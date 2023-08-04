@@ -1,0 +1,45 @@
+name: "trans_scene1"
+backend: "bls"
+max_batch_size: 0
+
+parameters { key: "ModelType" value: { string_value: "Trans" } }
+parameters { key: "GraphName" value: { string_value: "transGraphIns1" } }
+parameters { key: "input_channels" value: { string_value: "1" } }
+parameters { key: "fixed_height" value: { string_value: "32" } }
+parameters { key: "input_groups" value: { "2 0 1 1 3" } }
+
+input [
+  {
+    name: "b64_patchs"
+    data_type: TYPE_STRING
+    dims: [ -1 ]
+  },
+  {
+    name: "b64_image"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  },
+  {
+    name: "bboxes"
+    data_type: TYPE_FP32
+    dims: [ -1, 8 ]
+  }
+]
+output [
+  {
+    name: "texts"
+    data_type: TYPE_STRING
+    dims: [-1]
+  },
+  {
+    name: "text_scores"
+    data_type: TYPE_FP32
+    dims: [-1]
+  }
+]
+
+instance_group [
+  {
+    kind: KIND_CPU
+  }
+]

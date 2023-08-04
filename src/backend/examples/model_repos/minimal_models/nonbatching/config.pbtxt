@@ -1,0 +1,21 @@
+backend: "minimal"
+max_batch_size: 0
+input [
+  {
+    name: "IN0"
+    data_type: TYPE_INT32
+    dims: [ 4 ]
+  }
+]
+output [
+  {
+    name: "OUT0"
+    data_type: TYPE_INT32
+    dims: [ 4 ]
+  }
+]
+instance_group [
+  {
+    kind: KIND_CPU
+  }
+]

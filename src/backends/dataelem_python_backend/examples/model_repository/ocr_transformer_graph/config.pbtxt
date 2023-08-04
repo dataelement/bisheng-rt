@@ -1,0 +1,35 @@
+name: "ocr_transformer_graph"
+platform: "tensorflow_graphdef"
+backend: "tensorflow"
+max_batch_size: 64
+
+input [
+    {
+        name: "image"
+        data_type: TYPE_FP32
+        dims: [ 32, -1, 1 ]
+    },
+    {
+        name: "image_shape"
+        data_type: TYPE_INT32
+        dims: [ 2 ]
+    }
+]
+
+output [
+    {
+        name: "while/Exit_1",
+        data_type: TYPE_STRING,
+        dims: [ 1 ]
+    }
+]
+
+version_policy: { all { }}
+
+instance_group [
+    {
+        count: 1
+        kind: KIND_GPU
+        gpus: [0]
+    }
+]

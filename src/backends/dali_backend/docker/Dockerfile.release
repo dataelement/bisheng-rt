@@ -1,0 +1,111 @@
+# The MIT License (MIT)
+#
+# Copyright (c) 2020-2022 NVIDIA CORPORATION
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of
+# this software and associated documentation files (the "Software"), to deal in
+# the Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+# the Software, and to permit persons to whom the Software is furnished to do so,
+# subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+# -------------------------------------------------- #
+# This Docker image presents an out-of-source build.
+# If you want a release build of dali_backend
+# inside the tritonserver and you don't want to build
+# the whole tritonserver, start from here.
+# -------------------------------------------------- #
+
+ARG TRITON_VERSION=22.07
+ARG BASE_IMAGE=nvcr.io/nvidia/tritonserver:${TRITON_VERSION}-py3
+FROM ${BASE_IMAGE} as builder
+
+RUN apt-key adv --fetch-keys \
+    # Manually update the keys to NVIDIA repository because they are outdated in the base image
+    https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/3bf863cc.pub && \
+    apt-get update                                && \
+    apt-get install -y software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa         && \
+    apt-get update                                && \
+    apt-get install -y         \
+              zip              \
+              wget             \
+              build-essential  \
+              autoconf         \
+              autogen          \
+              unzip            \
+              python3.8        \
+              python3-pip      \
+              libboost-all-dev \
+              rapidjson-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# pip version in apt packages is ancient - we need to update it
+RUN pip3 install -U pip
+
+WORKDIR /opt
+
+# CMake
+RUN CMAKE_VERSION=3.18 && \
+    CMAKE_BUILD=3.18.6 && \
+    wget -nv https://cmake.org/files/v${CMAKE_VERSION}/cmake-${CMAKE_BUILD}.tar.gz && \
+    tar -xf cmake-${CMAKE_BUILD}.tar.gz && \
+    cd cmake-${CMAKE_BUILD} && \
+    ./bootstrap --parallel=$(grep ^processor /proc/cpuinfo | wc -l) -- -DCMAKE_USE_OPENSSL=OFF && \
+    make -j"$(grep ^processor /proc/cpuinfo | wc -l)" install && \
+    rm -rf /cmake-${CMAKE_BUILD}
+
+# Miniconda
+ENV PATH="/opt/conda/bin:${PATH}"
+RUN MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py38_4.12.0-Linux-x86_64.sh"; \
+    SHA256SUM="3190da6626f86eee8abf1b2fd7a5af492994eb2667357ee4243975cdbb175d7a"; \
+    wget "${MINICONDA_URL}" -O miniconda.sh -q && \
+    echo "${SHA256SUM} miniconda.sh" > shasum && \
+    sha256sum -c ./shasum && \
+    sh miniconda.sh -b -p /opt/conda && \
+    rm miniconda.sh shasum && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc && \
+    find /opt/conda/ -follow -type f -name '*.a' -delete && \
+    find /opt/conda/ -follow -type f -name '*.js.map' -delete && \
+    /opt/conda/bin/conda clean -afy
+
+WORKDIR /dali
+
+ARG DALI_DOWNLOAD_EXTRA_INDEX_URL
+ARG DALI_DOWNLOAD_PKG_NAME
+ARG DALI_DOWNLOAD_VERSION
+ARG DALI_DOWNLOAD_EXTRA_OPTIONS
+
+COPY . .
+
+ARG TRITON_BACKEND_API_VERSION="r22.07"
+
+RUN set -ex && mkdir build_in_ci && cd build_in_ci &&                                 \
+    cmake                                                                             \
+      -D CMAKE_INSTALL_PREFIX=/opt/tritonserver                                       \
+      -D CMAKE_BUILD_TYPE=Release                                                     \
+      -D TRITON_BACKEND_API_VERSION=${TRITON_BACKEND_API_VERSION}                     \
+      ${DALI_DOWNLOAD_PKG_NAME:+                                                      \
+        -D DALI_DOWNLOAD_PKG_NAME=${DALI_DOWNLOAD_PKG_NAME}}                          \
+      ${DALI_DOWNLOAD_EXTRA_INDEX_URL:+                                               \
+        -D DALI_EXTRA_INDEX_URL=${DALI_DOWNLOAD_EXTRA_INDEX_URL}}                     \
+      -D DALI_VERSION=${DALI_DOWNLOAD_VERSION}                                        \
+      -D DALI_DOWNLOAD_EXTRA_OPTIONS="${DALI_DOWNLOAD_EXTRA_OPTIONS}"                 \
+      .. &&                                                                           \
+    make -j"$(grep ^processor /proc/cpuinfo | wc -l)" install
+
+ENV LD_LIBRARY_PATH=/opt/tritonserver/lib:/opt/tritonserver/backends/dali/dali:${LD_LIBRARY_PATH}
+
+WORKDIR /opt/tritonserver

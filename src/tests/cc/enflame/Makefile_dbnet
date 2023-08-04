@@ -1,0 +1,43 @@
+# Makefile for gtest examples
+CC = g++
+
+INCLUDE_DIRS  = -I /usr/local/include
+INCLUDE_DIRS += -I /usr/include/TopsInference/
+# INCLUDE_DIRS += -I /usr/local/lib/python2.7/dist-packages/tensorflow/include/
+INCLUDE_DIRS += -I /usr/include/dtu/libprofile/
+INCLUDE_DIRS += -I /usr/include/dtu/
+INCLUDE_DIRS += -I /home/workspace/dataelem/cpp/include/
+
+DEBUG_FLAGS = -g -ggdb -O0
+# DEBUG_FLAGS = -O3
+CPP_FLAGS = -c -Wall -std=c++17
+
+LD_FLAGS  = -L /usr/local/lib
+LD_FLAGS += -L /usr/lib -l TopsInference -l pthread -l stdc++fs
+
+LD_FLAGS += -L /home/workspace/dataelem/cpp/lib -lopencv_core -lopencv_imgcodecs -lopencv_imgproc
+
+
+CSRCS = 
+CPPSRCS = ./dbnet_graph_enflame.cpp \
+          ./utils/tops_utils.cpp
+
+COBJS := $(CSRCS:.c=.o)
+CPPOBJS := $(CPPSRCS:.cpp=.o)
+
+OBJECTS = $(CPPOBJS) $(COBJS)
+
+TARGET = dbnet_graph_enflame
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(CC) -o $(TARGET) $(OBJECTS) $(LD_FLAGS)
+
+%.o : %.cpp
+	$(CC) $(CPP_FLAGS) $(DEBUG_FLAGS) $(INCLUDE_DIRS) $< -o $(<:.cpp=.o)
+
+clean:
+	rm -f $(TARGET) $(OBJECTS)
+
+.PHONY: all clean

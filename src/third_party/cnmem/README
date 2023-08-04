@@ -1,0 +1,4 @@
+This directory contains the patched cnmem source at commit 37896cc9bfc6536a8c878a1e675835c22d827821, the patched source will be used exactly as it is in building Triton components.
+The detail of the patch is specified with "*.patch" suffix, patches in cnmem are:
+CMakeLists.txt.patch
+cnmem.h.patch

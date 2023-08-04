@@ -1,0 +1,12 @@
+/builddir
+/.vscode
+*.so
+sftp-config.json
+/output
+.isort.cfg
+./third_party
+build/
+output/
+patches/
+.DS_Store
+test/models

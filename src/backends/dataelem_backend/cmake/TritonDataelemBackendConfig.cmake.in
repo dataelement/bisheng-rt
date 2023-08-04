@@ -1,0 +1,15 @@
+# Copyright 2022, Dataelem, Inc. All rights reserved.
+
+include(CMakeFindDependencyMacro)
+
+get_filename_component(
+  TRITONDATAELEMBACKEND_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH
+)
+
+list(APPEND CMAKE_MODULE_PATH ${TRITONDATAELEMBACKEND_CMAKE_DIR})
+
+if(NOT TARGET TritonDataelemBackend::triton-dataelem-backend)
+  include("${TRITONDATAELEMBACKEND_CMAKE_DIR}/TritonDataelemBackendTargets.cmake")
+endif()
+
+set(TRITONDATAELEMBACKEND_LIBRARIES TritonDataelemBackend::triton-dataelem-backend)

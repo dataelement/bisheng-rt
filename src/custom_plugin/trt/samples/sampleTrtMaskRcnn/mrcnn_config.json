@@ -1,0 +1,19 @@
+{
+   "input_tensors" : ["image"],
+   "output_tensors" : ["output_detections", "output_masks"],
+   "model_params" : {
+      "PRENMS_TOPK" : 6000,
+      "KEEP_TOPK" : 1000,
+      "PROPOSAL_NMS_THRESH" : 0.7,
+      "RESULT_SCORE_THRESH" : 0.3,
+      "FRCNN_NMS_THRESH" : 0.8,
+      "CHANNEL_AXIS" : 1,
+      "RESULTS_PER_IM" : 300,
+      "EDGE_SIZE" : 1600
+   },
+   "fp16" : true,
+   "workspaceSize" : 6000000000,
+   "batchSize" : 1,
+   "weightsFile" : "/root/gulixin/trt-lib/build/test_data/models/ocr_maskrcnn_weights.wts",
+   "engineFile" : "/root/gulixin/trt-lib/build/test_data/models/maskrcnn_v5_1600_fp16_3080.trt"
+}

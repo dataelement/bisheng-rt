@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package inference;
+
+import "model_config.proto";
+
+message EnvConfig
+{
+  map<string, string> parameters = 1;
+}
+
+message GpuConfig
+{
+  map<string, string> parameters = 1;
+}
+
+message BasicConfig
+{
+  optional EnvConfig env = 1;
+  optional GpuConfig gpu_config = 2;
+  optional string backend_directory = 3;
+  repeated string model_repository = 4;
+  optional uint32 http_port = 5;
+  optional uint32 grpc_port = 6;
+  optional uint32 metrics_port = 7;
+  repeated string backend_config = 8;
+  optional uint32 log_verbose = 9;
+  optional string log_file = 10;
+  optional string license_mode = 11;
+  optional bool allow_metrics = 12;
+}
+
+message LogicModel
+{
+  string name = 1;
+  string type = 2;
+  map<string, string> parameters = 3;
+  optional string path = 4;
+  repeated ModelInstanceGroup instance_group = 5;
+  repeated LogicModel dep = 6;
+}
+
+message ServerConfig
+{
+  BasicConfig basic_config = 1;
+  repeated LogicModel app = 2;
+  repeated LogicModel model = 3;
+}

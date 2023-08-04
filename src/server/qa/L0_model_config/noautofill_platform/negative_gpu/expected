@@ -1,0 +1,1 @@
+instance group negative_gpu_1 of model negative_gpu specifies invalid or unsupported gpu id -1. GPUs with at least the minimum required CUDA compute compatibility

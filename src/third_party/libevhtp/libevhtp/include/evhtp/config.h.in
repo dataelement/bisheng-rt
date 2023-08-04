@@ -1,0 +1,94 @@
+#ifndef __EVHTP_CONFIG_H__
+#define __EVHTP_CONFIG_H__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef EVHTP_EXPORT
+# if (defined __GNUC__ && __GNUC__ >= 4) || defined __INTEL_COMPILER || defined __clang__
+#  define EVHTP_EXPORT __attribute__ ((visibility("default")))
+# else
+#  define EVHTP_EXPORT
+# endif
+#endif
+
+
+#if defined(_MSC_VER) && _MSC_VER >= 1500 /* MSVC 2008 */
+#  define WINDEPRECATED(message)  __declspec(deprecated(message))
+#  define DEPRECATED(message)
+#elif defined(__clang__) && defined(__has_feature)
+#  if __has_feature(attribute_deprecated_with_message)
+#    define WINDEPRECATED(message)
+#    define DEPRECATED(message) __attribute__ ((deprecated(message)))
+#  endif
+#  elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5))
+#    define WINDEPRECATED(message)
+#    define DEPRECATED(message) __attribute__ ((deprecated(message)))
+#  elif defined(__GNUC__) && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ >= 1))
+#    define WINDEPRECATED(message)
+#    define DEPRECATED(message) __attribute__((__deprecated__))
+#  else
+#    define WINDEPRECATED(message)
+#    define DEPRECATED(message)
+#endif
+
+#undef EVHTP_DISABLE_EVTHR
+#undef EVHTP_DISABLE_REGEX
+#undef EVHTP_DISABLE_SSL
+#undef EVHTP_DISABLE_EVTHR
+#undef EVHTP_DEBUG
+
+#cmakedefine EVHTP_DISABLE_EVTHR
+#cmakedefine EVHTP_DISABLE_REGEX
+#cmakedefine EVHTP_DISABLE_SSL
+#cmakedefine EVHTP_DISABLE_EVTHR
+#cmakedefine EVHTP_USE_TCMALLOC
+#cmakedefine EVHTP_USE_JEMALLOC
+#cmakedefine EVHTP_USE_TCMALLOC
+#cmakedefine EVHTP_DEBUG
+#cmakedefine EVHTP_DISABLE_MEMFUNCTIONS
+
+#cmakedefine EVHTP_TRITON_ENABLE_TRACING
+#cmakedefine EVHTP_TRITON_ENABLE_HTTP_CONTIGUOUS
+
+#ifdef _WIN32
+typedef int ssize_t;
+#endif
+
+#ifdef _MSC_VER
+#   ifndef HAVE_STRCASECMP
+#       define strcasecmp _stricmp
+#   endif
+#   ifndef HAVE_STRNCASECMP
+#       define strncasecmp _strnicmp
+#   endif
+#endif
+
+#ifndef EVHTP_DISABLE_REGEX
+#include <onigposix.h>
+#endif
+
+#ifdef EVHTP_USE_TCMALLOC
+#include <google/tcmalloc.h>
+#define malloc(size)        tc_malloc(size)
+#define calloc(count, size) tc_calloc(count, size)
+#define realloc(ptr, size)  tc_realloc(ptr, size)
+#define free(ptr)           tc_free(ptr)
+#endif
+
+#ifdef EVHTP_USE_JEMALLOC
+#define JEMALLOC_NO_DEMANGLE
+#include <jemalloc/jemalloc.h>
+#define malloc(size)        je_malloc(size)
+#define calloc(count, size) je_calloc(count, size)
+#define realloc(ptr, size)  je_realloc(ptr, size)
+#define free(ptr)           je_free(ptr)
+#endif
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

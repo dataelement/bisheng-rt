@@ -1,0 +1,134 @@
+# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#  * Neither the name of NVIDIA CORPORATION nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+# EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+# PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+# PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+# OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+# Windows min container for Triton build
+
+ARG BASE_IMAGE=mcr.microsoft.com/dotnet/framework/sdk:4.8
+
+FROM ${BASE_IMAGE}
+
+SHELL ["cmd", "/S", "/C"]
+
+RUN mkdir c:\tmp
+WORKDIR /tmp
+
+RUN powershell.exe [Net.ServicePointManager]::Expect100Continue = $true; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls, [Net.SecurityProtocolType]::Tls11, [Net.SecurityProtocolType]::Tls12, [Net.SecurityProtocolType]::Ssl3; Invoke-Expression (New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')
+RUN choco install git docker unzip -y
+
+# Be aware that pip can interact badly with VS cmd shell so need to pip install before
+# vsdevcmd.bat (see https://bugs.python.org/issue38989)
+ADD https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe python-3.8.10-amd64.exe
+RUN python-3.8.10-amd64.exe /quiet InstallAllUsers=1 PrependPath=1 Include_doc=0
+RUN mklink "c:\Program Files\Python38\python3.exe" "c:\Program Files\Python38\python.exe"
+RUN pip install --upgrade wheel setuptools docker
+RUN pip install grpcio-tools
+
+# Download and install Build Tools for Visual Studio. The use of
+# powershell for the install seems to be required to make the command
+# wait for the install to complete before continuing. To avoid failures
+# caused by VS regressions we want to stick with a working
+# compiler. Currently this is 16.8.5. This page contains download
+# links for buildtools.
+# https://docs.microsoft.com/en-us/visualstudio/releases/2019/history#release-dates-and-build-numbers
+ADD https://download.visualstudio.microsoft.com/download/pr/20130c62-1bc8-43d6-b4f0-c20bb7c79113/145a319d79a83376915d8f855605e152ef5f6fa2b2f1d2dca411fb03722eea72/vs_BuildTools.exe vs_buildtools.exe
+ARG VS_INSTALL_PATH_WP="C:\BuildTools"
+RUN powershell.exe Start-Process -FilePath vs_buildtools.exe -ArgumentList "--wait","--quiet","--norestart","--nocache","--installPath","%VS_INSTALL_PATH_WP%","--channelUri","C:\tmp\doesnotexist.chman","--add","Microsoft.VisualStudio.Workload.VCTools`;includeRecommended","--add","Microsoft.Component.MSBuild" -Wait -PassThru
+
+WORKDIR /
+RUN git clone --single-branch --depth=1 -b 2022.04.12 https://github.com/microsoft/vcpkg.git
+WORKDIR /vcpkg
+RUN bootstrap-vcpkg.bat
+RUN vcpkg.exe update
+RUN vcpkg.exe install openssl:x64-windows openssl-windows:x64-windows rapidjson:x64-windows re2:x64-windows boost-interprocess:x64-windows boost-stacktrace:x64-windows zlib:x64-windows pthread:x64-windows b64:x64-windows
+RUN vcpkg.exe integrate install
+
+# Install a recent version of cmake. The version installed with VS is
+# older and specifically we need more recent version to avoid
+# https://gitlab.kitware.com/cmake/cmake/-/issues/21492.
+ARG CMAKE_VERSION=3.21.2
+ARG CMAKE_FILE=cmake-${CMAKE_VERSION}-windows-x86_64
+WORKDIR /
+ADD https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${CMAKE_FILE}.zip ${CMAKE_FILE}.zip
+RUN unzip %CMAKE_FILE%.zip
+RUN move %CMAKE_FILE% CMake
+RUN setx PATH "c:\CMake\bin;%PATH%"
+
+ARG CUDA_MAJOR=11
+ARG CUDA_MINOR=5
+ARG CUDA_PATCH=0
+ARG CUDA_VERSION=${CUDA_MAJOR}.${CUDA_MINOR}.${CUDA_PATCH}
+ARG CUDA_PACKAGES="nvcc_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   cudart_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   nvml_dev_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   cublas_${CUDA_MAJOR}.${CUDA_MINOR} cublas_dev_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   cufft_${CUDA_MAJOR}.${CUDA_MINOR} cufft_dev_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   curand_${CUDA_MAJOR}.${CUDA_MINOR} curand_dev_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   cusolver_${CUDA_MAJOR}.${CUDA_MINOR} cusolver_dev_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   cusparse_${CUDA_MAJOR}.${CUDA_MINOR} cusparse_dev_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   thrust_${CUDA_MAJOR}.${CUDA_MINOR} \
+                   visual_studio_integration_${CUDA_MAJOR}.${CUDA_MINOR}"
+ARG CUDA_INSTALL_ROOT_WP="C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${CUDA_MAJOR}.${CUDA_MINOR}"
+
+ARG TENSORRT_VERSION=8.2.2.1
+ARG TENSORRT_ZIP=TensorRT-${TENSORRT_VERSION}.Windows10.x86_64.cuda-11.4.cudnn8.2.zip
+
+ARG CUDNN_VERSION=8.3.2.44
+ARG CUDNN_DIR=cudnn-windows-x86_64-${CUDNN_VERSION}_cuda11.5-archive
+ARG CUDNN_ZIP=${CUDNN_DIR}.zip
+
+WORKDIR /tmp
+ADD https://developer.download.nvidia.com/compute/cuda/${CUDA_VERSION}/network_installers/cuda_${CUDA_VERSION}_win10_network.exe cuda_${CUDA_VERSION}_win10_network.exe
+COPY ${CUDNN_ZIP} .
+COPY ${TENSORRT_ZIP} .
+
+WORKDIR /
+RUN unzip /tmp/%TENSORRT_ZIP%
+RUN move TensorRT-%TENSORRT_VERSION% TensorRT
+ENV TRT_VERSION ${TENSORRT_VERSION}
+
+WORKDIR /tmp
+RUN cuda_%CUDA_VERSION%_win10_network.exe -s %CUDA_PACKAGES%
+
+WORKDIR /
+RUN unzip /tmp/%CUDNN_ZIP%
+RUN move %CUDNN_DIR% cudnn
+RUN copy cudnn\bin\cudnn*.dll "%CUDA_INSTALL_ROOT_WP%\bin\."
+RUN copy cudnn\lib\cudnn*.lib "%CUDA_INSTALL_ROOT_WP%\lib\x64\."
+RUN copy cudnn\include\cudnn*.h "%CUDA_INSTALL_ROOT_WP%\include\."
+
+# Copy the CUDA visualstudio integration from where it was installed
+# into the appropriate place in BuildTools
+RUN copy "%CUDA_INSTALL_ROOT_WP%\extras\visual_studio_integration\MSBuildExtensions\*" "%VS_INSTALL_PATH_WP%\MSBuild\Microsoft\VC\v160\BuildCustomizations"
+
+RUN setx PATH "%PATH%;c:\TensorRT\lib;%CUDA_INSTALL_ROOT_WP%\bin"
+
+# It is important that the entrypoint initialize VisualStudio
+# environment otherwise the build will fail. Also set
+# CMAKE_TOOLCHAIN_FILE and VCPKG_TARGET_TRIPLET so
+# that cmake can find the packages installed by vcpkg.
+ENV CMAKE_TOOLCHAIN_FILE /vcpkg/scripts/buildsystems/vcpkg.cmake
+ENV VCPKG_TARGET_TRIPLET x64-windows
+ENTRYPOINT C:\BuildTools\VC\Auxiliary\Build\vcvars64.bat &&
