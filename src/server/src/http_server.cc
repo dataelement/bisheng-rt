@@ -1095,7 +1095,7 @@ HTTPAPIServer::HTTPAPIServer(
       cudasharedmemory_regex_(
           R"(/v2/cudasharedmemory(?:/region/([^/]+))?/(status|register|unregister))"),
       trace_regex_(R"(/v2/trace/setting)"),
-      app_regex_(R"(/v2/idp/([^/]+)/infer)")
+      app_regex_(R"(/v2.1/models/([^/]+)/infer)")
 {
   // FIXME, don't cache server metadata. The http endpoint should
   // not be deciding that server metadata will not change during
@@ -3529,7 +3529,142 @@ HTTPAPIServer::InferRequestClass::FinalizeResponseV1(
   // evbuffer_add_reference(req_->buffer_out, base, byte_size, nullptr,
   // nullptr);
   // evbuffer_add_buffer(req_->buffer_out, info->evbuffer_);
+
   evbuffer_add_buffer_reference(req_->buffer_out, info->evbuffer_);
+
+  return nullptr;  // success
+}
+
+
+void
+HTTPAPIServer::InferRequestClass::InferResponseCompleteV2(
+    TRITONSERVER_InferenceResponse* response, const uint32_t flags, void* userp)
+{
+  // FIXME can't use InferRequestClass object here since it's lifetime
+  // is different than response. For response we need to know how to
+  // send each output (as json, shm, or binary) and that information
+  // has to be maintained in a way that allows us to clean it up
+  // appropriately if connection closed or last response sent.
+  //
+  // But for now userp is the InferRequestClass object and the end of
+  // its life is in the OK or BAD ReplyCallback.
+
+  HTTPAPIServer::InferRequestClass* infer_request =
+      reinterpret_cast<HTTPAPIServer::InferRequestClass*>(userp);
+
+  auto response_count = infer_request->IncrementResponseCount();
+
+  // Defer to the callback with the final response
+  if ((flags & TRITONSERVER_RESPONSE_COMPLETE_FINAL) == 0) {
+    LOG_ERROR << "[INTERNAL] received a response without FINAL flag";
+    return;
+  }
+
+  TRITONSERVER_Error* err = nullptr;
+  if (response_count != 0) {
+    err = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, std::string(
+                                         "expected a single response, got " +
+                                         std::to_string(response_count + 1))
+                                         .c_str());
+  } else if (response == nullptr) {
+    err = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "received an unexpected null response");
+  } else {
+    err = infer_request->FinalizeResponseV2(response);
+  }
+
+  if (err == nullptr) {
+    evthr_defer(infer_request->thread_, OKReplyCallback, infer_request);
+  } else {
+    EVBufferAddErrorJson(infer_request->req_->buffer_out, err);
+    TRITONSERVER_ErrorDelete(err);
+    evthr_defer(infer_request->thread_, BADReplyCallback, infer_request);
+  }
+
+  LOG_TRITONSERVER_ERROR(
+      TRITONSERVER_InferenceResponseDelete(response),
+      "deleting inference response");
+}
+
+
+TRITONSERVER_Error*
+HTTPAPIServer::InferRequestClass::FinalizeResponseV2(
+    TRITONSERVER_InferenceResponse* response)
+{
+  RETURN_IF_ERR(TRITONSERVER_InferenceResponseError(response));
+  uint32_t output_count;
+  RETURN_IF_ERR(
+      TRITONSERVER_InferenceResponseOutputCount(response, &output_count));
+
+  if (output_count != 1) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "wrong output count");
+  }
+
+  const char* cname;
+  TRITONSERVER_DataType datatype;
+  const int64_t* shape;
+  uint64_t dim_count;
+  const void* base;
+  size_t byte_size;
+  TRITONSERVER_MemoryType memory_type;
+  int64_t memory_type_id;
+  void* userp;
+  RETURN_IF_ERR(TRITONSERVER_InferenceResponseOutput(
+      response, 0, &cname, &datatype, &shape, &dim_count, &base, &byte_size,
+      &memory_type, &memory_type_id, &userp));
+
+  if (std::string(cname).compare("OUTPUT") != 0 ||
+      datatype != TRITONSERVER_TYPE_BYTES || userp == nullptr) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "response wrong name or type or userp");
+  }
+
+  auto info = reinterpret_cast<AllocPayload::OutputInfo*>(userp);
+  // Set head with "application/json"
+  // SetResponseHeader(false, evbuffer_get_length(response_body));
+  SetResponseHeader(false, byte_size);
+
+  struct evbuffer_iovec* v = nullptr;
+  int v_idx = 0;
+  int n = evbuffer_peek(info->evbuffer_, -1, NULL, NULL, 0);
+  if (n > 0) {
+    v = static_cast<struct evbuffer_iovec*>(
+        alloca(sizeof(struct evbuffer_iovec) * n));
+    if (evbuffer_peek(info->evbuffer_, -1, NULL, v, n) != n) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          "unexpected error getting iovec in response evbuffer");
+    }
+  }
+
+  size_t buffer_len = evbuffer_get_length(info->evbuffer_);
+  size_t offset = 0, remaining_length = buffer_len;
+  bool first_chunk = true;
+  while ((remaining_length > 0) && (v_idx < n)) {
+    char* base = static_cast<char*>(v[v_idx].iov_base);
+    size_t base_size;
+    if (v[v_idx].iov_len > remaining_length) {
+      base_size = remaining_length;
+      v[v_idx].iov_base = static_cast<void*>(base + remaining_length);
+      v[v_idx].iov_len -= remaining_length;
+      remaining_length = 0;
+    } else {
+      base_size = v[v_idx].iov_len;
+      remaining_length -= v[v_idx].iov_len;
+      v_idx += 1;
+    }
+
+    if (first_chunk) {
+      evbuffer_add_reference(
+          req_->buffer_out, base + 4, base_size - 4, NULL, NULL);
+      first_chunk = false;
+    } else {
+      evbuffer_add_reference(req_->buffer_out, base, base_size, NULL, NULL);
+    }
+    offset += base_size;
+  }
 
   return nullptr;  // success
 }
@@ -4031,7 +4166,8 @@ HTTPAPIServer::ParseRequestBody(
 
 void
 HTTPAPIServer::HandleRestfulInfer(
-    evhtp_request_t* req, const std::string& model_name)
+    evhtp_request_t* req, const std::string& model_name,
+    bool use_raw_input = true)
 {
   if (req->method != htp_method_POST) {
     evhtp_send_reply(req, EVHTP_RES_METHNALLOWED);
@@ -4050,6 +4186,14 @@ HTTPAPIServer::HandleRestfulInfer(
   // Decompress request body if it is compressed in supported type
   std::vector<char> body;
   TRITONSERVER_Error* err = ParseRequestBody(req, &body);
+
+  if (!use_raw_input) {
+    std::string len_buffer;
+    uint32_t len = body.size() - 1;
+    len_buffer.append(reinterpret_cast<const char*>(&len), sizeof(uint32_t));
+    body.insert(body.begin(), len_buffer.begin(), len_buffer.end());
+    body.resize(body.size() - 1);
+  }
 
   // Step 2. create thre request
   bool connection_paused = false;
@@ -4112,14 +4256,18 @@ HTTPAPIServer::HandleRestfulInfer(
 
     // Set the request callback
     if (err == nullptr) {
+      auto response_callback = InferRequestClass::InferResponseCompleteV1;
+      if (!use_raw_input) {
+        response_callback = InferRequestClass::InferResponseCompleteV2;
+      }
+
       err = TRITONSERVER_InferenceRequestSetReleaseCallback(
           irequest, InferRequestClass::InferRequestComplete, nullptr);
       if (err == nullptr) {
         err = TRITONSERVER_InferenceRequestSetResponseCallback(
             irequest, allocator_,
             reinterpret_cast<void*>(&infer_request->alloc_payload_),
-            InferRequestClass::InferResponseCompleteV1,
-            reinterpret_cast<void*>(infer_request.get()));
+            response_callback, reinterpret_cast<void*>(infer_request.get()));
       }
 
       // Get request ID for logging in case of error.
@@ -4273,7 +4421,7 @@ HTTPAPIServer::Handle(evhtp_request_t* req)
   std::string app_name;
   if (RE2::FullMatch(
           std::string(req->uri->path->full), app_regex_, &app_name)) {
-    HandleRestfulInfer(req, app_name);
+    HandleRestfulInfer(req, app_name, false);
     return;
   }
 

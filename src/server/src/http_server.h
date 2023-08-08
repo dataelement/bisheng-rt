@@ -205,6 +205,16 @@ class HTTPAPIServer : public HTTPServer {
     TRITONSERVER_Error* FinalizeResponseV1(
         TRITONSERVER_InferenceResponse* response);
 
+
+    // Support v2.1 protocal
+    static void InferResponseCompleteV2(
+        TRITONSERVER_InferenceResponse* response, const uint32_t flags,
+        void* userp);
+
+    TRITONSERVER_Error* FinalizeResponseV2(
+        TRITONSERVER_InferenceResponse* response);
+
+
     TRITONSERVER_Error* FinalizeResponse(
         TRITONSERVER_InferenceResponse* response);
 
@@ -318,7 +328,8 @@ class HTTPAPIServer : public HTTPServer {
   void HandleTrace(evhtp_request_t* req, const std::string& model_name = "");
   void HandleLogging(evhtp_request_t* req);
 
-  void HandleRestfulInfer(evhtp_request_t* req, const std::string& app_name);
+  void HandleRestfulInfer(
+      evhtp_request_t* req, const std::string& app_name, bool use_raw_input);
 
   TRITONSERVER_Error* ParseRequestBody(
       evhtp_request_t* req, std::vector<char>* body);

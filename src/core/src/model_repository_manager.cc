@@ -893,6 +893,21 @@ ModelRepositoryManager::LoadUnloadModel(
       }
     }
 
+    bool has_model_reload = false;
+    for (auto* parameter : model.second) {
+      if (parameter->Name().compare("reload") == 0) {
+        auto reload_value = parameter->ValueString();
+        if (reload_value.compare("1") == 0) {
+          has_model_reload = true;
+        }
+        break;
+      }
+    }
+
+    if (!has_model_reload && infos_.find(model_name) != infos_.end()) {
+      continue;
+    }
+
     if (has_model_type) {
       std::vector<std::string> model_defs = absl::StrSplit(model_type, '.');
       std::string graph_path = model_defs[model_defs.size() - 1];
@@ -1040,6 +1055,10 @@ ModelRepositoryManager::LoadUnloadModel(
         new_models[model_name].emplace_back(p);
       }
     }
+  }
+
+  if (new_models.size() == 0) {
+    return Status::Success;
   }
 
   bool polled = true;
