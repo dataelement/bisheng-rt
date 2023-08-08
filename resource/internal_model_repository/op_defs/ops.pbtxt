@@ -973,5 +973,22 @@ ops [
     ]
 
     instance_group [ { kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.pymodel.huggingface_model"
+    backend: "python"
+    max_batch_size: 0
+
+    parameters { key: "model_type" value: { string_value: "" } }
+
+    input [
+      { name: "INPUT", data_type: TYPE_STRING, dims: [ 1 ] }
+    ]
+
+    output [
+      { name: "OUTPUT", data_type: TYPE_STRING, dims: [ 1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
   }
 ]

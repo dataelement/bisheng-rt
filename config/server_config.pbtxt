@@ -12,18 +12,10 @@ basic_config {
     }
   }
   model_repository: "./models/model_repository"
+  model_control_mode: "explicit"
   http_port: 8502
   grpc_port: 6000
   metrics_port: 6002
   log_verbose: 0
   log_file: "./logs/bisheng-rt.log"
-}
-
-app {
-  name: "idp_app"
-  path: "ocr_app"
-  instance_group {
-    count: 10
-    kind: KIND_CPU
-  }
 }

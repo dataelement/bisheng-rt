@@ -312,7 +312,8 @@ function build_huawei_backend() {
 function build_server() {
   # rm -fr tritonbuild/tritonserver/build/triton-server/_deps/repo-core*
 
-  # rm -fr tritonbuild/tritonserver/build/_deps/repo-core-build
+  # If update common or core library, need to uncommont follow
+  rm -fr tritonbuild/tritonserver/build/_deps/repo-core-build
 
   #    --extra-core-cmake-arg="LICENSE_STRATEGY:STRING=LICENSE_HASP" \
   #    --extra-core-cmake-arg="LICENSE_HASP_VCODE:STRING=DEMOMA" \
@@ -321,7 +322,10 @@ function build_server() {
   #  --extra-core-cmake-arg="LICENSE_HASP_VCODE:STRING=TBGBZ" \
 
 
-  python3 ./build.py -v \
+  #VERBOSE="-v"
+  VERBOSE=""
+
+  python3 ./build.py ${VERBOSE} \
     --no-container-build --enable-gpu \
     --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
     --backend ensemble \
@@ -548,5 +552,6 @@ function build_test() {
 # build_test
 
 ## Control for bisheng-rt
-# build_server
-build_dataelem_backend
+build_server
+# build_dataelem_backend
+# build_python_backend

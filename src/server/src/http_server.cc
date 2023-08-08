@@ -1491,6 +1491,10 @@ HTTPAPIServer::HandleRepositoryControl(
                   param_str, param_len, binary_files.back().data(), &s);
               param = TRITONSERVER_ParameterBytesNew(
                   m.c_str(), binary_files.back().data(), decoded_size);
+            } else {
+              // support for other parameters
+              param = TRITONSERVER_ParameterNew(
+                  m.c_str(), TRITONSERVER_PARAMETER_STRING, param_str);
             }
 
             if (param != nullptr) {

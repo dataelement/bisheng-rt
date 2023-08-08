@@ -28,6 +28,7 @@ message BasicConfig
   optional string log_file = 10;
   optional string license_mode = 11;
   optional bool allow_metrics = 12;
+  optional string model_control_mode = 13;
 }
 
 message LogicModel
