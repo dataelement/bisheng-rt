@@ -4,6 +4,8 @@
 function up_repo() {
   cp -fr resource/internal_model_repository/* \
     ./tritonbuild/install/resource/internal_model_repository/
+
+  cp -fr python/pybackend_libs/src/pybackend_libs ./tritonbuild/install/backends/python/
 }
 
 
@@ -14,26 +16,30 @@ function index_model() {
 }
 
 
-function generate_load_data() {
+function load_data() {
   cat <<EOF
 {
   "parameters": {
     "type": "dataelem.pymodel.huggingface_model",
-    "instance_groups": "device=gpu;gpus=0,1|2"
+    "pymodel_type": "embedding.ME5Embedding",
+    "gpu_memory": "5",
+    "instance_groups": "device=gpu;gpus=7"
   }
 }
 EOF
 }
 
 function load_model() {
-  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/test/load \
+  model="$1"
+  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/load \
    -H 'Content-Type: application/json' \
-   -d "$(generate_load_data)"
+   -d "$(load_data)"
 }
 
 
 function unload_model() {
-  curl -X POST http://192.168.106.12:8502/v2/repository/models/test/unload \
+  model="$1"
+  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/unload \
    -H 'Content-Type: application/json' \
    -d '{}'
 }
@@ -46,22 +52,48 @@ function model_ready() {
 }
 
 
-function model_infer() {
-  curl -v -X POST http://192.168.106.12:8502/v2.1/models/test/infer \
-   -H 'Content-Type: application/json' \
-   -d '{"texts":[1]}'
+function infer_data() {
+  cat <<EOF
+{
+
+  "model": "multilingual-e5-large",
+  "texts": ["how much protein should a female eat"],
+  "type": "query"
+}
+EOF
 }
 
 
-up_repo
-# index_model
+function model_infer() {
+  model="$1"
+  curl -v -X POST http://192.168.106.12:8502/v2.1/models/${model}/infer \
+   -H 'Content-Type: application/json' \
+   -d "$(infer_data)"
+}
 
-load_model
-index_model
 
-# unload_model
-# index_model
 
-# model_ready
-
-# model_infer
+case $1 in
+  update)
+    echo -n "update"
+    up_repo
+    index_model
+    ;;
+  load)
+    echo -n "load"
+    load_model "multilingual-e5-large"
+    index_model
+    ;;
+  unload)
+    echo -n "unload"
+    unload_model "multilingual-e5-large"
+    index_model
+    ;;
+  infer)
+    echo -n "infer"
+    model_infer "multilingual-e5-large"
+    ;;
+  *)
+    echo -n "unknown"
+    ;;
+esac

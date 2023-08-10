@@ -979,7 +979,7 @@ ops [
     backend: "python"
     max_batch_size: 0
 
-    parameters { key: "model_type" value: { string_value: "" } }
+    parameters { key: "pymodel_type" value: { string_value: "" } }
 
     input [
       { name: "INPUT", data_type: TYPE_STRING, dims: [ 1 ] }

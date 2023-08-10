@@ -894,19 +894,22 @@ ModelRepositoryManager::LoadUnloadModel(
     }
 
     bool has_model_reload = false;
-    for (auto* parameter : model.second) {
-      if (parameter->Name().compare("reload") == 0) {
-        auto reload_value = parameter->ValueString();
-        if (reload_value.compare("1") == 0) {
-          has_model_reload = true;
+    if (has_model_type) {
+      for (auto* parameter : model.second) {
+        if (parameter->Name().compare("reload") == 0) {
+          auto reload_value = parameter->ValueString();
+          if (reload_value.compare("1") == 0) {
+            has_model_reload = true;
+          }
+          break;
         }
-        break;
+      }
+
+      if (!has_model_reload && infos_.find(model_name) != infos_.end()) {
+        continue;
       }
     }
 
-    if (!has_model_reload && infos_.find(model_name) != infos_.end()) {
-      continue;
-    }
 
     if (has_model_type) {
       std::vector<std::string> model_defs = absl::StrSplit(model_type, '.');

@@ -43,7 +43,7 @@ class BaseLLM(object):
 
         torch_seed()
 
-        memory_per_device = int(gpu_memory / len(devices))
+        memory_per_device = int(int(gpu_memory) / len(devices))
         memory = f'{memory_per_device}GiB'
         max_memory = {int(device_id): memory for device_id in devices}
 
