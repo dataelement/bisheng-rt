@@ -16,7 +16,7 @@ function index_model() {
 }
 
 
-function load_data() {
+function load_data1() {
   cat <<EOF
 {
   "parameters": {
@@ -29,11 +29,31 @@ function load_data() {
 EOF
 }
 
-function load_model() {
+function load_data2() {
+  cat <<EOF
+{
+  "parameters": {
+    "type": "dataelem.pymodel.huggingface_model",
+    "pymodel_type": "llm.Llama2Chat",
+    "gpu_memory": "30",
+    "instance_groups": "device=gpu;gpus=7,8"
+  }
+}
+EOF
+}
+
+function load_model2() {
   model="$1"
   curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/load \
    -H 'Content-Type: application/json' \
-   -d "$(load_data)"
+   -d "$(load_data2)"
+}
+
+function load_model1() {
+  model="$1"
+  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/load \
+   -H 'Content-Type: application/json' \
+   -d "$(load_data1)"
 }
 
 
@@ -64,12 +84,28 @@ EOF
 }
 
 
+function infer_data2() {
+  cat <<EOF
+{
+
+  "model": "Llama-2-13b-chat-hf",
+  "messages": [
+    {"role": "user", "content": "hello"}
+   ]
+}
+EOF
+}
+
+
 function model_infer() {
   model="$1"
   curl -v -X POST http://192.168.106.12:8502/v2.1/models/${model}/infer \
    -H 'Content-Type: application/json' \
-   -d "$(infer_data)"
+   -d "$(infer_data2)"
 }
+
+m1="multilingual-e5-large"
+m2="Llama-2-13b-chat-hf"
 
 
 
@@ -81,17 +117,17 @@ case $1 in
     ;;
   load)
     echo -n "load"
-    load_model "multilingual-e5-large"
+    # load_model2 "$m2"
+    load_model1 "$m1"
     index_model
     ;;
   unload)
     echo -n "unload"
-    unload_model "multilingual-e5-large"
-    index_model
+    unload_model "$m2"
     ;;
   infer)
     echo -n "infer"
-    model_infer "multilingual-e5-large"
+    model_infer "$m2"
     ;;
   *)
     echo -n "unknown"

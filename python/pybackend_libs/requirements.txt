@@ -1,5 +1,5 @@
 protobuf
-transformers==4.3
+transformers==4.31.0
 transformers_stream_generator
 cpm_kernels
 torch>=2.0
