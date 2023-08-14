@@ -259,6 +259,10 @@ prepare_tf_libs_new() {
     
 }
 
+function patch() {
+  # patch for install transformers
+  ln -s /usr/local/bin/pip3.8 /usr/bin/
+}
 
 # prepare_python_be
 # prepare_tf_libs 1

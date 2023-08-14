@@ -873,10 +873,207 @@ ModelRepositoryManager::LoadUnloadModel(
   // Serialize all operations that change model state
   std::lock_guard<std::mutex> lock(poll_mu_);
 
+  // Support for load api with type in parameters
+  // e.g. {"type": "dataelem.pymodel.huggingface_model"}
+  const std::string MODEL_TYPE_NAME = "type";
+  const std::string MODEL_PATH = "model_path";
+  std::unordered_map<std::string, std::vector<const InferenceParameter*>>
+      new_models;
+  std::unordered_map<std::string, std::vector<InferenceParameter>> params_store;
+
+  for (const auto& model : models) {
+    std::string model_name = model.first;
+    bool has_model_type = false;
+    std::string model_type;
+    for (auto* parameter : model.second) {
+      if (parameter->Name().compare(MODEL_TYPE_NAME) == 0) {
+        has_model_type = true;
+        model_type = parameter->ValueString();
+        break;
+      }
+    }
+
+    bool has_model_reload = false;
+    if (has_model_type) {
+      for (auto* parameter : model.second) {
+        if (parameter->Name().compare("reload") == 0) {
+          auto reload_value = parameter->ValueString();
+          if (reload_value.compare("1") == 0) {
+            has_model_reload = true;
+          }
+          break;
+        }
+      }
+
+      if (!has_model_reload && infos_.find(model_name) != infos_.end()) {
+        continue;
+      }
+    }
+
+
+    if (has_model_type) {
+      std::vector<std::string> model_defs = absl::StrSplit(model_type, '.');
+      std::string graph_path = model_defs[model_defs.size() - 1];
+      inference::ModelConfig model_config;
+      if (ops_map_.find(model_type) == ops_map_.end()) {
+        return Status(
+            Status::Code::INVALID_ARG,
+            model_type + " is not defined in ops_map");
+      }
+      model_config.CopyFrom(ops_map_[model_type]);
+
+      std::string model_path_full;
+      for (const auto& repository_path : repository_paths_) {
+        auto model_name_path = JoinPath({repository_path, model_name});
+        bool exists = false;
+        FileExists(model_name_path, &exists);
+        if (exists) {
+          model_path_full = model_name_path;
+          break;
+        }
+      }
+
+      if (model_path_full.empty()) {
+        return Status(
+            Status::Code::INVALID_ARG,
+            model_name + " not exists in model repository");
+      }
+
+      auto* model_params = model_config.mutable_parameters();
+      for (auto* parameter : model.second) {
+        if (parameter->Name().rfind("type") == 0) {
+          continue;
+        }
+        inference::ModelParameter mp;
+        mp.set_string_value(parameter->ValueString());
+        (*model_params)[parameter->Name()] = mp;
+      }
+
+      if (!model_path_full.empty()) {
+        inference::ModelParameter mp;
+        mp.set_string_value(model_path_full);
+        (*model_params)[MODEL_PATH] = mp;
+      }
+
+
+      // update parameters in model config
+      const std::string INSTANCE_GROUP_NAME = "instance_groups";
+      std::string instance_group_info;
+      for (auto* parameter : model.second) {
+        if (parameter->Name().compare(INSTANCE_GROUP_NAME) == 0) {
+          instance_group_info = parameter->ValueString();
+          break;
+        }
+      }
+
+      if (!instance_group_info.empty()) {
+        auto splitter = [](const std::string& str, const char& sep) {
+          std::vector<std::string> str_list = absl::StrSplit(str, sep);
+          return str_list;
+        };
+
+        auto status = Status::Success;
+        do {
+          auto ig_device_gpus_info = splitter(instance_group_info, ';');
+          if (ig_device_gpus_info.size() != 2) {
+            status = Status(
+                Status::Code::INVALID_ARG,
+                model_name +
+                    "  wrong format of instance_groups in parameters.");
+            break;
+          }
+          auto device_info = splitter(ig_device_gpus_info[0], '=');
+          auto gpus_info = splitter(ig_device_gpus_info[1], '=');
+          if (device_info.size() != 2 || gpus_info.size() != 2) {
+            status = Status(
+                Status::Code::INVALID_ARG,
+                model_name +
+                    "  wrong format of instance_groups in parameters.");
+            break;
+          }
+          auto device_type = device_info[1];
+
+          std::vector<std::string> gpus_group = splitter(gpus_info[1], '|');
+          int group_cnt = gpus_group.size();
+          if (gpus_info[1].empty()) {
+            group_cnt = 0;
+          }
+          std::vector<std::vector<int>> gpus(group_cnt);
+          for (size_t i = 0; i < gpus_group.size(); i++) {
+            std::vector<std::string> group_ids = splitter(gpus_group[i], ',');
+            for (auto gpu : group_ids) {
+              int id = 0;
+              absl::SimpleAtoi(gpu, &id);
+              gpus[i].emplace_back(id);
+            }
+          }
+
+          if (gpus.size() > 0) {
+            model_config.clear_instance_group();
+          }
+
+          for (size_t i = 0; i < gpus.size(); i++) {
+            auto* ig = model_config.add_instance_group();
+            // put first device in instance group, because framework will
+            //  envoke instance for each gpu id in group
+            if (gpus[i].size()) {
+              ig->add_gpus(gpus[i][0]);
+            }
+
+            // for (auto& device: gpus[i]) { ig->add_gpus(device); }
+
+            auto kind = inference::ModelInstanceGroup::KIND_CPU;
+            if (device_type.compare("gpu") == 0) {
+              kind = inference::ModelInstanceGroup::KIND_GPU;
+            }
+            ig->set_kind(kind);
+            ig->set_count(1);
+          }
+        } while (0);
+
+        if (!status.IsOk()) {
+          return status;
+        }
+      }
+
+      model_config.set_name(model_name);
+
+      // serilize the model config
+      std::string model_config_ser = "";
+      ModelConfigToJson(model_config, 1, &model_config_ser);
+
+      params_store[model_name].emplace_back(
+          InferenceParameter("config", model_config_ser.c_str()));
+
+      params_store[model_name].emplace_back(
+          InferenceParameter("graph", graph_path.c_str()));
+
+      for (const auto& p : params_store.at(model_name)) {
+        new_models[model_name].emplace_back(&p);
+      }
+    } else {
+      // support for the normal model load
+      new_models[model_name];
+      for (const auto& p : model.second) {
+        new_models[model_name].emplace_back(p);
+      }
+    }
+  }
+
+  if (new_models.size() == 0) {
+    return Status::Success;
+  }
+
   bool polled = true;
-  RETURN_IF_ERROR(LoadUnloadModels(models, type, unload_dependents, &polled));
-  // Check if model is loaded / unloaded properly
-  const auto& model_name = models.begin()->first;
+  //  Check if model is loaded / unloaded properly const auto&
+  // RETURN_IF_ERROR(
+  //   LoadUnloadModels(models, type, unload_dependents, &polled));
+  // model_name = models.begin()->first;
+
+  RETURN_IF_ERROR(
+      LoadUnloadModels(new_models, type, unload_dependents, &polled));
+  const auto& model_name = new_models.begin()->first;
+
   if (!polled) {
     return Status(
         Status::Code::INTERNAL, "failed to load '" + model_name +

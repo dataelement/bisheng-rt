@@ -92,7 +92,8 @@ static_assert(
 #include "server_config.pb.h"
 #include "triton/common/local_filesystem.h"
 
-DEFINE_string(config, "/opt/bisheng-rt/config/server_config.pbtxt", "config file");
+DEFINE_string(
+    config, "/opt/bisheng-rt/config/server_config.pbtxt", "config file");
 
 namespace {
 
@@ -2155,6 +2156,11 @@ ParseArgsFromConfig(const char* argv0, std::vector<std::string>& args)
     }
   }
 
+  if (bc.has_model_control_mode()) {
+    args.emplace_back("--model-control-mode");
+    args.emplace_back(bc.model_control_mode());
+  }
+
   if (bc.backend_config_size() > 0) {
     for (const auto& opt : bc.backend_config()) {
       size_t ind = opt.rfind("plugins=");
@@ -2280,8 +2286,8 @@ main(int argc, char** argv)
 
   if (found) {
     LOG_INFO << "bisheng runtime server is already started. "
-              << "need restart, please use "
-              << "/opt/bisheng-rt/bin/rtserver stop first";
+             << "need restart, please use "
+             << "/opt/bisheng-rt/bin/rtserver stop first";
     return 0;
   }
 
@@ -2330,8 +2336,9 @@ main(int argc, char** argv)
 #endif  // TRITON_ENABLE_GPU
 
 #ifdef LICENSE_STRATEGY
-    std::string env_license = triton::server::GetEnvironmentVariableOrDefault("LICENSE_MODE", "");
-    if (env_license == "hasp" || env_license == "dataelem"){
+    std::string env_license =
+        triton::server::GetEnvironmentVariableOrDefault("LICENSE_MODE", "");
+    if (env_license == "hasp" || env_license == "dataelem") {
       license_mode_ = env_license;
     }
     LOG_INFO << "ENTER DATAELEM AUTH PROCEDURE, USE MODE " << license_mode_;

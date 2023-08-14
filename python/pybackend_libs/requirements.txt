@@ -1,0 +1,13 @@
+protobuf
+transformers==4.31.0
+transformers_stream_generator
+cpm_kernels
+torch>=2.0
+gradio
+mdtex2html
+sentencepiece
+accelerate
+sse-starlette
+streamlit>=1.24.0
+tiktoken
+einops
