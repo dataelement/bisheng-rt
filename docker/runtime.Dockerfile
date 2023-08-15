@@ -5,7 +5,7 @@ ARG PIP_REPO=https://mirrors.tencent.com/pypi/simple
 
 # 安装系统库依赖
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt update && apt install -y nasm zlib1g-dev libssl-dev libre2-dev libb64-dev locales
+RUN apt update && apt install -y nasm zlib1g-dev libssl-dev libre2-dev libb64-dev locales libsm6 libxext6 libxrender-dev libgl1
 
 # Configure language
 RUN locale-gen en_US.UTF-8
@@ -31,6 +31,10 @@ RUN cd deps/flash-attention && \
   pip install . -i $PIP_REPO && \
   pip install csrc/layer_norm -i $PIP_REPO && \
   pip install csrc/rotary -i $PIP_REPO
+
+RUN pip3 install -U tensorflow==1.15.5+nv \
+    --extra-index http://public:26rS9HRxDqaVy5T@192.168.106.8:6081/repository/pypi-hosted/simple --trusted-host 192.168.106.8 \
+    -i $PIP_REPO
 
 # Clean caches
 RUN apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip && rm -fr /opt/bisheng-rt/deps

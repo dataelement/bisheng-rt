@@ -2,10 +2,16 @@
 
 
 function up_repo() {
-  cp -fr resource/internal_model_repository/* \
-    ./tritonbuild/install/resource/internal_model_repository/
+  # cp -fr resource/internal_model_repository/* \
+  #   ./tritonbuild/install/resource/internal_model_repository/
 
-  cp -fr python/pybackend_libs/src/pybackend_libs ./tritonbuild/install/backends/python/
+  # cp -fr python/pybackend_libs/src/pybackend_libs ./tritonbuild/install/backends/python/
+
+  cp -fr resource/internal_model_repository/* \
+    /opt/bisheng-rt/resource/internal_model_repository/
+
+  cp -fr python/pybackend_libs/src/pybackend_libs /opt/bisheng-rt/backends/python/  
+
 }
 
 
@@ -35,9 +41,9 @@ function load_data2() {
   "parameters": {
     "type": "dataelem.pymodel.huggingface_model",
     "pymodel_type": "llm.Llama2Chat",
+    "pymodel_params": "{\"max_tokens\": 4096}"
     "gpu_memory": "36",
     "instance_groups": "device=gpu;gpus=7,8",
-    "max_tokens": "4096"
   }
 }
 EOF
@@ -97,24 +103,35 @@ function infer_data2() {
 EOF
 }
 
+function infer_data3() {
+  cat <<EOF
+{
+
+  "model": "qwen-7b",
+  "messages": [
+    {"role": "user", "content": "hello"}
+   ]
+}
+EOF
+}
 
 function model_infer() {
   model="$1"
   curl -v -X POST http://192.168.106.12:7001/v2.1/models/${model}/infer \
    -H 'Content-Type: application/json' \
-   -d "$(infer_data2)"
+   -d "$(infer_data3)"
 }
 
 m1="multilingual-e5-large"
 m2="Llama-2-13b-chat-hf"
-
+m3="Qwen-7B-Chat"
 
 
 case $1 in
   update)
     echo -n "update"
     up_repo
-    index_model
+    # index_model
     ;;
   load)
     echo -n "load"
@@ -128,7 +145,8 @@ case $1 in
     ;;
   infer)
     echo -n "infer"
-    model_infer "$m2"
+    # model_infer "$m2"
+    model_infer $m3
     ;;
   *)
     echo -n "unknown"
