@@ -10,7 +10,7 @@ function up_repo() {
 
 
 function index_model() {
-  curl -X POST http://192.168.106.12:8502/v2/repository/index \
+  curl -X POST http://192.168.106.12:7001/v2/repository/index \
    -H 'Content-Type: application/json' \
    -d '{}'
 }
@@ -35,8 +35,9 @@ function load_data2() {
   "parameters": {
     "type": "dataelem.pymodel.huggingface_model",
     "pymodel_type": "llm.Llama2Chat",
-    "gpu_memory": "30",
-    "instance_groups": "device=gpu;gpus=7,8"
+    "gpu_memory": "36",
+    "instance_groups": "device=gpu;gpus=7,8",
+    "max_tokens": "4096"
   }
 }
 EOF
@@ -44,14 +45,14 @@ EOF
 
 function load_model2() {
   model="$1"
-  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/load \
+  curl -v -X POST http://192.168.106.12:7001/v2/repository/models/${model}/load \
    -H 'Content-Type: application/json' \
    -d "$(load_data2)"
 }
 
 function load_model1() {
   model="$1"
-  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/load \
+  curl -v -X POST http://192.168.106.12:7001/v2/repository/models/${model}/load \
    -H 'Content-Type: application/json' \
    -d "$(load_data1)"
 }
@@ -59,14 +60,14 @@ function load_model1() {
 
 function unload_model() {
   model="$1"
-  curl -v -X POST http://192.168.106.12:8502/v2/repository/models/${model}/unload \
+  curl -v -X POST http://192.168.106.12:7001/v2/repository/models/${model}/unload \
    -H 'Content-Type: application/json' \
    -d '{}'
 }
 
 
 function model_ready() {
-  curl -v -X GET http://192.168.106.12:8502/v2/models/test2/ready \
+  curl -v -X GET http://192.168.106.12:7001/v2/models/test2/ready \
    -H 'Content-Type: application/json' \
    -d '{}'
 }
@@ -99,7 +100,7 @@ EOF
 
 function model_infer() {
   model="$1"
-  curl -v -X POST http://192.168.106.12:8502/v2.1/models/${model}/infer \
+  curl -v -X POST http://192.168.106.12:7001/v2.1/models/${model}/infer \
    -H 'Content-Type: application/json' \
    -d "$(infer_data2)"
 }
@@ -117,8 +118,8 @@ case $1 in
     ;;
   load)
     echo -n "load"
-    # load_model2 "$m2"
-    load_model1 "$m1"
+    load_model2 "$m2"
+    # load_model1 "$m1"
     index_model
     ;;
   unload)

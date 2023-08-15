@@ -20,7 +20,7 @@ class Llama2Chat(BaseLLM):
         temperature = kwargs.get('temperature', 0.9)
         top_p = kwargs.get('top_p', 0.6)
         # max length: 4096
-        max_tokens = kwargs.get('max_tokens', 2048)
+        max_tokens = kwargs.get('max_tokens', 4096)
         self.default_params = {
             'temperature': temperature,
             'top_p': top_p,

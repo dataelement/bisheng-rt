@@ -54,7 +54,7 @@ class QwenChat(BaseLLM):
         self.devices = devices
 
         top_p = kwargs.get('top_p', 0.5)
-        max_tokens = kwargs.get('max_tokens', 2048)
+        max_tokens = kwargs.get('max_tokens', 8192)
         do_sample = kwargs.get('do_sample', False)
 
         self.default_params = {
