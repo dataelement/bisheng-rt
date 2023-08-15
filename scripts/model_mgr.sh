@@ -40,5 +40,15 @@ function load_model1() {
    -d "$(load_data1)"
 }
 
+
+function unload_model() {
+  model="$1"
+  curl -v -X POST http://192.168.106.12:7001/v2/repository/models/${model}/unload \
+   -H 'Content-Type: application/json' \
+   -d '{}'
+}
+
+unload_model "multilingual-e5-large"
+
 # load_model1
 # load_model2

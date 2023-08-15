@@ -16,6 +16,10 @@ class TritonPythonModel:
         params = model_config['parameters']
         parameters = dict((k, v['string_value']) for k, v in params.items())
         pymodel_type = parameters.pop('pymodel_type')
+
+        pymodel_params = parameters.pop('pymodel_params', '{}')
+        pymodel_params = json.loads(pymodel_params)
+
         instance_groups = parameters.pop('instance_groups')
         model_path = parameters.pop('model_path')
         parameters['pretrain_path'] = model_path
@@ -23,6 +27,9 @@ class TritonPythonModel:
         group_idx = int(model_instance_name.rsplit('_', 1)[1])
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
         parameters['devices'] = gpus[group_idx]
+
+        if pymodel_params:
+            parameters.update(pymodel_params)
 
         model_cate, model_cls_name = pymodel_type.split('.', 1)
         self.model_func = self._emb_func if model_cate == 'embedding' else self._llm_func
