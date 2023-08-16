@@ -1010,20 +1010,27 @@ class LayoutMrcnnPt(object):
             dtype=np.float32,
         )
 
-        img = resized_img[:, :, ::-1].astype(np.float32)
-        img -= np.array(cfg.PREPROC.PIXEL_MEAN, dtype=np.float32)
-        img /= np.array(cfg.PREPROC.PIXEL_STD, dtype=np.float32)
-        img = img[:, :, ::-1]
-        img = img.reshape((1, neww, newh, 3))
-        img = np.transpose(img, [0, 3, 1, 2])
+        resized_img0 = np.zeros([1600, 1600, 3], dtype=np.float32)
+        resized_img0[:newh, :neww, :] = resized_img
+        resized_img = resized_img0
 
-        h, w = img.shape[-2:]
-        img = np.pad(img, ((0, 0), (0, 0), (0, 1600 - h), (0, 1600 - w)))
+        mean = [123.675, 116.28, 103.53]
+        std = [58.395, 57.12, 57.375]
+        mean = mean[::-1]
+        std = std[::-1]
 
-        print('img', img.shape)
+        image_mean = np.array(mean)
+        image_std = np.array(std)
+        resized_img = (resized_img - image_mean) / image_std
+
+        resized_img = np.expand_dims(resized_img, axis=0).astype(np.float32)
+        resized_img = np.transpose(resized_img, [0, 3, 1, 2])
+
+        print('resized_img', resized_img.shape)
         # Step 2. infer
         start = time.time()
-        inp_tensor = torch.from_numpy(img.copy()).to(self.default_device)
+        inp_tensor = torch.from_numpy(resized_img.copy()).to(
+            self.default_device)
         with torch.no_grad():
             detections, masks = self.model(inp_tensor)
 
@@ -1034,7 +1041,9 @@ class LayoutMrcnnPt(object):
          pre_labels) = (detections[:, :4], detections[:, 5], detections[:, 6],
                         detections[:, 7], masks, detections[:, 4])
 
-        # print('pre_labels', pre_labels)
+        print('pre_boxes', pre_boxes.shape, pre_boxes)
+        print('pre_scores', pre_scores)
+        print('pre_labels', pre_labels)
 
         end = time.time()
         print('[Layout Analysis] %d ms per frame' % ((end - start) * 1000))
