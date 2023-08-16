@@ -264,6 +264,20 @@ function patch() {
   ln -s /usr/local/bin/pip3.8 /usr/bin/
 }
 
+function upload_tf_pkg() {
+  TWINE_USER=deploy
+  TWINE_PASSWORD=kDNubrlaK6n6RtzN
+  PYPI_REPO="http://192.168.106.8:6081/repository/pypi-hosted/"
+  WHL_PKG="/home/public/liuqingjie/tensorflow-1.15.5+nv-cp38-cp38-linux_x86_64.whl"
+  twine upload ${WHL_PKG} -u ${TWINE_USER} -p ${TWINE_PASSWORD} --repository-url ${PYPI_REPO}
+}
+
+
+function install_tf_pkg() {
+  pip3 install -U tensorflow==1.15.5+nv \
+    --extra-index  http://public:26rS9HRxDqaVy5T@192.168.106.8:6081/repository/pypi-hosted/simple --trusted-host 192.168.106.8
+}
+
 # prepare_python_be
 # prepare_tf_libs 1
 # prepare_tf_libs 2
@@ -282,4 +296,6 @@ function patch() {
 
 ## dependences for bisheng-rt
 # preinstall
-prepare_system_lib
+# prepare_system_lib
+# upload_tf_pkg
+install_tf_pkg

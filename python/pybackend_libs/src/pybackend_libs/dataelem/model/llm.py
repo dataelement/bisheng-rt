@@ -39,7 +39,9 @@ class BaseLLM(object):
               devices,
               gpu_memory,
               use_auto_model=False,
-              use_safetensors=False):
+              use_safetensors=False,
+              auto_configure_device_map=None,
+              **kwargs):
 
         torch_seed()
 
@@ -64,17 +66,24 @@ class BaseLLM(object):
                                                trust_remote_code=True)
 
         no_split_modules = model._no_split_modules
-        device_map = infer_auto_device_map(
-            model,
-            max_memory=max_memory,
-            no_split_module_classes=no_split_modules)
+        if auto_configure_device_map is None:
+            device_map = infer_auto_device_map(
+                model,
+                max_memory=max_memory,
+                no_split_module_classes=no_split_modules)
+        else:
+            device_map = auto_configure_device_map(
+                model,
+                max_memory=max_memory,
+                no_split_module_classes=no_split_modules)
 
         self.model = auto_model_cls.from_pretrained(
             pretrain_path,
             device_map=device_map,
             torch_dtype=torch.float16,
             trust_remote_code=True,
-            use_safetensors=use_safetensors)
+            use_safetensors=use_safetensors,
+            **kwargs)
 
         self.model.eval()
 

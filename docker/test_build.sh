@@ -1,10 +1,11 @@
 #!/bin/bash
 
 PIP_REPO="https://mirrors.tencent.com/pypi/simple"
+INTER_REPO="http://public:26rS9HRxDqaVy5T@192.168.106.8:6081/repository/pypi-hosted/simple"
 
 # # 安装bisheng-rt系统库依赖
 # export DEBIAN_FRONTEND=noninteractive
-# apt update && apt install -y nasm zlib1g-dev libssl-dev libre2-dev libb64-dev locales
+# apt update && apt install -y nasm zlib1g-dev libssl-dev libre2-dev libb64-dev locales libsm6 libxext6 libxrender-dev libgl1
 
 # # Configure language
 # locale-gen en_US.UTF-8
@@ -31,3 +32,5 @@ cd deps/flash-attention && \
   pip install . -i $PIP_REPO && \
   pip install csrc/layer_norm -i $PIP_REPO && \
   pip install csrc/rotary -i $PIP_REPO
+
+pip3 install -U tensorflow==1.15.5+nv --extra-index ${INTER_REPO} --trusted-host 192.168.106.8 -i $PIP_REPO
