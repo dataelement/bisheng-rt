@@ -210,6 +210,9 @@ case $1 in
     # model_infer $m3
     model_infer $m4
     ;;
+  index)
+    index_model
+    ;;
   *)
     echo -n "unknown"
     ;;

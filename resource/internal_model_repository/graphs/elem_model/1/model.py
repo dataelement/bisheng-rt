@@ -7,6 +7,21 @@ import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model import get_model
 
 
+def emb_func(model, input):
+    return model.emb(**input)
+
+
+def llm_func(model, input):
+    return model.chat(**input)
+
+
+def layout_func(model, input):
+    return model.predict(**input)
+
+
+func_map = {'embedding': emb_func, 'llm': llm_func, 'layout': layout_func}
+
+
 class TritonPythonModel:
     def initialize(self, args):
         model_instance_name = args['model_instance_name']
@@ -32,17 +47,9 @@ class TritonPythonModel:
             parameters.update(pymodel_params)
 
         model_cate, model_cls_name = pymodel_type.split('.', 1)
-        self.model_func = self._emb_func if model_cate == 'embedding' else self._llm_func
+
+        self.model_func = func_map.get(model_cate)
         self.model = get_model(model_cls_name)(**parameters)
-
-    def _emb_func(self, model, input):
-        return model.emb(**input)
-
-    def _llm_func(self, model, input):
-        return model.chat(**input)
-
-    def _layout_func(self, model, input):
-        return model.predict(**input)
 
     def execute(self, requests):
         def _get_np_input(request, name, has_batch=True):
