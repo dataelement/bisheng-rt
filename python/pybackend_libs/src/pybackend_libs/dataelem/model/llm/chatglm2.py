@@ -2,7 +2,7 @@ import copy
 
 import torch
 
-from .chatglm2_utils import load_model_on_gpus
+from .chatglm2_utils import auto_configure_device_map
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
 
@@ -68,7 +68,12 @@ class ChatGLM2(BaseLLM):
             'max_tokens': max_tokens,
             'do_sample': do_sample
         }
-        self._load(pretrain_path, precision, devices, gpu_memory, True)
+        self._load(pretrain_path,
+                   precision,
+                   devices,
+                   gpu_memory,
+                   True,
+                   auto_configure_device_map=auto_configure_device_map)
 
     def chat(self, **kwargs):
         req_dict = copy.copy(self.default_params)

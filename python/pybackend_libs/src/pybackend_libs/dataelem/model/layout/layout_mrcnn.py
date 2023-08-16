@@ -135,7 +135,11 @@ class LayoutMrcnn(Mrcnn):
     """
     Layout
     """
-    def __init__(self, model_path, **kwargs):
+    def __init__(self, **kwargs):
+        model_path = kwargs.get('model_path', None)
+        if model_path is None:
+            model_path = kwargs.get('pretrain_path')
+
         super().__init__(model_path=model_path)
         devices = kwargs.get('devices')
         used_device = devices.split(',')[0]
@@ -167,10 +171,10 @@ class LayoutMrcnn(Mrcnn):
             dtype=np.float32,
         )
 
-        if self.precision == 'fp16':
-            resized_img = resized_img.astype(np.float16)
+        # if self.precision == 'fp16':
+        #     resized_img = resized_img.astype(np.float16)
 
-        start = time.time()
+        # start = time.time()
         # graph infer
         (
             pre_boxes,
@@ -181,8 +185,9 @@ class LayoutMrcnn(Mrcnn):
             pre_labels,
         ) = self.sess.run(self.ys, feed_dict={self.xs[0]: resized_img})
 
-        end = time.time()
-        print('[Layout Analysis] %d ms per frame' % ((end - start) * 1000))
+        # end = time.time()
+        # print('[Layout Analysis] %d ms per frame' % ((end - start) * 1000))
+
         # post
         pre_boxes = pre_boxes / scale
         pre_boxes = clip_boxes(pre_boxes, orig_shape)
@@ -201,11 +206,10 @@ class LayoutMrcnn(Mrcnn):
         labels = pre_labels.astype(np.int32)
         return boxes, scores, labels
 
-    def predict(self, request):
-        img = base64.b64decode(request['img'])
+    def predict(self, img, **kwargs):
+        img = base64.b64decode(img)
         img = np.fromstring(img, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
-        print('img.shape', img.shape)
         boxes, scores, labels = self.infer(img)
         res = []
         for i, box in enumerate(boxes):

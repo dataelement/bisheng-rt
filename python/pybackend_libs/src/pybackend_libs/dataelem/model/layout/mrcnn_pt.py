@@ -1066,8 +1066,8 @@ class LayoutMrcnnPt(object):
         labels = pre_labels.astype(np.int32)
         return boxes, scores, labels
 
-    def predict(self, request):
-        img = base64.b64decode(request['img'])
+    def predict(self, img, **kwargs):
+        img = base64.b64decode(img)
         img = np.fromstring(img, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
         boxes, scores, labels = self.infer(img)

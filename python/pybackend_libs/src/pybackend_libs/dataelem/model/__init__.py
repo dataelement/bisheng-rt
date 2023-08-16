@@ -1,14 +1,15 @@
-from .baichuan import BaichuanChat
-from .bge import BGEZhEmbedding
-from .chatglm2 import ChatGLM2
-from .gte import GTEEmbedding
-from .llama2 import Llama2Chat
-from .me5 import ME5Embedding
-from .qwen import QwenChat
+from .embedding.bge import BGEZhEmbedding
+from .embedding.gte import GTEEmbedding
+from .embedding.me5 import ME5Embedding
+from .layout.layout_mrcnn import LayoutMrcnn
+from .llm.baichuan import BaichuanChat
+from .llm.chatglm2 import ChatGLM2
+from .llm.llama2 import Llama2Chat
+from .llm.qwen import QwenChat
 
 __all__ = [
     'ChatGLM2', 'BaichuanChat', 'QwenChat', 'Llama2Chat', 'ME5Embedding',
-    'BGEZhEmbedding', 'GTEEmbedding'
+    'BGEZhEmbedding', 'GTEEmbedding', 'LayoutMrcnn'
 ]
 
 
@@ -21,6 +22,7 @@ def get_model(name: str):
         'ME5Embedding': ME5Embedding,
         'BGEZhEmbedding': BGEZhEmbedding,
         'GTEEmbedding': GTEEmbedding,
+        'LayoutMrcnn': LayoutMrcnn
     }
 
     return model_name_mapping.get(name, None)

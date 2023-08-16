@@ -2,15 +2,13 @@
 
 
 function up_repo() {
-  # cp -fr resource/internal_model_repository/* \
-  #   ./tritonbuild/install/resource/internal_model_repository/
-
-  # cp -fr python/pybackend_libs/src/pybackend_libs ./tritonbuild/install/backends/python/
-
-  cp -fr resource/internal_model_repository/* \
+  projdir="/home/hanfeng/projects/bisheng-rt"
+  rm -fr /opt/bisheng-rt/resource/internal_model_repository/*
+  cp -fr ${projdir}/resource/internal_model_repository/* \
     /opt/bisheng-rt/resource/internal_model_repository/
 
-  cp -fr python/pybackend_libs/src/pybackend_libs /opt/bisheng-rt/backends/python/  
+  rm -fr /opt/bisheng-rt/backends/python/pybackend_libs
+  cp -fr ${projdir}/python/pybackend_libs/src/pybackend_libs /opt/bisheng-rt/backends/python/  
 
 }
 
@@ -62,6 +60,30 @@ function load_data3() {
   }
 }
 EOF
+}
+
+
+
+function load_data4() {
+  cat <<EOF
+{
+  "parameters": {
+    "type": "dataelem.pymodel.huggingface_model",
+    "pymodel_type": "llm.ChatGLM2",
+    "pymodel_params": "{\"max_tokens\": 32768}",
+    "gpu_memory": "16",
+    "instance_groups": "device=gpu;gpus=2,3"
+  }
+}
+EOF
+}
+
+
+function load_model4() {
+  model="$1"
+  curl -v -X POST http://192.168.106.12:7001/v2/repository/models/${model}/load \
+   -H 'Content-Type: application/json' \
+   -d "$(load_data4)"
 }
 
 
@@ -139,17 +161,30 @@ function infer_data3() {
 EOF
 }
 
+function infer_data4() {
+  cat <<EOF
+{
+
+  "model": "chatglm2-6b-32k",
+  "messages": [
+    {"role": "user", "content": "hello"}
+   ]
+}
+EOF
+}
+
+
 function model_infer() {
   model="$1"
   curl -v -X POST http://192.168.106.12:7001/v2.1/models/${model}/infer \
    -H 'Content-Type: application/json' \
-   -d "$(infer_data3)"
+   -d "$(infer_data4)"
 }
 
 m1="multilingual-e5-large"
 m2="Llama-2-13b-chat-hf"
 m3="Qwen-7B-Chat"
-
+m4="chatglm2-6b-32k"
 
 case $1 in
   update)
@@ -159,7 +194,8 @@ case $1 in
     ;;
   load)
     echo -n "load"
-    load_model3 $m3
+    load_model4 $m4
+    # load_model3 $m3
     # load_model2 "$m2"
     # load_model1 "$m1"
     index_model
@@ -171,7 +207,8 @@ case $1 in
   infer)
     echo -n "infer"
     # model_infer "$m2"
-    model_infer $m3
+    # model_infer $m3
+    model_infer $m4
     ;;
   *)
     echo -n "unknown"

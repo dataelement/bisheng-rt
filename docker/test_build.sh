@@ -25,12 +25,12 @@ INTER_REPO="http://public:26rS9HRxDqaVy5T@192.168.106.8:6081/repository/pypi-hos
 
 # 安装bisheng-rt依赖
 # FIX
-ln -s /usr/local/bin/pip3 /usr/bin/pip3.8
-pip install -r deps/requirements.txt -i $PIP_REPO
+# ln -s /usr/local/bin/pip3 /usr/bin/pip3.8
+# pip install -r ./requirements.txt -i $PIP_REPO
 
-cd deps/flash-attention && \
-  pip install . -i $PIP_REPO && \
-  pip install csrc/layer_norm -i $PIP_REPO && \
-  pip install csrc/rotary -i $PIP_REPO
+# cd deps/flash-attention && \
+#   pip install . -i $PIP_REPO && \
+#   pip install csrc/layer_norm -i $PIP_REPO && \
+#   pip install csrc/rotary -i $PIP_REPO
 
-pip3 install -U tensorflow==1.15.5+nv --extra-index ${INTER_REPO} --trusted-host 192.168.106.8 -i $PIP_REPO
+# pip3 install -U tensorflow==1.15.5+nv --extra-index ${INTER_REPO} --trusted-host 192.168.106.8 -i $PIP_REPO
