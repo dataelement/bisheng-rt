@@ -107,20 +107,6 @@ class Mrcnn(object):
         with open(self.model_path, 'rb') as f:
             graph_def = tf.GraphDef()
             graph_def.ParseFromString(f.read())
-            node_set = []
-            for node in graph_def.node:
-                print('-' * 30)
-                print('node:', node.op, node.name)
-                attrs = list(node.attr.keys())
-                for attr in attrs:
-                    print('attr', attr)
-                    if attr == 'value':
-                        tensor = node.attr[attr].tensor
-                        print('tensor', tensor.dtype)
-
-                node_set.append(node.op)
-
-            print('node_set', list(set(node_set)))
 
         # refer https://github.com/tensorflow/tensorflow/issues/18861
         gpu_options = tf.GPUOptions(allow_growth=True,
@@ -183,7 +169,6 @@ class LayoutMrcnn(Mrcnn):
 
         if self.precision == 'fp16':
             resized_img = resized_img.astype(np.float16)
-            # resized_img = tf.cast(resized_img, tf.float16)
 
         start = time.time()
         # graph infer

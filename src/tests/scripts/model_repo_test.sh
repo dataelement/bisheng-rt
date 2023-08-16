@@ -41,13 +41,37 @@ function load_data2() {
   "parameters": {
     "type": "dataelem.pymodel.huggingface_model",
     "pymodel_type": "llm.Llama2Chat",
-    "pymodel_params": "{\"max_tokens\": 4096}"
+    "pymodel_params": "{\"max_tokens\": 4096}",
     "gpu_memory": "36",
-    "instance_groups": "device=gpu;gpus=7,8",
+    "instance_groups": "device=gpu;gpus=7,8"
   }
 }
 EOF
 }
+
+
+function load_data3() {
+  cat <<EOF
+{
+  "parameters": {
+    "type": "dataelem.pymodel.huggingface_model",
+    "pymodel_type": "llm.QwenChat",
+    "pymodel_params": "{\"max_tokens\": 8192}",
+    "gpu_memory": "36",
+    "instance_groups": "device=gpu;gpus=7,8"
+  }
+}
+EOF
+}
+
+
+function load_model3() {
+  model="$1"
+  curl -v -X POST http://192.168.106.12:7001/v2/repository/models/${model}/load \
+   -H 'Content-Type: application/json' \
+   -d "$(load_data3)"
+}
+
 
 function load_model2() {
   model="$1"
@@ -135,7 +159,8 @@ case $1 in
     ;;
   load)
     echo -n "load"
-    load_model2 "$m2"
+    load_model3 $m3
+    # load_model2 "$m2"
     # load_model1 "$m1"
     index_model
     ;;

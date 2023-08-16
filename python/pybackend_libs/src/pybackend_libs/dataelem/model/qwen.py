@@ -6,6 +6,7 @@ import torch
 
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
+from .qwen_utils import auto_configure_device_map
 
 
 def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):
@@ -63,7 +64,16 @@ class QwenChat(BaseLLM):
             'do_sample': do_sample
         }
 
-        self._load(pretrain_path, precision, devices, gpu_memory)
+        load_params = {}
+        if precision == 'bf16':
+            load_params = {'bf16': True}
+
+        self._load(pretrain_path,
+                   precision,
+                   devices,
+                   gpu_memory,
+                   auto_configure_device_map=auto_configure_device_map,
+                   **load_params)
         self.generation_config.update(**self.default_params)
         self.model.generation_config = self.generation_config
 
