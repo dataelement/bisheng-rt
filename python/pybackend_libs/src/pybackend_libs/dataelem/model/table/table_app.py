@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import base64
 import copy
 import io
@@ -10,13 +8,21 @@ from collections import defaultdict
 import cv2
 import numpy as np
 
-from ..utils import (intersection, perspective_transform, rotate_image_only,
-                     rotate_polys_only)
-from ..utils.html_to_excel import document_to_workbook
-from ..utils.table_cell_post import PostCell, area_to_html, format_html
-from ..utils.table_rowcol_post import objects_to_cells
+from pybackend_libs.dataelem.utils import (
+    intersection,
+    perspective_transform, 
+    rotate_image_only,
+    rotate_polys_only)
 
-# from ..utils.visualization import draw_box_on_img, ocr_visual
+from pybackend_libs.dataelem.utils.html_to_excel import document_to_workbook
+from pybackend_libs.dataelem.utils.table_cell_post import (
+    PostCell, area_to_html, format_html)
+
+from pybackend_libs.dataelem.utils.table_rowcol_post import objects_to_cells
+
+from pybackend_libs.dataelem.utils import decode_image_from_b64
+
+# from pybackend_libs.dataelem.utils.visualization import draw_box_on_img, ocr_visual
 
 
 class NpEncoder(json.JSONEncoder):
@@ -195,31 +201,10 @@ structure_class_thresholds = {
 
 
 class TableRowColApp(object):
-    def __init__(self, app_params, app_inputs, app_ouputs, **kwargs):
-        super(TableRowColApp, self).__init__(app_params, app_inputs,
-                                             app_ouputs, **kwargs)
-        assert 'table_det_model_name' in app_params, \
-            'Please specify table_det_model_name in config.pbtxt'
-        self.table_det_model_name = \
-            app_params['table_det_model_name']['string_value']
-        self.table_det_model_version = int(
-            app_params['table_det_model_version']['string_value']
-        ) if 'table_det_model_version' in app_params else -1
-        self.table_det_model_inputs = ['image', 'params']
-        self.table_det_model_outputs = ['boxes']
-
-        assert 'table_rowcol_det_model_name' in app_params, \
-            'Please specify table_rowcol_det_model_name in config.pbtxt'
-        self.table_rowcol_det_model_name = \
-            app_params['table_rowcol_det_model_name']['string_value']
-        self.table_rowcol_det_model_version = int(
-            app_params['table_rowcol_det_model_version']['string_value']
-        ) if 'table_rowcol_det_model_version' in app_params else -1
-        self.table_rowcol_det_model_inputs = ['image', 'params']
-        self.table_rowcol_det_model_outputs = ['boxes', 'scores', 'labels']
+    def __init__(self, **kwargs):
         self.padding = 50
 
-    async def infer(self, context, inputs):
+    def infer(self, context, inputs):
         """app infer
 
         Args:
@@ -230,37 +215,39 @@ class TableRowColApp(object):
             outputs (list[np.array]): [seal_results], outputs of app
         """
 
-        table_det_longer_edge_size = context['params'].get(
+        table_det_longer_edge_size = context.get(
             'table_det_longer_edge_size', 0)
-        table_rowcol_det_longer_edge_size = context['params'].get(
+        table_rowcol_det_longer_edge_size = context.get(
             'table_rowcol_det_longer_edge_size', 0)
-        sep_char = context['params'].get('sep_char', '')
+
+        sep_char = context.get('sep_char', '')
         # debug = context['params'].get('debug', False)
 
-        image = inputs[0]
+        image = decode_image_from_b64(inputs[0])
         image = image.astype(np.float32)
 
         # phase1: ocr results
-        ocr_result_byte = inputs[1][0]
+        ocr_result_byte = base64.b64decode(inputs[1])
         ocr_result = json.loads(ocr_result_byte.decode('utf-8'))
         ocr_bboxes = np.asarray(ocr_result['bboxes'])
         ocr_bboxes_origin = copy.deepcopy(ocr_bboxes)
         ocr_texts = ocr_result['texts']
 
         # phase2: table detect
-        table_det_params = {}
-        if table_det_longer_edge_size != 0:
-            table_det_params['longer_edge_size'] = table_det_longer_edge_size
-        det_params = np.array([json.dumps(table_det_params).encode('utf-8')
-                               ]).astype(np.object_)
-        det_inputs = [image.astype(np.float32), det_params]
+        # table_det_params = {}
+        # if table_det_longer_edge_size != 0:
+        #     table_det_params['longer_edge_size'] = table_det_longer_edge_size
+        # det_params = np.array([json.dumps(table_det_params).encode('utf-8')
+        #                        ]).astype(np.object_)
+        # det_inputs = [image.astype(np.float32), det_params]
 
-        det_outputs = self.alg_infer(det_inputs, self.table_det_model_name,
-                                     self.table_det_model_version,
-                                     self.table_det_model_inputs,
-                                     self.table_det_model_outputs)
+        # det_outputs = self.alg_infer(det_inputs, self.table_det_model_name,
+        #                              self.table_det_model_version,
+        #                              self.table_det_model_inputs,
+        #                              self.table_det_model_outputs)
 
-        table_bboxes = det_outputs[0].tolist()
+        # table_bboxes = det_outputs[0].tolist()
+        table_bboxes = inputs[2]
 
         output_res = dict()
         if len(table_bboxes) != 0:
@@ -500,37 +487,15 @@ class TableRowColApp(object):
             np.array([json.dumps(output_res).encode('utf-8')
                       ]).astype(np.object_)
         ]
-        return context, infer_outputs
+        return infer_outputs
 
 
 class TableCellApp(object):
-    def __init__(self, app_params, app_inputs, app_ouputs, **kwargs):
-        super(TableCellApp, self).__init__(app_params, app_inputs, app_ouputs,
-                                           **kwargs)
-
-        assert 'table_det_model_name' in app_params, \
-            'Please specify table_det_model_name in config.pbtxt'
-        self.table_det_model_name = \
-            app_params['table_det_model_name']['string_value']
-        self.table_det_model_version = int(
-            app_params['table_det_model_version']['string_value']
-        ) if 'table_det_model_version' in app_params else -1
-        self.table_det_model_inputs = ['image', 'params']
-        self.table_det_model_outputs = ['boxes']
-
-        assert 'table_cell_det_model_name' in app_params, \
-            'Please specify table_cell_det_model_name in config.pbtxt'
-        self.table_cell_det_model_name = \
-            app_params['table_cell_det_model_name']['string_value']
-        self.table_cell_det_model_version = int(
-            app_params['table_cell_det_model_version']['string_value']
-        ) if 'table_cell_det_model_version' in app_params else -1
-        self.table_cell_det_model_inputs = ['image', 'params']
-        self.table_cell_det_model_outputs = ['boxes']
+    def __init__(self, **kwargs):
         self.post_cell = PostCell()
         self.padding = 50
 
-    async def infer(self, context, inputs):
+    def infer(self, context, inputs):
         """app infer
 
         Args:
@@ -540,37 +505,44 @@ class TableCellApp(object):
             context (dict): TableRowColApp global information
             outputs (list[np.array]): [seal_results], outputs of app
         """
-        table_det_longer_edge_size = context['params'].get(
+        table_det_longer_edge_size = context.get(
             'table_det_longer_edge_size', 0)
-        table_cell_det_longer_edge_size = context['params'].get(
+        table_cell_det_longer_edge_size = context.get(
             'table_cell_det_longer_edge_size', 0)
-        sep_char = context['params'].get('sep_char', '')
+        sep_char = context.get('sep_char', '')
         # debug = context['params'].get('debug', False)
 
-        image = inputs[0]
+        image = decode_image_from_b64(inputs[0])
         image = image.astype(np.float32)
 
+        # image = inputs[0]
+        # image = image.astype(np.float32)
+
         # phase1: ocr results
-        ocr_result_byte = inputs[1][0]
+        # ocr_result_byte = inputs[1][0]
+        ocr_result_byte = base64.b64decode(inputs[1])
+
         ocr_result = json.loads(ocr_result_byte.decode('utf-8'))
         ocr_bboxes = np.asarray(ocr_result['bboxes'])
         ocr_bboxes_origin = copy.deepcopy(ocr_bboxes)
         ocr_texts = ocr_result['texts']
 
         # phase2: table detect
-        table_det_params = {}
-        if table_det_longer_edge_size != 0:
-            table_det_params['longer_edge_size'] = table_det_longer_edge_size
-        det_params = np.array([json.dumps(table_det_params).encode('utf-8')
-                               ]).astype(np.object_)
-        det_inputs = [image.astype(np.float32), det_params]
+        # table_det_params = {}
+        # if table_det_longer_edge_size != 0:
+        #     table_det_params['longer_edge_size'] = table_det_longer_edge_size
+        # det_params = np.array([json.dumps(table_det_params).encode('utf-8')
+        #                        ]).astype(np.object_)
+        # det_inputs = [image.astype(np.float32), det_params]
 
-        det_outputs = self.alg_infer(det_inputs, self.table_det_model_name,
-                                     self.table_det_model_version,
-                                     self.table_det_model_inputs,
-                                     self.table_det_model_outputs)
+        # det_outputs = self.alg_infer(det_inputs, self.table_det_model_name,
+        #                              self.table_det_model_version,
+        #                              self.table_det_model_inputs,
+        #                              self.table_det_model_outputs)
 
-        table_bboxes = det_outputs[0].tolist()
+        # table_bboxes = det_outputs[0].tolist()
+
+        table_bboxes = inputs[2]
 
         output_res = dict()
         if len(table_bboxes) != 0:
@@ -774,4 +746,4 @@ class TableCellApp(object):
             np.array([json.dumps(output_res).encode('utf-8')
                       ]).astype(np.object_)
         ]
-        return context, infer_outputs
+        return infer_outputs

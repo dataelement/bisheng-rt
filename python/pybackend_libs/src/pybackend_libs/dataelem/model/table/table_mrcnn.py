@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from pybackend_libs.dataelem.framework.tf_graph import TFGraph
 
-from . import lanms
+import lanms
 
 
 def paste_mask(box, mask, shape):
