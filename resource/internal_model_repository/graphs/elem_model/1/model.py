@@ -7,21 +7,6 @@ import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model import get_model
 
 
-def emb_func(model, input):
-    return model.emb(**input)
-
-
-def llm_func(model, input):
-    return model.chat(**input)
-
-
-def layout_func(model, input):
-    return model.predict(**input)
-
-
-func_map = {'embedding': emb_func, 'llm': llm_func, 'layout': layout_func}
-
-
 class TritonPythonModel:
     def initialize(self, args):
         model_instance_name = args['model_instance_name']
@@ -46,9 +31,7 @@ class TritonPythonModel:
         if pymodel_params:
             parameters.update(pymodel_params)
 
-        model_cate, model_cls_name = pymodel_type.split('.', 1)
-
-        self.model_func = func_map.get(model_cate)
+        _, model_cls_name = pymodel_type.split('.', 1)
         self.model = get_model(model_cls_name)(**parameters)
 
     def execute(self, requests):
@@ -67,7 +50,7 @@ class TritonPythonModel:
             try:
                 inp_str = _get_np_input(request, 'INPUT')[0]
                 inp = json.loads(inp_str)
-                outp = self.model_func(self.model, inp)
+                outp = self.model.predict(inp)
             except Exception as e:
                 status_code = 400
                 status_message = str(e)

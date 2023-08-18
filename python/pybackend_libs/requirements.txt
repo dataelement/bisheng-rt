@@ -13,3 +13,7 @@ tiktoken
 einops
 opencv-python==4.5.5.64
 shapely
+lxml
+openpyxl
+premailer
+scipy

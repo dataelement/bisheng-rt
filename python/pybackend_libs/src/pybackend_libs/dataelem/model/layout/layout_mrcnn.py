@@ -206,11 +206,13 @@ class LayoutMrcnn(Mrcnn):
         labels = pre_labels.astype(np.int32)
         return boxes, scores, labels
 
-    def predict(self, img, **kwargs):
+    def predict(self, inp):
+        img = inp.get('b64_image')
+        longer_edge_size = inp.get('longer_edge_size', 0)
         img = base64.b64decode(img)
         img = np.fromstring(img, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
-        boxes, scores, labels = self.infer(img)
+        boxes, scores, labels = self.infer(img, longer_edge_size)
         res = []
         for i, box in enumerate(boxes):
             tmp_dict = {}

@@ -18,8 +18,8 @@ def test_elem_layout_v1_fp16():
 
     test_image = '../data/maoxuan_mulu.jpg'
     b64data = base64.b64encode(open(test_image, 'rb').read())
-    inp = {'img': b64data}
-    outp = model.predict(**inp)
+    inp = {'b64_image': b64data}
+    outp = model.predict(inp)
     print(outp)
 
 
@@ -35,8 +35,8 @@ def test_elem_layout_v1():
 
     test_image = '../data/maoxuan_mulu.jpg'
     b64data = base64.b64encode(open(test_image, 'rb').read())
-    inp = {'img': b64data}
-    outp = model.predict(**inp)
+    inp = {'b64_image': b64data}
+    outp = model.predict(inp)
     print(outp)
 
 
