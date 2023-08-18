@@ -428,12 +428,15 @@ def ocr_result_matching(cell_bboxes, ocr_results, iou_thres=0.7, sep_char=''):
         [], [], []
     ocr_bboxes, ocr_texts, ocr_orders = ocr_results['bboxes'], ocr_results[
         'texts'], ocr_results['orders']
+
+    delta_y_threhold = 5
     for i, box_cell in enumerate(cell_bboxes):
         matched_bboxes, matched_texts, matched_orders = [], [], []
         for j, box_text in enumerate(ocr_bboxes):
             if rect_max_iou(box_cell, box_text) >= iou_thres:
                 # Insert curent ocr bbox into the matched_bboxes list according
                 # to Y coordinate,
+                # Changelog: add same row judge with delta_y threshold
                 if len(matched_bboxes) == 0:
                     matched_bboxes.append(box_text)
                     matched_texts.append(ocr_texts[j])
@@ -441,6 +444,9 @@ def ocr_result_matching(cell_bboxes, ocr_results, iou_thres=0.7, sep_char=''):
                 else:
                     insert_staus = 0
                     for k, matched_box in enumerate(matched_bboxes):
+                        delta_y = np.abs(box_text[1] - matched_box[1])
+                        if delta_y <= delta_y_threhold: continue
+
                         if box_text[1] < matched_box[1]:
                             matched_bboxes.insert(k, box_text)
                             matched_texts.insert(k, ocr_texts[j])

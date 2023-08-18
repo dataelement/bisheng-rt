@@ -3,10 +3,9 @@ import math
 from typing import Any, Dict, List, Tuple, Union
 
 import cv2
+import lanms
 import numpy as np
 from pybackend_libs.dataelem.framework.tf_graph import TFGraph
-
-import lanms
 
 
 def paste_mask(box, mask, shape):
@@ -260,12 +259,13 @@ class Mrcnn(object):
             self.scale_list = np.asarray(
                 [200, 400, 600, 800, 1000, 1200, 1600])
 
-    def predict(self, context: Dict[str, Any]) -> List[np.ndarray]:
-        b64_image = context.pop('b64_image')
-        img = base64.b64decode(b64_image)
-        img = np.fromstring(img, np.uint8)
-        img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+    def predict(self, context: Dict[str, Any], inputs) -> List[np.ndarray]:
+        # b64_image = context.pop('b64_image')
+        # img = base64.b64decode(b64_image)
+        # img = np.fromstring(img, np.uint8)
+        # img = cv2.imdecode(img, cv2.IMREAD_COLOR)
 
+        img = inputs[0]
         context, prep_outputs = self.preprocess(context, [img])
         graph_outputs = self.graph.run(prep_outputs)
         outputs = self.postprocess(context, graph_outputs)
@@ -320,6 +320,17 @@ class MrcnnTableDetect(Mrcnn):
     def __init__(self, **kwargs):
         super(MrcnnTableDetect, self).__init__(**kwargs)
 
+    def predict(self, context: Dict[str, Any]) -> List[np.ndarray]:
+        b64_image = context.pop('b64_image')
+        img = base64.b64decode(b64_image)
+        img = np.fromstring(img, np.uint8)
+        img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+
+        context, prep_outputs = self.preprocess(context, [img])
+        graph_outputs = self.graph.run(prep_outputs)
+        outputs = self.postprocess(context, graph_outputs)
+        return outputs
+
     def postprocess(self, context, inputs):
         """OcrMrcnn postprocess
 
@@ -367,8 +378,9 @@ class MrcnnTableDetect(Mrcnn):
             boxes_sin = boxes_scores[:, 10]
             boxes = start_point_boxes(boxes, boxes_cos, boxes_sin)
 
-        post_outputs = [np.asarray(boxes)]
-        return post_outputs
+        # post_outputs = [np.asarray(boxes)]
+        result = {'bboxes': np.asarray(boxes).tolist()}
+        return result
 
 
 class MrcnnTableCellDetect(Mrcnn):

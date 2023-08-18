@@ -4,25 +4,24 @@ import io
 import json
 import math
 from collections import defaultdict
+from typing import Any, Dict, List, Tuple, Union
 
 import cv2
 import numpy as np
-
-from pybackend_libs.dataelem.utils import (
-    intersection,
-    perspective_transform, 
-    rotate_image_only,
-    rotate_polys_only)
-
+from pybackend_libs.dataelem.utils import (decode_image_from_b64, intersection,
+                                           perspective_transform,
+                                           rotate_image_only,
+                                           rotate_polys_only)
 from pybackend_libs.dataelem.utils.html_to_excel import document_to_workbook
-from pybackend_libs.dataelem.utils.table_cell_post import (
-    PostCell, area_to_html, format_html)
-
+from pybackend_libs.dataelem.utils.table_cell_post import (PostCell,
+                                                           area_to_html,
+                                                           format_html)
 from pybackend_libs.dataelem.utils.table_rowcol_post import objects_to_cells
 
-from pybackend_libs.dataelem.utils import decode_image_from_b64
+from .table_mrcnn import MrcnnTableCellDetect, MrcnnTableRowColDetect
 
-# from pybackend_libs.dataelem.utils.visualization import draw_box_on_img, ocr_visual
+# from pybackend_libs.dataelem.utils.visualization import (
+#     draw_box_on_img, ocr_visual)
 
 
 class NpEncoder(json.JSONEncoder):
@@ -202,7 +201,21 @@ structure_class_thresholds = {
 
 class TableRowColApp(object):
     def __init__(self, **kwargs):
+        self.model = MrcnnTableRowColDetect(**kwargs)
         self.padding = 50
+
+    def predict(self, context: Dict[str, Any]) -> List[np.ndarray]:
+        b64_image = context.pop('b64_image')
+        img = base64.b64decode(b64_image)
+        img = np.fromstring(img, np.uint8)
+        img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+        bboxes = context.pop('table_bboxes')
+
+        ocr_result_str = context.pop('ocr_result')
+        ocr_result = json.loads(ocr_result_str)
+
+        result = self.infer(context, [img, ocr_result, bboxes])
+        return result
 
     def infer(self, context, inputs):
         """app infer
@@ -215,20 +228,19 @@ class TableRowColApp(object):
             outputs (list[np.array]): [seal_results], outputs of app
         """
 
-        table_det_longer_edge_size = context.get(
-            'table_det_longer_edge_size', 0)
+        table_det_longer_edge_size = context.get('table_det_longer_edge_size',
+                                                 0)
         table_rowcol_det_longer_edge_size = context.get(
             'table_rowcol_det_longer_edge_size', 0)
 
         sep_char = context.get('sep_char', '')
         # debug = context['params'].get('debug', False)
 
-        image = decode_image_from_b64(inputs[0])
+        image = inputs[0]
         image = image.astype(np.float32)
 
         # phase1: ocr results
-        ocr_result_byte = base64.b64decode(inputs[1])
-        ocr_result = json.loads(ocr_result_byte.decode('utf-8'))
+        ocr_result = inputs[1]
         ocr_bboxes = np.asarray(ocr_result['bboxes'])
         ocr_bboxes_origin = copy.deepcopy(ocr_bboxes)
         ocr_texts = ocr_result['texts']
@@ -249,6 +261,7 @@ class TableRowColApp(object):
         # table_bboxes = det_outputs[0].tolist()
         table_bboxes = inputs[2]
 
+        raw_table_htmls = []
         output_res = dict()
         if len(table_bboxes) != 0:
             table_bboxes = np.asarray(table_bboxes).reshape(-1, 4, 2)
@@ -331,19 +344,23 @@ class TableRowColApp(object):
                 table_ocr_bboxes[:, :, 1] = table_ocr_bboxes[:, :, 1] - crop_y1
 
                 # phase5: predict table, row, col, spannig cell bouding box
-                table_rowcol_det_params = {}
-                if table_rowcol_det_longer_edge_size != 0:
-                    table_rowcol_det_params[
-                        'longer_edge_size'] = table_rowcol_det_longer_edge_size
-                det_params = np.array([
-                    json.dumps(table_rowcol_det_params).encode('utf-8')
-                ]).astype(np.object_)
-                det_inputs = [crop_table_img.astype(np.float32), det_params]
-                det_outputs = self.alg_infer(
-                    det_inputs, self.table_rowcol_det_model_name,
-                    self.table_rowcol_det_model_version,
-                    self.table_rowcol_det_model_inputs,
-                    self.table_rowcol_det_model_outputs)
+                inputs = [crop_table_img.astype(np.float32)]
+                det_outputs = self.model.predict(context, inputs)
+
+                # table_rowcol_det_params = {}
+                # if table_rowcol_det_longer_edge_size != 0:
+                #     table_rowcol_det_params[
+                #         'longer_edge_size'] = table_rowcol_det_longer_edge_size
+                # det_params = np.array([
+                #     json.dumps(table_rowcol_det_params).encode('utf-8')
+                # ]).astype(np.object_)
+                # det_inputs = [crop_table_img.astype(np.float32), det_params]
+                # det_outputs = self.alg_infer(
+                #     det_inputs, self.table_rowcol_det_model_name,
+                #     self.table_rowcol_det_model_version,
+                #     self.table_rowcol_det_model_inputs,
+                #     self.table_rowcol_det_model_outputs)
+
                 row_col_bboxes = det_outputs[0].tolist()
                 scores = det_outputs[1].tolist()
                 labels = det_outputs[2].tolist()
@@ -454,6 +471,7 @@ class TableRowColApp(object):
                     arearec, no_empty_cell_labels, no_empty_cell_texts)
                 table_html = format_html(html_str_rec, html_text_rec)
                 raw_table_html += table_html
+                raw_table_htmls.append(table_html)
 
                 # if b64_vis_table_img is None:
                 #     # todo: vis table need remove
@@ -472,28 +490,45 @@ class TableRowColApp(object):
                 #     b64_vis_table_img = draw_box_on_img(
                 #         b64_vis_table_img, table_cell_bboxes)
 
-            if raw_table_result:
-                fid = io.BytesIO()
-                workbook = document_to_workbook(raw_table_html)
-                fid.seek(0)
-                workbook.save(fid)
-                output_res['resultFile'] = base64.b64encode(
-                    fid.getvalue()).decode('ascii').replace('\n', '')
-                output_res['raw_result'] = raw_table_result
-                output_res['resultImg'] = b64_vis_table_img
-                output_res = serilize_json(output_res)
+        #     if raw_table_result:
+        #         fid = io.BytesIO()
+        #         workbook = document_to_workbook(raw_table_html)
+        #         fid.seek(0)
+        #         workbook.save(fid)
+        #         output_res['resultFile'] = base64.b64encode(
+        #             fid.getvalue()).decode('ascii').replace('\n', '')
+        #         output_res['raw_result'] = raw_table_result
+        #         output_res['resultImg'] = b64_vis_table_img
+        #         output_res = serilize_json(output_res)
 
-        infer_outputs = [
-            np.array([json.dumps(output_res).encode('utf-8')
-                      ]).astype(np.object_)
-        ]
-        return infer_outputs
+        # infer_outputs = [
+        #     np.array([json.dumps(output_res).encode('utf-8')
+        #               ]).astype(np.object_)
+        # ]
+        # return infer_outputs
+        result = {'htmls': raw_table_htmls}
+        return result
 
 
 class TableCellApp(object):
     def __init__(self, **kwargs):
+        self.model = MrcnnTableCellDetect(**kwargs)
         self.post_cell = PostCell()
         self.padding = 50
+
+    def predict(self, context: Dict[str, Any]) -> List[np.ndarray]:
+        b64_image = context.pop('b64_image')
+        img = base64.b64decode(b64_image)
+        img = np.fromstring(img, np.uint8)
+        img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+        bboxes = context.pop('table_bboxes')
+
+        ocr_result_str = context.pop('ocr_result')
+        ocr_result = json.loads(ocr_result_str)
+
+        result = self.infer(context, [img, ocr_result, bboxes])
+
+        return result
 
     def infer(self, context, inputs):
         """app infer
@@ -505,24 +540,18 @@ class TableCellApp(object):
             context (dict): TableRowColApp global information
             outputs (list[np.array]): [seal_results], outputs of app
         """
-        table_det_longer_edge_size = context.get(
-            'table_det_longer_edge_size', 0)
+        table_det_longer_edge_size = context.get('table_det_longer_edge_size',
+                                                 0)
         table_cell_det_longer_edge_size = context.get(
             'table_cell_det_longer_edge_size', 0)
         sep_char = context.get('sep_char', '')
         # debug = context['params'].get('debug', False)
 
-        image = decode_image_from_b64(inputs[0])
+        image = inputs[0]
         image = image.astype(np.float32)
 
-        # image = inputs[0]
-        # image = image.astype(np.float32)
-
         # phase1: ocr results
-        # ocr_result_byte = inputs[1][0]
-        ocr_result_byte = base64.b64decode(inputs[1])
-
-        ocr_result = json.loads(ocr_result_byte.decode('utf-8'))
+        ocr_result = inputs[1]
         ocr_bboxes = np.asarray(ocr_result['bboxes'])
         ocr_bboxes_origin = copy.deepcopy(ocr_bboxes)
         ocr_texts = ocr_result['texts']
@@ -544,6 +573,7 @@ class TableCellApp(object):
 
         table_bboxes = inputs[2]
 
+        raw_table_htmls = []
         output_res = dict()
         if len(table_bboxes) != 0:
             table_bboxes = np.asarray(table_bboxes).reshape(-1, 4, 2)
@@ -626,19 +656,23 @@ class TableCellApp(object):
                 table_ocr_bboxes[:, :, 1] = table_ocr_bboxes[:, :, 1] - crop_y1
 
                 # phase5: predict table cell bouding box
-                table_cell_det_params = {}
-                if table_cell_det_longer_edge_size != 0:
-                    table_cell_det_params[
-                        'longer_edge_size'] = table_cell_det_longer_edge_size
-                det_params = np.array([
-                    json.dumps(table_cell_det_params).encode('utf-8')
-                ]).astype(np.object_)
-                det_inputs = [crop_table_img.astype(np.float32), det_params]
-                det_outputs = self.alg_infer(det_inputs,
-                                             self.table_cell_det_model_name,
-                                             self.table_cell_det_model_version,
-                                             self.table_cell_det_model_inputs,
-                                             self.table_cell_det_model_outputs)
+                # table_cell_det_params = {}
+                # if table_cell_det_longer_edge_size != 0:
+                #     table_cell_det_params[
+                #         'longer_edge_size'] = table_cell_det_longer_edge_size
+                # det_params = np.array([
+                #     json.dumps(table_cell_det_params).encode('utf-8')
+                # ]).astype(np.object_)
+                # det_inputs = [crop_table_img.astype(np.float32), det_params]
+                # det_outputs = self.alg_infer(det_inputs,
+                #                              self.table_cell_det_model_name,
+                #                              self.table_cell_det_model_version,
+                #                              self.table_cell_det_model_inputs,
+                #                              self.table_cell_det_model_outputs)
+
+                inputs = [crop_table_img.astype(np.float32)]
+                det_outputs = self.model.predict(context, inputs)
+
                 table_cell_bboxes = det_outputs[0].tolist()
 
                 if len(table_cell_bboxes) > 0:
@@ -711,6 +745,7 @@ class TableCellApp(object):
                 raw_table_result.append(table)
                 raw_table_html += table_results[0]['html']
 
+                raw_table_htmls.append(table_results[0]['html'])
                 # if b64_vis_table_img is None:
                 #     # todo: vis table need remove
                 #     b64_vis_table_img = ocr_visual(image=crop_table_img,
@@ -731,19 +766,21 @@ class TableCellApp(object):
                 #     b64_vis_table_img = draw_box_on_img(
                 #         b64_vis_table_img, table_cell_bboxes)
 
-            if raw_table_result:
-                fid = io.BytesIO()
-                workbook = document_to_workbook(raw_table_html)
-                fid.seek(0)
-                workbook.save(fid)
-                output_res['resultFile'] = base64.b64encode(
-                    fid.getvalue()).decode('ascii').replace('\n', '')
-                output_res['raw_result'] = raw_table_result
-                output_res['resultImg'] = b64_vis_table_img
-                output_res = serilize_json(output_res)
+            # if raw_table_result:
 
-        infer_outputs = [
-            np.array([json.dumps(output_res).encode('utf-8')
-                      ]).astype(np.object_)
-        ]
-        return infer_outputs
+            #     fid = io.BytesIO()
+            #     workbook = document_to_workbook(raw_table_html)
+            #     fid.seek(0)
+            #     workbook.save(fid)
+            #     output_res['resultFile'] = base64.b64encode(
+            #         fid.getvalue()).decode('ascii').replace('\n', '')
+            #     output_res['raw_result'] = raw_table_result
+            #     output_res['resultImg'] = b64_vis_table_img
+            #     output_res = serilize_json(output_res)
+
+        # infer_outputs = [
+        #     np.array([json.dumps(output_res).encode('utf-8')
+        #               ]).astype(np.object_)
+        # ]
+        result = {'htmls': raw_table_htmls}
+        return result
