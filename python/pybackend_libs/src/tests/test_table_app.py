@@ -26,7 +26,9 @@ def test_table_row_col_app():
     params = {'url': 'http://192.168.106.12:36001'}
     model = OCRClient(**params)
     test_image = '../data/table1.jpg'
-    resp = model.predict(test_image)
+    b64 = convert_file_to_base64(test_image)
+    inp = {'b64_image': b64}
+    resp = model.predict(inp)
     ocr_result = resp['result']['ocr_result']
 
     table_bbox = [[77., 119., 568., 119., 568., 800., 77., 800.]]
@@ -37,10 +39,8 @@ def test_table_row_col_app():
         'gpu_memory': 3,
         'precision': 'fp32'
     }
-    model = TableRowColApp(**app_params)
-    test_image = '../data/table1.jpg'
-    b64 = convert_file_to_base64(test_image)
 
+    model = TableRowColApp(**app_params)
     inp = {
         'b64_image': b64,
         'ocr_result': json.dumps(ocr_result),
@@ -55,7 +55,9 @@ def test_table_cell_app():
     params = {'url': 'http://192.168.106.12:36001'}
     model = OCRClient(**params)
     test_image = '../data/table1.jpg'
-    resp = model.predict(test_image)
+    b64 = convert_file_to_base64(test_image)
+    inp = {'b64_image': b64}
+    resp = model.predict(inp)
     ocr_result = resp['result']['ocr_result']
 
     table_bbox = [[77., 119., 568., 119., 568., 800., 77., 800.]]
@@ -66,10 +68,8 @@ def test_table_cell_app():
         'gpu_memory': 3,
         'precision': 'fp32'
     }
-    model = TableCellApp(**app_params)
-    test_image = '../data/table1.jpg'
-    b64 = convert_file_to_base64(test_image)
 
+    model = TableCellApp(**app_params)
     inp = {
         'b64_image': b64,
         'ocr_result': json.dumps(ocr_result),
