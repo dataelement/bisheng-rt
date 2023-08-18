@@ -73,7 +73,8 @@ class ChatGLM2(BaseLLM):
                    devices,
                    gpu_memory,
                    True,
-                   auto_configure_device_map=auto_configure_device_map)
+                   auto_configure_device_map=auto_configure_device_map,
+                   use_dispatch=True)
 
     def chat(self, **kwargs):
         req_dict = copy.copy(self.default_params)

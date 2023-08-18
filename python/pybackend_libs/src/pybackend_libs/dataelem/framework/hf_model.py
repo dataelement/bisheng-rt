@@ -1,8 +1,8 @@
-import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
-from accelerate import infer_auto_device_map, init_empty_weights
+from accelerate import (dispatch_model, infer_auto_device_map,
+                        init_empty_weights)
 from pydantic import BaseModel, Field
 from transformers import (AutoConfig, AutoModel, AutoModelForCausalLM,
                           AutoTokenizer)
@@ -23,27 +23,17 @@ def torch_seed(seed=1947):
     torch.manual_seed(seed)
 
 
-class BaseLLM(object):
-    def __init__(self, **kwargs):
-        pass
-
-    def chat(self, **kwargs):
-        raise Exception('not implemented')
-
-    def completion(self, **kwargs):
-        raise Exception('not implemented')
-
-    def _load(self,
-              pretrain_path,
-              precision,
-              devices,
-              gpu_memory,
-              use_auto_model=False,
-              use_safetensors=False,
-              auto_configure_device_map=None,
-              use_dispatch=False,
-              **kwargs):
-
+class HFModel(object):
+    def load(self,
+             pretrain_path,
+             precision,
+             devices,
+             gpu_memory,
+             use_auto_model=False,
+             use_safetensors=False,
+             auto_configure_device_map=None,
+             use_dispatch=False,
+             **kwargs):
         torch_seed()
 
         memory_per_device = int(int(gpu_memory) / len(devices))
@@ -96,43 +86,3 @@ class BaseLLM(object):
                 **kwargs)
 
         self.model.eval()
-
-
-class ChatMessage(BaseModel):
-    role: Literal['user', 'assistant', 'system']
-    content: str
-
-
-class DeltaMessage(BaseModel):
-    role: Optional[Literal['user', 'assistant', 'system']] = None
-    content: Optional[str] = None
-
-
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: List[ChatMessage]
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    max_tokens: Optional[int] = None
-    stream: Optional[bool] = False
-    do_sample: Optional[bool] = False
-
-
-class ChatCompletionResponseChoice(BaseModel):
-    index: int
-    message: ChatMessage
-    finish_reason: Literal['stop', 'length']
-
-
-class ChatCompletionResponseStreamChoice(BaseModel):
-    index: int
-    delta: DeltaMessage
-    finish_reason: Optional[Literal['stop', 'length']]
-
-
-class ChatCompletionResponse(BaseModel):
-    model: str
-    object: Literal['chat.completion', 'chat.completion.chunk']
-    choices: List[Union[ChatCompletionResponseChoice,
-                        ChatCompletionResponseStreamChoice]]
-    created: Optional[int] = Field(default_factory=lambda: int(time.time()))

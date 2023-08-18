@@ -6,10 +6,12 @@ from .llm.baichuan import BaichuanChat
 from .llm.chatglm2 import ChatGLM2
 from .llm.llama2 import Llama2Chat
 from .llm.qwen import QwenChat
+from .table import MrcnnTableDetect, TableCellApp, TableRowColApp
 
 __all__ = [
     'ChatGLM2', 'BaichuanChat', 'QwenChat', 'Llama2Chat', 'ME5Embedding',
-    'BGEZhEmbedding', 'GTEEmbedding', 'LayoutMrcnn'
+    'BGEZhEmbedding', 'GTEEmbedding', 'LayoutMrcnn', 'TableCellApp',
+    'TableRowColApp', 'MrcnnTableDetect'
 ]
 
 
@@ -22,7 +24,10 @@ def get_model(name: str):
         'ME5Embedding': ME5Embedding,
         'BGEZhEmbedding': BGEZhEmbedding,
         'GTEEmbedding': GTEEmbedding,
-        'LayoutMrcnn': LayoutMrcnn
+        'LayoutMrcnn': LayoutMrcnn,
+        'TableCellApp': TableCellApp,
+        'TableRowColApp': TableRowColApp,
+        'MrcnnTableDetect': MrcnnTableDetect,
     }
 
     return model_name_mapping.get(name, None)
