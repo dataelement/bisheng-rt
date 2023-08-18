@@ -4,11 +4,13 @@ import copy
 import requests
 
 
+# OCR Client Version 0.1, update at 2023.08.18
 class OCRClient(object):
-    def __init__(self, url, timeout=10000):
+    def __init__(self, **kwargs):
+        url = kwargs.get('url')
         self.ep = f'{url}/v2/idp/idp_app/infer'
         self.client = requests.Session()
-        self.timeout = timeout
+        self.timeout = kwargs.get('timeout', 10000)
         self.params = {
             'sort_filter_boxes': True,
             'enable_huarong_box_adjust': True,
@@ -31,14 +33,14 @@ class OCRClient(object):
             }
         }
 
-    def predict(self, image_file, **kwargs):
-        scene = kwargs.get('scene', 'doc')
+    def predict(self, inp):
+        scene = inp.pop('scene', 'doc')
+        b64_image = inp.pop('b64_image')
         params = copy.deepcopy(self.params)
         params.update(self.scene_mapping[scene])
+        params.update(inp)
 
-        bytes_data = open(image_file, 'rb').read()
-        b64enc = base64.b64encode(bytes_data).decode()
-        req_data = {'param': params, 'data': [b64enc]}
+        req_data = {'param': params, 'data': [b64_image]}
 
         try:
             r = self.client.post(url=self.ep,
