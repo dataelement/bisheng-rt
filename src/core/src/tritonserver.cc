@@ -2824,6 +2824,44 @@ TRITONSERVER_ServerModelIndex(
 }
 
 TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONSERVER_ServerHubConfig(
+    TRITONSERVER_Server* server, const char* model_name,
+    TRITONSERVER_Message** config)
+{
+  tc::InferenceServer* lserver = reinterpret_cast<tc::InferenceServer*>(server);
+
+  auto repos = lserver->ModelRepositoryPaths();
+
+  const std::string HUB_CONFIG_NAME = "model_def.json";
+  std::string config_content = "";
+  for (auto repo : repos) {
+    std::string model_path = triton::common::JoinPath({repo, model_name});
+    bool model_exists = false;
+    triton::common::IsDirectory(model_path, &model_exists);
+    if (model_exists) {
+      auto hub_config_file =
+          triton::common::JoinPath({model_path, HUB_CONFIG_NAME});
+      bool file_exists = false;
+      triton::common::FileExists(hub_config_file, &file_exists);
+      if (file_exists) {
+        triton::common::ReadTextFile(hub_config_file, &config_content);
+      }
+
+      break;
+    }
+  }
+
+  if (config_content.empty()) {
+    config_content = "{}";
+  }
+
+  *config = reinterpret_cast<TRITONSERVER_Message*>(
+      new tc::TritonServerMessage(std::move(config_content)));
+
+  return nullptr;  // success
+}
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
 TRITONSERVER_ServerLoadModel(
     TRITONSERVER_Server* server, const char* model_name)
 {

@@ -2164,6 +2164,10 @@ TRITONSERVER_DECLSPEC TRITONSERVER_Error* TRITONSERVER_ServerModelIndex(
     TRITONSERVER_Server* server, uint32_t flags,
     TRITONSERVER_Message** model_index);
 
+TRITONSERVER_DECLSPEC TRITONSERVER_Error* TRITONSERVER_ServerHubConfig(
+    TRITONSERVER_Server* server, const char* model_name,
+    TRITONSERVER_Message** config);
+
 /// Load the requested model or reload the model if it is already
 /// loaded. The function does not return until the model is loaded or
 /// fails to load. Returned error indicates if model loaded
