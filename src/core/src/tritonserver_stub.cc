@@ -558,6 +558,10 @@ TRITONSERVER_ServerUnregisterModelRepository()
 {
 }
 TRITONAPI_DECLSPEC void
+TRITONSERVER_ServerHubConfig()
+{
+}
+TRITONAPI_DECLSPEC void
 TRITONSERVER_ServerLoadModel()
 {
 }

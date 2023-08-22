@@ -1089,7 +1089,7 @@ HTTPAPIServer::HTTPAPIServer(
       model_regex_(
           R"(/v2/models/([^/]+)(?:/versions/([0-9]+))?(?:/(infer|ready|config|stats|trace/setting))?)"),
       modelcontrol_regex_(
-          R"(/v2/repository(?:/([^/]+))?/(index|models/([^/]+)/(load|unload)))"),
+          R"(/v2/repository(?:/([^/]+))?/(index|models/([^/]+)/(load|unload|config)))"),
       systemsharedmemory_regex_(
           R"(/v2/systemsharedmemory(?:/region/([^/]+))?/(status|register|unregister))"),
       cudasharedmemory_regex_(
@@ -1558,6 +1558,21 @@ HTTPAPIServer::HandleRepositoryControl(
             server_.get(), model_name.c_str());
       } else {
         err = TRITONSERVER_ServerUnloadModel(server_.get(), model_name.c_str());
+      }
+    } else if (action == "config") {
+      // read static model config in model repository
+      TRITONSERVER_Message* message = nullptr;
+      auto err = TRITONSERVER_ServerHubConfig(
+          server_.get(), model_name.c_str(), &message);
+      if (err == nullptr) {
+        const char* buffer = nullptr;
+        size_t byte_size;
+        err = TRITONSERVER_MessageSerializeToJson(message, &buffer, &byte_size);
+        if (err == nullptr) {
+          evbuffer_add(req->buffer_out, buffer, byte_size);
+          evhtp_send_reply(req, EVHTP_RES_OK);
+        }
+        TRITONSERVER_MessageDelete(message);
       }
     }
   }

@@ -181,6 +181,15 @@ function model_infer() {
    -d "$(infer_data4)"
 }
 
+
+function get_model_config() {
+  model="$1"
+  curl -v -X POST http://192.168.106.12:9001/v2/repository/models/${model}/config \
+   -H 'Content-Type: application/json' \
+   -d "{}"  
+}
+
+
 m1="multilingual-e5-large"
 m2="Llama-2-13b-chat-hf"
 m3="Qwen-7B-Chat"
@@ -212,6 +221,9 @@ case $1 in
     ;;
   index)
     index_model
+    ;;
+  config)
+    get_model_config $2
     ;;
   *)
     echo -n "unknown"
