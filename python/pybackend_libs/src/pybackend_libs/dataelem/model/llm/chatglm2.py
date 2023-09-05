@@ -76,13 +76,13 @@ class ChatGLM2(BaseLLM):
                    auto_configure_device_map=auto_configure_device_map,
                    use_dispatch=True)
 
-    def chat(self, **kwargs):
+    def predict(self, kwargs):
         req_dict = copy.copy(self.default_params)
         req_dict.update(kwargs)
         request = ChatCompletionRequest.parse_obj(req_dict)
         resp = create_chat_completion(self.model, self.tokenizer, request)
         torch_gc(self.devices)
-        return resp
+        return resp.dict()
 
-    def completion(self, **kwargs):
+    def completion(self, kwargs):
         pass

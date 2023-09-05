@@ -2,7 +2,8 @@ import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
-from accelerate import infer_auto_device_map, init_empty_weights
+from accelerate import (dispatch_model, infer_auto_device_map,
+                        init_empty_weights)
 from pydantic import BaseModel, Field
 from transformers import (AutoConfig, AutoModel, AutoModelForCausalLM,
                           AutoTokenizer)
@@ -27,10 +28,10 @@ class BaseLLM(object):
     def __init__(self, **kwargs):
         pass
 
-    def chat(self, **kwargs):
+    def predict(self, kwargs):
         raise Exception('not implemented')
 
-    def completion(self, **kwargs):
+    def completion(self, kwargs):
         raise Exception('not implemented')
 
     def _load(self,
@@ -42,6 +43,7 @@ class BaseLLM(object):
               use_safetensors=False,
               auto_configure_device_map=None,
               use_dispatch=False,
+              use_generate_config=True,
               **kwargs):
 
         torch_seed()
@@ -52,7 +54,7 @@ class BaseLLM(object):
 
         auto_model_cls = AutoModel if use_auto_model else AutoModelForCausalLM
 
-        if not use_auto_model:
+        if not use_auto_model and use_generate_config:
             self.generation_config = GenerationConfig.from_pretrained(
                 pretrain_path)
 

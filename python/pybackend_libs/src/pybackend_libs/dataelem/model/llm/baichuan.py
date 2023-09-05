@@ -64,13 +64,13 @@ class BaichuanChat(BaseLLM):
         self.generation_config.update(**self.default_params)
         self.model.generation_config = self.generation_config
 
-    def chat(self, **kwargs):
+    def predict(self, kwargs):
         req_dict = copy.copy(self.default_params)
         req_dict.update(kwargs)
         request = ChatCompletionRequest.parse_obj(req_dict)
         resp = create_chat_completion(self.model, self.tokenizer, request)
         torch_gc(self.devices)
-        return resp
+        return resp.dict()
 
     def completion(self, **kwargs):
         pass

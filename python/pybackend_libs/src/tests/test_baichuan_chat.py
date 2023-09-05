@@ -28,7 +28,7 @@ def test_baichuan_13b_chat():
             'content': '你是谁创造的'
         }],
     }
-    outp = model.chat(**inp)
+    outp = model.predict(inp)
     print(outp)
 
 

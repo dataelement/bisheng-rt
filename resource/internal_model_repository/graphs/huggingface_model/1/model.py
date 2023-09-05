@@ -32,14 +32,13 @@ class TritonPythonModel:
             parameters.update(pymodel_params)
 
         model_cate, model_cls_name = pymodel_type.split('.', 1)
-        self.model_func = self._emb_func if model_cate == 'embedding' else self._llm_func
-        self.model = get_model(model_cls_name)(**parameters)
 
-    def _emb_func(self, model, input):
-        return model.emb(**input)
+        cls_type = get_model(model_cls_name)
+        if cls_type is None:
+            raise pb_utils.TritonModelException(
+                f'{model_cls_name} is not existed')
 
-    def _llm_func(self, model, input):
-        return model.chat(**input)
+        self.model = cls_type(**parameters)
 
     def execute(self, requests):
         def _get_np_input(request, name, has_batch=True):
@@ -57,7 +56,7 @@ class TritonPythonModel:
             try:
                 inp_str = _get_np_input(request, 'INPUT')[0]
                 inp = json.loads(inp_str)
-                outp = self.model_func(self.model, inp)
+                outp = self.model.predict(inp)
             except Exception as e:
                 status_code = 400
                 status_message = str(e)
@@ -68,7 +67,7 @@ class TritonPythonModel:
             }
 
             if status_code == 200 and outp:
-                result.update(outp.dict())
+                result.update(outp)
 
             result_arr = np.array([json.dumps(result)], dtype=np.object_)
 

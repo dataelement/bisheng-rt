@@ -57,7 +57,7 @@ def test_llama2_7b_chat():
         }],
     }
 
-    outp = model.chat(**inp)
+    outp = model.predict(inp)
     print(outp)
 
 
@@ -91,7 +91,7 @@ def test_llama2_13b_chat():
         }],
     }
 
-    outp = model.chat(**inp)
+    outp = model.predict(inp)
     print(outp)
 
 

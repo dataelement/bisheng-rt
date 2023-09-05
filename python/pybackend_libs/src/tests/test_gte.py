@@ -18,9 +18,9 @@ def test_gte_emb():
     ]
 
     inp = {'model': 'gte_large', 'type': 'raw', 'texts': input_texts}
-    outp = model.emb(**inp)
+    outp = model.predict(inp)
 
-    embeddings = np.asarray(outp.embeddings)
+    embeddings = np.asarray(outp['embeddings'])
     print(embeddings.shape)
 
     scores = (embeddings[:2] @ embeddings[2:].T) * 100

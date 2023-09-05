@@ -38,7 +38,7 @@ class BaseEmbedding(object):
     def __init__(self, **kwargs):
         pass
 
-    def emb(self, **kwargs):
+    def predict(self, kwargs):
         raise Exception('not implemented')
 
     def _load(self,

@@ -41,7 +41,7 @@ function load_data2() {
     "pymodel_type": "llm.Llama2Chat",
     "pymodel_params": "{\"max_tokens\": 4096}",
     "gpu_memory": "36",
-    "instance_groups": "device=gpu;gpus=7,8"
+    "instance_groups": "device=gpu;gpus=2,3"
   }
 }
 EOF
@@ -203,9 +203,9 @@ case $1 in
     ;;
   load)
     echo -n "load"
-    load_model4 $m4
+    # load_model4 $m4
     # load_model3 $m3
-    # load_model2 "$m2"
+    load_model2 "$m2"
     # load_model1 "$m1"
     index_model
     ;;

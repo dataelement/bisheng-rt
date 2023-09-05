@@ -31,11 +31,14 @@ class TFGraph(object):
 
     def __init__(self, sig, device, **kwargs):
         model_path = kwargs.get('model_path')
-        variable_scope = kwargs.get('variable_scope', 'MRCNN')
+        model_file = os.path.join(model_path, 'model.graphdef')
+        if not os.path.exists(model_file):
+            raise Exception(f'{model_file} not exists')
 
+        variable_scope = kwargs.get('variable_scope', 'unknown')
         # model_dir = os.path.dirname(model_path)
         # sig = json.loads(os.path.join(model_dir, "sig.json"))
-        self.load_pb(sig, variable_scope, device, model_path)
+        self.load_pb(sig, variable_scope, device, model_file)
 
     def run(self, inputs: List[Any]) -> List[Any]:
         assert len(inputs) == len(self.xs)
