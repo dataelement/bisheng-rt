@@ -22,7 +22,7 @@ def test_qwen_7b_chat():
         }],
     }
 
-    outp = model.chat(**inp)
+    outp = model.predict(inp)
     print(outp)
 
 

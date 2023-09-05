@@ -26,7 +26,7 @@ class BGEZhEmbedding(BaseEmbedding):
             gpu_memory,
         )
 
-    def emb(self, **kwargs):
+    def predict(self, kwargs):
         model = kwargs.get('model')
         input_texts = kwargs.get('texts')
         emb_type = kwargs.get('type')
@@ -50,4 +50,4 @@ class BGEZhEmbedding(BaseEmbedding):
         embeddings = cls_pool(outputs.last_hidden_state)
         embeddings = F.normalize(embeddings, p=2, dim=1).cpu().numpy()
 
-        return EmbResponse(model=model, embeddings=embeddings.tolist())
+        return EmbResponse(model=model, embeddings=embeddings.tolist()).dict()

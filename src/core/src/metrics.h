@@ -296,6 +296,9 @@ class Metrics {
   std::vector<prometheus::Gauge*> gpu_power_limit_;
   std::vector<prometheus::Counter*> gpu_energy_consumption_;
 
+  prometheus::Family<prometheus::Gauge>& gpu_uuid_to_deviceid_family_;
+  std::vector<prometheus::Gauge*> gpu_uuid_to_deviceid_;
+
   DcgmMetadata dcgm_metadata_;
 #endif  // TRITON_ENABLE_METRICS_GPU
 

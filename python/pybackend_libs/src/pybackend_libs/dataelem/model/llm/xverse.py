@@ -1,58 +1,54 @@
 import copy
 import time
+from typing import Any, Dict, List, Literal, Optional, Union
 
-import torch
-
-from .llama2_utils import LlamaTokenizerHelper
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
 
 
-class Llama2Chat(BaseLLM):
+class XverseChat(BaseLLM):
     def __init__(self, **kwargs):
         pretrain_path = kwargs.get('pretrain_path')
         precision = kwargs.get('precision', 'fp16')
         gpu_memory = kwargs.get('gpu_memory')
         devices = kwargs.get('devices').split(',')
         self.devices = devices
-
         self.default_device = f'cuda:{devices[0]}'
-        temperature = kwargs.get('temperature', 0.9)
-        top_p = kwargs.get('top_p', 0.6)
-        # max length: 4096
-        max_tokens = kwargs.get('max_tokens', 4096)
+
+        temperature = kwargs.get('temperature', 0.3)
+        top_p = kwargs.get('top_p', 0.85)
+        max_tokens = kwargs.get('max_tokens', 2048)
+        do_sample = kwargs.get('do_sample', False)
         self.default_params = {
             'temperature': temperature,
             'top_p': top_p,
             'max_length': max_tokens,
-            'do_sample': False
+            'do_sample': do_sample
         }
 
+        # self.model, self.tokenizer = None, None
         self._load(pretrain_path,
                    precision,
                    devices,
                    gpu_memory,
-                   use_safetensors=True)
-        self.generation_config.update(**self.default_params)
-        self.model.generation_config = self.generation_config
-        self.tokenizer_helper = LlamaTokenizerHelper(self.tokenizer)
+                   use_generate_config=False)
 
-    def predict(self, kwargs):
-        messages = kwargs.get('messages')
-        model_name = kwargs.get('model')
-        input_ids = self.tokenizer_helper.chat_completion([messages])
-        input0_len = input_ids.size()[1]
+    def chat(self, **kwargs):
+        req_dict = copy.copy(self.default_params)
+        req_dict.update(kwargs)
 
-        # prompt = messages[-1]['content']
-        # input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
+        query = req_dict['messages'][-1].content
+        inputs = self.tokenizer(query, return_tensors='pt').input_ids
+        inputs = inputs.to(self.default_device)
         with torch.no_grad():
-            generate_ids = self.model.generate(
-                input_ids.to(self.default_device), **self.default_params)
+            generated_ids = model.generate(
+                inputs,
+                max_length=req_dict['max_length'],
+                eos_token_id=self.tokenizer.eos_token_id,
+                repetition_penalty=1.1)
 
-        new_tokens = generate_ids[0, input0_len:]
-        response = self.tokenizer.decode(new_tokens,
-                                         skip_special_tokens=True,
-                                         clean_up_tokenization_spaces=False)
+        response = self.tokenizer.batch_decode(generated_ids,
+                                               skip_special_tokens=True)[0]
 
         choice_data = ChatCompletionResponseChoice(index=0,
                                                    message=ChatMessage(
@@ -65,7 +61,7 @@ class Llama2Chat(BaseLLM):
                                         object='chat.completion')
 
         torch_gc(self.devices)
-        return result.dict()
+        return result
 
-    def completion(self, kwargs):
+    def completion(self, **kwargs):
         pass

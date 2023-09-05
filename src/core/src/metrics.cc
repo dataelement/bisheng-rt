@@ -192,6 +192,10 @@ Metrics::Metrics()
               .Help("GPU energy consumption in joules since the Triton Server "
                     "started")
               .Register(*registry_)),
+      gpu_uuid_to_deviceid_family_(prometheus::BuildGauge()
+                                       .Name("nv_gpu_uuid_to_deviceid")
+                                       .Help("GPU UUID to device mapping")
+                                       .Register(*registry_)),
 #endif  // TRITON_ENABLE_METRICS_GPU
 
 #ifdef TRITON_ENABLE_METRICS_CPU
@@ -849,6 +853,8 @@ Metrics::InitializeDcgmMetrics()
         << "Cannot get CUDA device count, GPU metrics will not be available";
     return false;
   }
+
+  std::vector<size_t> device_ids;
   for (int i = 0; i < cuda_gpu_count; ++i) {
     std::string pci_bus_id = "0000";  // pad 0's for uniformity
     char pcibusid_str[64];
@@ -864,6 +870,17 @@ Metrics::InitializeDcgmMetrics()
       LOG_INFO << "Collecting metrics for GPU " << i << ": "
                << pci_bus_id_to_device_name[pci_bus_id];
       auto& gpu_labels = pci_bus_id_to_gpu_labels[pci_bus_id];
+
+      // // debug
+      // for (auto p : gpu_labels) {
+      //   std::cout << "gpu_labels.k/v:" << p.first << "," << p.second << "\n";
+      // }
+
+      // std::cout << "---DEBUG:" << pci_bus_id << ","
+      //           << "," <<  pci_bus_id_to_dcgm_id[pci_bus_id] << "\n";
+
+      device_ids.push_back(pci_bus_id_to_dcgm_id[pci_bus_id]);
+
       gpu_utilization_.push_back(&gpu_utilization_family_.Add(gpu_labels));
       gpu_memory_total_.push_back(&gpu_memory_total_family_.Add(gpu_labels));
       gpu_memory_used_.push_back(&gpu_memory_used_family_.Add(gpu_labels));
@@ -871,12 +888,20 @@ Metrics::InitializeDcgmMetrics()
       gpu_power_limit_.push_back(&gpu_power_limit_family_.Add(gpu_labels));
       gpu_energy_consumption_.push_back(
           &gpu_energy_consumption_family_.Add(gpu_labels));
+
+      gpu_uuid_to_deviceid_.push_back(
+          &gpu_uuid_to_deviceid_family_.Add(gpu_labels));
+
       uint32_t dcgm_id = pci_bus_id_to_dcgm_id[pci_bus_id];
       dcgm_metadata_.cuda_ids_to_dcgm_ids_[i] = dcgm_id;
       dcgm_metadata_.available_cuda_gpu_ids_.emplace_back(i);
     } else {
       LOG_WARNING << "GPU metrics will not be available for device:" << i;
     }
+  }
+
+  for (int i = 0; i < cuda_gpu_count; ++i) {
+    gpu_uuid_to_deviceid_[i]->Set((int)device_ids[i]);
   }
 
   // create a gpu group

@@ -140,6 +140,7 @@ class LayoutMrcnn(Mrcnn):
         if model_path is None:
             model_path = kwargs.get('pretrain_path')
 
+        model_path = os.path.join(model_path, 'model.graphdef')
         super().__init__(model_path=model_path)
         devices = kwargs.get('devices')
         used_device = devices.split(',')[0]
@@ -204,7 +205,7 @@ class LayoutMrcnn(Mrcnn):
         new_boxes[:, 7] = boxes[:, 3]  # y2
         scores = pre_scores.astype(np.float32)
         labels = pre_labels.astype(np.int32)
-        return boxes, scores, labels
+        return new_boxes, scores, labels
 
     def predict(self, inp):
         img = inp.get('b64_image')
@@ -225,4 +226,5 @@ class LayoutMrcnn(Mrcnn):
             tmp_dict['bbox'].extend(box.tolist())
             tmp_dict['score'] = score
             res.append(tmp_dict)
-        return res
+        out = {'result': res}
+        return out

@@ -65,6 +65,24 @@ def test_table_rowcol_det():
     print(outp)
 
 
+def test_table_detect2():
+    params = {
+        'model_path': '/home/public/llm/elem_table_detect_v1/',
+        'devices': '8',
+        'gpu_memory': 3,
+        'precision': 'fp32'
+    }
+
+    model = MrcnnTableDetect(**params)
+
+    test_image = '../data/001.png'
+    b64 = convert_file_to_base64(test_image)
+    inp = {'b64_image': b64}
+    outp = model.predict(inp)
+    print(outp)
+
+
 # test_table_rowcol_det()
 # test_table_cell_det()
-test_table_detect()
+# test_table_detect()
+test_table_detect2()

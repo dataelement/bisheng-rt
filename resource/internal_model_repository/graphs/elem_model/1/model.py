@@ -22,7 +22,7 @@ class TritonPythonModel:
 
         instance_groups = parameters.pop('instance_groups')
         model_path = parameters.pop('model_path')
-        parameters['pretrain_path'] = model_path
+        parameters['model_path'] = model_path
 
         group_idx = int(model_instance_name.rsplit('_', 1)[1])
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
@@ -32,7 +32,12 @@ class TritonPythonModel:
             parameters.update(pymodel_params)
 
         _, model_cls_name = pymodel_type.split('.', 1)
-        self.model = get_model(model_cls_name)(**parameters)
+        cls_type = get_model(model_cls_name)
+        if cls_type is None:
+            raise pb_utils.TritonModelException(
+                f'{model_cls_name} is not existed')
+
+        self.model = cls_type(**parameters)
 
     def execute(self, requests):
         def _get_np_input(request, name, has_batch=True):
@@ -61,7 +66,7 @@ class TritonPythonModel:
             }
 
             if status_code == 200 and outp:
-                result.update(outp.dict())
+                result.update(outp)
 
             result_arr = np.array([json.dumps(result)], dtype=np.object_)
 

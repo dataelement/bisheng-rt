@@ -17,7 +17,7 @@ class GTEEmbedding(BaseEmbedding):
         self.default_device = f'cuda:{devices[0]}'
         self._load(pretrain_path, precision, devices, gpu_memory)
 
-    def emb(self, **kwargs):
+    def predict(self, kwargs):
         model = kwargs.get('model')
         input_texts = kwargs.get('texts')
 
@@ -37,4 +37,4 @@ class GTEEmbedding(BaseEmbedding):
         embeddings = average_pool(outputs.last_hidden_state, attention_mask)
         embeddings = F.normalize(embeddings, p=2, dim=1).cpu().numpy()
 
-        return EmbResponse(model=model, embeddings=embeddings.tolist())
+        return EmbResponse(model=model, embeddings=embeddings.tolist()).dict()

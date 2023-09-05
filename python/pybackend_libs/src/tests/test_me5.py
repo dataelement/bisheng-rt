@@ -18,9 +18,9 @@ def test_me5():
     ]
 
     inp = {'model': 'me5', 'type': 'raw', 'texts': input_texts}
-    outp = model.emb(**inp)
+    outp = model.predict(inp)
 
-    embeddings = np.asarray(outp.embeddings)
+    embeddings = np.asarray(outp['embeddings'])
     print(embeddings.shape)
 
     scores = (embeddings[:2] @ embeddings[2:].T) * 100

@@ -18,12 +18,12 @@ def test_bge_zh():
     ]
 
     inp = {'model': 'bge_zh', 'type': 'query', 'texts': input_texts[:2]}
-    query_embs = model.emb(**inp)
+    query_embs = model.predict(inp)
 
     inp = {'model': 'bge_zh', 'type': 'doc', 'texts': input_texts[2:]}
-    doc_embs = model.emb(**inp)
+    doc_embs = model.predict(inp)
 
-    embs = query_embs.embeddings + doc_embs.embeddings
+    embs = query_embs['embeddings'] + doc_embs['embeddings']
     embeddings = np.asarray(embs)
     print(embeddings.shape)
 

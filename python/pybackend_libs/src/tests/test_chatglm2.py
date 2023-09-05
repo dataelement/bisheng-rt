@@ -25,10 +25,10 @@ def test_chatglm2_6b():
             'content': '你可以做什么'
         }],
     }
-    outp = model.chat(**inp)
+    outp = model.predict(inp)
     print(outp)
 
-    outp = model.chat(**inp)
+    outp = model.predict(inp)
     print(outp)
 
 
