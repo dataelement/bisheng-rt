@@ -3,7 +3,7 @@ from pybackend_libs.dataelem.model import QwenChat
 
 def test_qwen_7b_chat():
     params = {
-        'pretrain_path': '/home/hanfeng/projects/models/Qwen-7B-Chat',
+        'pretrain_path': '/home/public/projects/models/Qwen-7B-Chat',
         'devices': '8',
         'gpu_memory': 20,
         'max_tokens': 256,

@@ -7,7 +7,7 @@ from pybackend_libs.dataelem.model.table.table_mrcnn import (
     MrcnnTableCellDetect, MrcnnTableDetect, MrcnnTableRowColDetect)
 from pybackend_libs.dataelem.utils import convert_file_to_base64
 
-REPO = '/home/hanfeng/models/'
+REPO = '/home/public/models/'
 
 
 def test_table_detect():

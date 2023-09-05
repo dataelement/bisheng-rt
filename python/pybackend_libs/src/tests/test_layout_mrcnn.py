@@ -8,7 +8,7 @@ from pybackend_libs.dataelem.model.layout.mrcnn_pt import LayoutMrcnnPt
 
 def test_elem_layout_v1_fp16():
     params = {
-        'model_path': '/home/hanfeng/models/elem_layout_v1/freeze_fp16.pb',
+        'model_path': '/home/public/models/elem_layout_v1/freeze_fp16.pb',
         'devices': '6',
         'gpu_memory': 3,
         'precision': 'fp16'
@@ -25,7 +25,7 @@ def test_elem_layout_v1_fp16():
 
 def test_elem_layout_v1():
     params = {
-        'model_path': '/home/hanfeng/models/elem_layout_v1/freeze.pb',
+        'model_path': '/home/public/models/elem_layout_v1/freeze.pb',
         'devices': '6',
         'gpu_memory': 4,
         'precision': 'fp32'
@@ -42,7 +42,7 @@ def test_elem_layout_v1():
 
 def test_elem_layout_v1_pt():
     params = {
-        'model_path': '/home/hanfeng/models/elem_layout_v1/model.pth',
+        'model_path': '/home/public/models/elem_layout_v1/model.pth',
         'devices': '6',
         'gpu_memory': 3,
         'precision': 'fp32'

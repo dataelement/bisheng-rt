@@ -4,7 +4,7 @@ from pybackend_libs.dataelem.model import BaichuanChat
 def test_baichuan_13b_chat():
     # params = {'pretrain_path': '/home/public/llm/Baichuan-13B-Chat'}
     params = {
-        'pretrain_path': '/home/hanfeng/projects/models/Baichuan-13B-Chat',
+        'pretrain_path': '/home/public/projects/models/Baichuan-13B-Chat',
         'devices': '7,8',
         'gpu_memory': 40,
         'precision': 'fp16',

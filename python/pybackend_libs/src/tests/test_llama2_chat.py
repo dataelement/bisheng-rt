@@ -4,7 +4,7 @@ from pybackend_libs.dataelem.model import Llama2Chat
 def test_llama2_7b_chat():
     # params = {'pretrain_path': '/home/public/llm/Baichuan-13B-Chat'}
     params = {
-        'pretrain_path': '/home/hanfeng/projects/models/Llama-2-7b-chat-hf',
+        'pretrain_path': '/home/public/projects/models/Llama-2-7b-chat-hf',
         'devices': '8',
         'gpu_memory': 20,
         'precision': 'fp16',
@@ -64,7 +64,7 @@ def test_llama2_7b_chat():
 def test_llama2_13b_chat():
     # params = {'pretrain_path': '/home/public/llm/Baichuan-13B-Chat'}
     params = {
-        'pretrain_path': '/home/hanfeng/projects/models/Llama-2-13b-chat-hf',
+        'pretrain_path': '/home/public/projects/models/Llama-2-13b-chat-hf',
         'devices': '7,8',
         'gpu_memory': 30,
         'precision': 'fp16',

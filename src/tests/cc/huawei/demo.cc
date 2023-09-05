@@ -1,12 +1,13 @@
+#include <iostream>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
-#include <iostream>
 #include <vector>
 
 #include "acl/acl.h"
 
-void CHW2HWC(cv::Mat m_in, cv::Mat& m_out)
+void
+CHW2HWC(cv::Mat m_in, cv::Mat& m_out)
 {
   int h = m_in.size[2];
   int w = m_in.size[3];
@@ -15,7 +16,8 @@ void CHW2HWC(cv::Mat m_in, cv::Mat& m_out)
   cv::transpose(m0, m1);
 }
 
-void HWC2CHW(cv::Mat m_in, cv::Mat& m_out)
+void
+HWC2CHW(cv::Mat m_in, cv::Mat& m_out)
 {
   int h = m_in.size[0];
   int w = m_in.size[1];
@@ -24,7 +26,8 @@ void HWC2CHW(cv::Mat m_in, cv::Mat& m_out)
   cv::transpose(m0, m1);
 }
 
-bool image_pad(cv::Mat img, cv::Mat& graph_in, int imgH, int imgW)
+bool
+image_pad(cv::Mat img, cv::Mat& graph_in, int imgH, int imgW)
 {
   int h = img.size[2];
   int w = img.size[3];
@@ -41,8 +44,10 @@ bool image_pad(cv::Mat img, cv::Mat& graph_in, int imgH, int imgW)
   return true;
 }
 
-int main(int argc, char** argv){
-  std::string model_path = "/home/liuqingjie/models/det_r34_vd_db.om";
+int
+main(int argc, char** argv)
+{
+  std::string model_path = "/home/public/models/det_r34_vd_db.om";
   std::string acl_config_path = "acl.json";
   int32_t device_id = 0;
   aclrtContext context;
@@ -50,27 +55,27 @@ int main(int argc, char** argv){
   aclrtRunMode run_mode;
   aclError ret = aclInit(acl_config_path.c_str());
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclInit failed!"<<std::endl;
+    std::cout << "aclInit failed!" << std::endl;
     return 0;
   }
   ret = aclrtSetDevice(device_id);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclrtSetDevice failed!"<<std::endl;
+    std::cout << "aclrtSetDevice failed!" << std::endl;
     return 0;
   }
   ret = aclrtCreateContext(&context, device_id);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclrtCreateContext failed!"<<std::endl;
+    std::cout << "aclrtCreateContext failed!" << std::endl;
     return 0;
   }
   ret = aclrtCreateStream(&stream);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclrtCreateStream failed!"<<std::endl;
+    std::cout << "aclrtCreateStream failed!" << std::endl;
     return 0;
   }
   ret = aclrtGetRunMode(&run_mode);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclrtGetRunMode failed!"<<std::endl;
+    std::cout << "aclrtGetRunMode failed!" << std::endl;
     return 0;
   }
   bool is_device = (run_mode == ACL_DEVICE);
@@ -80,59 +85,61 @@ int main(int argc, char** argv){
   size_t model_weightsize = 0;
   ret = aclmdlQuerySize(model_path.c_str(), &model_worksize, &model_weightsize);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclmdlQuerySize failed!"<<std::endl;
+    std::cout << "aclmdlQuerySize failed!" << std::endl;
     return 0;
   }
-  void *model_workptr;
-  void *model_weightptr;
+  void* model_workptr;
+  void* model_weightptr;
   ret = aclrtMalloc(&model_workptr, model_worksize, ACL_MEM_MALLOC_HUGE_FIRST);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclrtMalloc model_workptr failed!"<<std::endl;
+    std::cout << "aclrtMalloc model_workptr failed!" << std::endl;
     return 0;
   }
-  ret = aclrtMalloc(&model_weightptr, model_weightsize, ACL_MEM_MALLOC_HUGE_FIRST);
+  ret = aclrtMalloc(
+      &model_weightptr, model_weightsize, ACL_MEM_MALLOC_HUGE_FIRST);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclrtMalloc model_weightptr failed!"<<std::endl;
+    std::cout << "aclrtMalloc model_weightptr failed!" << std::endl;
     return 0;
   }
-  ret = aclmdlLoadFromFileWithMem(model_path.c_str(), &model_id, model_workptr,
-                                  model_worksize, model_weightptr, model_weightsize);
+  ret = aclmdlLoadFromFileWithMem(
+      model_path.c_str(), &model_id, model_workptr, model_worksize,
+      model_weightptr, model_weightsize);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclmdlLoadFromFileWithMem failed!"<<std::endl;
+    std::cout << "aclmdlLoadFromFileWithMem failed!" << std::endl;
     return 0;
   }
-  
-  aclmdlDesc *model_desc = aclmdlCreateDesc();
+
+  aclmdlDesc* model_desc = aclmdlCreateDesc();
   ret = aclmdlGetDesc(model_desc, model_id);
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclmdlGetDesc failed!"<<std::endl;
+    std::cout << "aclmdlGetDesc failed!" << std::endl;
     return 0;
   }
 
   uint32_t num_inputs = aclmdlGetNumInputs(model_desc);
-  std::cout<<"num_inputs:"<<num_inputs<<std::endl;
-  aclmdlDataset *device_inputs = aclmdlCreateDataset();
+  std::cout << "num_inputs:" << num_inputs << std::endl;
+  aclmdlDataset* device_inputs = aclmdlCreateDataset();
   std::vector<void*> host_inputs(num_inputs);
-  for(size_t i=0; i<num_inputs; i++){
+  for (size_t i = 0; i < num_inputs; i++) {
     size_t data_len = aclmdlGetInputSizeByIndex(model_desc, i);
-    void *data = nullptr;
+    void* data = nullptr;
     ret = aclrtMalloc(&data, data_len, ACL_MEM_MALLOC_NORMAL_ONLY);
-    aclDataBuffer *data_buf = aclCreateDataBuffer(data, data_len);
+    aclDataBuffer* data_buf = aclCreateDataBuffer(data, data_len);
     ret = aclmdlAddDatasetBuffer(device_inputs, data_buf);
     aclrtMallocHost(&host_inputs[i], data_len);
   }
 
   uint32_t num_outputs = aclmdlGetNumOutputs(model_desc);
-  std::cout<<"num_outputs:"<<num_outputs<<std::endl;
-  aclmdlDataset *device_outputs = aclmdlCreateDataset();
+  std::cout << "num_outputs:" << num_outputs << std::endl;
+  aclmdlDataset* device_outputs = aclmdlCreateDataset();
   std::vector<void*> host_outputs(num_outputs);
-  for(size_t i=0; i<num_outputs; i++){
+  for (size_t i = 0; i < num_outputs; i++) {
     size_t data_len = aclmdlGetOutputSizeByIndex(model_desc, i);
-    void *data = nullptr;
+    void* data = nullptr;
     ret = aclrtMalloc(&data, data_len, ACL_MEM_MALLOC_NORMAL_ONLY);
-    aclDataBuffer *data_buf = aclCreateDataBuffer(data, data_len);
+    aclDataBuffer* data_buf = aclCreateDataBuffer(data, data_len);
     ret = aclmdlAddDatasetBuffer(device_outputs, data_buf);
-    std::cout<<"i:"<<i<<" host_outputs:"<<data_len<<std::endl;
+    std::cout << "i:" << i << " host_outputs:" << data_len << std::endl;
     aclrtMallocHost(&host_outputs[i], data_len);
   }
 
@@ -143,8 +150,8 @@ int main(int argc, char** argv){
   current_dims.dims[2] = 960;
   current_dims.dims[3] = 960;
   ret = aclmdlSetInputDynamicDims(model_id, device_inputs, 0, &current_dims);
-  
-  std::string data_dir = "/home/liuqingjie/data/";
+
+  std::string data_dir = "/home/public/data/";
   std::string read_name = "ppdet_prep.cvfs";
   cv::FileStorage fs(data_dir + read_name, cv::FileStorage::READ);
 
@@ -155,7 +162,7 @@ int main(int argc, char** argv){
   for (int k = 0; k < num; k++) {
     cv::Mat prepout;
     fs["prepout" + std::to_string(k)] >> prepout;
-    std::vector<int> input_dims = {1,3,960,960};
+    std::vector<int> input_dims = {1, 3, 960, 960};
     cv::Mat graph_in = cv::Mat(input_dims, CV_32FC1, cv::Scalar(0.0f));
     image_pad(prepout, graph_in, 960, 960);
 
@@ -163,31 +170,33 @@ int main(int argc, char** argv){
     int channels = graph_in.size[1];
     int height = graph_in.size[2];
     int width = graph_in.size[3];
-    std::cout<<"batch_size:"<<batch_size<<" channels:"<<channels<<" height:"<<height<<" width:"<<width<<std::endl;
+    std::cout << "batch_size:" << batch_size << " channels:" << channels
+              << " height:" << height << " width:" << width << std::endl;
 
     float* indata = (float*)graph_in.data;
     float sin = 0.0f;
-    std::cout<<"indata:";
-    for(size_t i=0; i<batch_size*channels*height*width; i++){
-      if(i < 16){
-        std::cout<<*(indata+i)<<",";
+    std::cout << "indata:";
+    for (size_t i = 0; i < batch_size * channels * height * width; i++) {
+      if (i < 16) {
+        std::cout << *(indata + i) << ",";
       }
 
-      sin += *(indata+i);
+      sin += *(indata + i);
     }
 
-    std::cout<<"sum:"<<sin<<std::endl;
+    std::cout << "sum:" << sin << std::endl;
 
-    int inputsize = batch_size*channels*height*width*4;
+    int inputsize = batch_size * channels * height * width * 4;
     memcpy(host_inputs[0], graph_in.data, inputsize);
 
     for (size_t i = 0; i < num_inputs; i++) {
-      aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_inputs, i);
-      void *data = aclGetDataBufferAddr(data_buffer);
+      aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_inputs, i);
+      void* data = aclGetDataBufferAddr(data_buffer);
       uint32_t data_len = aclGetDataBufferSizeV2(data_buffer);
-      ret = aclrtMemcpy(data, data_len, host_inputs[i], data_len, ACL_MEMCPY_HOST_TO_DEVICE);
+      ret = aclrtMemcpy(
+          data, data_len, host_inputs[i], data_len, ACL_MEMCPY_HOST_TO_DEVICE);
       if (ret != ACL_SUCCESS) {
-        std::cout<<"aclrtMemcpy host2device failed!"<<std::endl;
+        std::cout << "aclrtMemcpy host2device failed!" << std::endl;
       }
     }
 
@@ -197,37 +206,39 @@ int main(int argc, char** argv){
 
     uint32_t out_data_len = 0;
     for (size_t i = 0; i < num_outputs; i++) {
-      aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_outputs, i);
-      void *data = aclGetDataBufferAddr(data_buffer);
+      aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_outputs, i);
+      void* data = aclGetDataBufferAddr(data_buffer);
       uint32_t data_len = aclGetDataBufferSizeV2(data_buffer);
-      std::cout<<"i:"<<i<<" before copy host_outputs:"<<data_len<<std::endl;
-      ret = aclrtMemcpy(host_outputs[i], data_len, data, data_len, ACL_MEMCPY_DEVICE_TO_HOST);
+      std::cout << "i:" << i << " before copy host_outputs:" << data_len
+                << std::endl;
+      ret = aclrtMemcpy(
+          host_outputs[i], data_len, data, data_len, ACL_MEMCPY_DEVICE_TO_HOST);
       if (ret != ACL_SUCCESS) {
-        std::cout<<"aclrtMemcpy device2host failed!"<<std::endl;
+        std::cout << "aclrtMemcpy device2host failed!" << std::endl;
       }
       out_data_len = data_len;
     }
 
-    std::cout<<"out_data_len:"<<out_data_len<<std::endl;
+    std::cout << "out_data_len:" << out_data_len << std::endl;
     uint32_t out_data_num = out_data_len / 4;
-    float *outdata = reinterpret_cast<float*>(host_outputs[0]);
+    float* outdata = reinterpret_cast<float*>(host_outputs[0]);
     float sout = 0.0f;
-    std::cout<<"outdata:";
-    for(size_t i=0; i<out_data_num; i++){
-      if(i < 16){
-        std::cout<<*(outdata+i)<<",";
+    std::cout << "outdata:";
+    for (size_t i = 0; i < out_data_num; i++) {
+      if (i < 16) {
+        std::cout << *(outdata + i) << ",";
       }
 
-      sout += *(outdata+i);
+      sout += *(outdata + i);
     }
 
-    std::cout<<"sum:"<<sout<<std::endl;
+    std::cout << "sum:" << sout << std::endl;
   }
 
   for (size_t i = 0; i < num_inputs; ++i) {
     (void)aclrtFreeHost(host_inputs[i]);
-    aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_inputs, i);
-    void *data = aclGetDataBufferAddr(data_buffer);
+    aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_inputs, i);
+    void* data = aclGetDataBufferAddr(data_buffer);
     (void)aclrtFree(data);
     (void)aclDestroyDataBuffer(data_buffer);
   }
@@ -236,8 +247,8 @@ int main(int argc, char** argv){
 
   for (size_t i = 0; i < num_outputs; ++i) {
     (void)aclrtFreeHost(host_outputs[i]);
-    aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_outputs, i);
-    void *data = aclGetDataBufferAddr(data_buffer);
+    aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_outputs, i);
+    void* data = aclGetDataBufferAddr(data_buffer);
     (void)aclrtFree(data);
     (void)aclDestroyDataBuffer(data_buffer);
   }
@@ -276,6 +287,6 @@ int main(int argc, char** argv){
   aclFinalize();
 
   fs.release();
-  
+
   return 0;
 }

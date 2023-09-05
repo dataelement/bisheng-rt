@@ -303,8 +303,8 @@ def test():
         ],
     }
 
-    model_path = '/home/hanfeng/models/layout_mrcnn/freeze.pb'
-    save_path = '/home/hanfeng/models/layout_mrcnn/'
+    model_path = '/home/public/models/layout_mrcnn/freeze.pb'
+    save_path = '/home/public/models/layout_mrcnn/'
     name = 'freeze_fp16.pb'
     as_text = False
     target_type = 'fp16'

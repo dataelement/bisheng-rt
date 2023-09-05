@@ -31,8 +31,8 @@ class ModelImpl {
       const TRITONHUAWEI_Shape& shape, char** ptr);
 
   TRITONHUAWEI_Error* GetOutputMetadata(
-      const char* name, TRITONHUAWEI_DataType* dtype,
-      TRITONHUAWEI_Shape* shape, char** ptr);
+      const char* name, TRITONHUAWEI_DataType* dtype, TRITONHUAWEI_Shape* shape,
+      char** ptr);
 
   // TRITONHUAWEI_Error* ZeroCopyRun();
 
@@ -43,14 +43,14 @@ class ModelImpl {
   aclrtContext cur_context_ = nullptr;
   aclrtStream stream_;
   aclrtRunMode run_mode_;
-  aclmdlDesc *model_desc_;
+  aclmdlDesc* model_desc_;
   uint32_t model_id_;
   size_t model_worksize_ = 0;
   size_t model_weightsize_ = 0;
-  void *model_workptr_;
-  void *model_weightptr_;
-  aclmdlDataset *device_inputs_;
-  aclmdlDataset *device_outputs_;
+  void* model_workptr_;
+  void* model_weightptr_;
+  aclmdlDataset* device_inputs_;
+  aclmdlDataset* device_outputs_;
   uint32_t num_inputs_;
   uint32_t num_outputs_;
   std::vector<void*> host_inputs_;
@@ -115,41 +115,44 @@ ModelImpl::ModelImpl(
   if (err != nullptr) {
     TRITONSERVER_ErrorDelete(err);
   }
-  
-  std::cout<<"acl_config_path_:"<<acl_config_path_<<std::endl;
+
+  std::cout << "acl_config_path_:" << acl_config_path_ << std::endl;
   // aclError ret = aclInit(acl_config_path_.c_str());
   // if (ret != ACL_SUCCESS) {
   //   std::cout<<"aclInit failed!"<<std::endl;
   // }
   aclError ret = aclrtSetDevice(device_id_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclrtSetDevice failed!"<<std::endl;
+    std::cout << "aclrtSetDevice failed!" << std::endl;
   ret = aclrtCreateContext(&context_, device_id_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclrtCreateContext failed!"<<std::endl;
+    std::cout << "aclrtCreateContext failed!" << std::endl;
   ret = aclrtCreateStream(&stream_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclrtCreateStream failed!"<<std::endl;
+    std::cout << "aclrtCreateStream failed!" << std::endl;
   ret = aclrtGetRunMode(&run_mode_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclrtGetRunMode failed!"<<std::endl;
+    std::cout << "aclrtGetRunMode failed!" << std::endl;
   ret = aclmdlQuerySize(model_path, &model_worksize_, &model_weightsize_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclmdlQuerySize failed!"<<std::endl;
-  ret = aclrtMalloc(&model_workptr_, model_worksize_, ACL_MEM_MALLOC_HUGE_FIRST);
+    std::cout << "aclmdlQuerySize failed!" << std::endl;
+  ret =
+      aclrtMalloc(&model_workptr_, model_worksize_, ACL_MEM_MALLOC_HUGE_FIRST);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclrtMalloc model_workptr_!"<<std::endl;
-  ret = aclrtMalloc(&model_weightptr_, model_weightsize_, ACL_MEM_MALLOC_HUGE_FIRST);
+    std::cout << "aclrtMalloc model_workptr_!" << std::endl;
+  ret = aclrtMalloc(
+      &model_weightptr_, model_weightsize_, ACL_MEM_MALLOC_HUGE_FIRST);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclrtMalloc model_weightptr_ failed!"<<std::endl;
-  ret = aclmdlLoadFromFileWithMem(model_path, &model_id_, model_workptr_,
-                                  model_worksize_, model_weightptr_, model_weightsize_);
+    std::cout << "aclrtMalloc model_weightptr_ failed!" << std::endl;
+  ret = aclmdlLoadFromFileWithMem(
+      model_path, &model_id_, model_workptr_, model_worksize_, model_weightptr_,
+      model_weightsize_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclmdlLoadFromFileWithMem failed!"<<std::endl;
+    std::cout << "aclmdlLoadFromFileWithMem failed!" << std::endl;
   model_desc_ = aclmdlCreateDesc();
   ret = aclmdlGetDesc(model_desc_, model_id_);
   if (ret != ACL_SUCCESS)
-    std::cout<<"aclmdlGetDesc failed!"<<std::endl;
+    std::cout << "aclmdlGetDesc failed!" << std::endl;
   num_inputs_ = aclmdlGetNumInputs(model_desc_);
   num_outputs_ = aclmdlGetNumOutputs(model_desc_);
 
@@ -159,33 +162,33 @@ ModelImpl::ModelImpl(
   host_outputs_.resize(num_outputs_);
   device_inputs_ = aclmdlCreateDataset();
   device_outputs_ = aclmdlCreateDataset();
-  for(size_t i=0; i<num_inputs_; i++){
+  for (size_t i = 0; i < num_inputs_; i++) {
     size_t data_len = aclmdlGetInputSizeByIndex(model_desc_, i);
-    void *data = nullptr;
+    void* data = nullptr;
     ret = aclrtMalloc(&data, data_len, ACL_MEM_MALLOC_NORMAL_ONLY);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMalloc input device failed!"<<std::endl;
-    aclDataBuffer *data_buf = aclCreateDataBuffer(data, data_len);
+      std::cout << "aclrtMalloc input device failed!" << std::endl;
+    aclDataBuffer* data_buf = aclCreateDataBuffer(data, data_len);
     ret = aclmdlAddDatasetBuffer(device_inputs_, data_buf);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclmdlAddDatasetBuffer input device failed!"<<std::endl;
+      std::cout << "aclmdlAddDatasetBuffer input device failed!" << std::endl;
     ret = aclrtMallocHost(&host_inputs_[i], data_len);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMallocHost input host failed!"<<std::endl;
+      std::cout << "aclrtMallocHost input host failed!" << std::endl;
   }
-  for(size_t i=0; i<num_outputs_; i++){
+  for (size_t i = 0; i < num_outputs_; i++) {
     size_t data_len = aclmdlGetOutputSizeByIndex(model_desc_, i);
-    void *data = nullptr;
+    void* data = nullptr;
     ret = aclrtMalloc(&data, data_len, ACL_MEM_MALLOC_NORMAL_ONLY);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMalloc output device failed!"<<std::endl;
-    aclDataBuffer *data_buf = aclCreateDataBuffer(data, data_len);
+      std::cout << "aclrtMalloc output device failed!" << std::endl;
+    aclDataBuffer* data_buf = aclCreateDataBuffer(data, data_len);
     ret = aclmdlAddDatasetBuffer(device_outputs_, data_buf);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMalloc output device failed!"<<std::endl;
+      std::cout << "aclrtMalloc output device failed!" << std::endl;
     ret = aclrtMallocHost(&host_outputs_[i], data_len);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMalloc output device failed!"<<std::endl;
+      std::cout << "aclrtMalloc output device failed!" << std::endl;
   }
 }
 
@@ -194,8 +197,8 @@ ModelImpl::~ModelImpl()
   // // Release the resource
   for (size_t i = 0; i < num_inputs_; ++i) {
     (void)aclrtFreeHost(host_inputs_[i]);
-    aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_inputs_, i);
-    void *data = aclGetDataBufferAddr(data_buffer);
+    aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_inputs_, i);
+    void* data = aclGetDataBufferAddr(data_buffer);
     (void)aclrtFree(data);
     (void)aclDestroyDataBuffer(data_buffer);
   }
@@ -204,8 +207,8 @@ ModelImpl::~ModelImpl()
 
   for (size_t i = 0; i < num_outputs_; ++i) {
     (void)aclrtFreeHost(host_outputs_[i]);
-    aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_outputs_, i);
-    void *data = aclGetDataBufferAddr(data_buffer);
+    aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_outputs_, i);
+    void* data = aclGetDataBufferAddr(data_buffer);
     (void)aclrtFree(data);
     (void)aclDestroyDataBuffer(data_buffer);
   }
@@ -247,19 +250,19 @@ ModelImpl::~ModelImpl()
 TRITONHUAWEI_Error*
 ModelImpl::Run()
 {
-  if(cur_context_ == nullptr){
+  if (cur_context_ == nullptr) {
     cur_context_ = context_;
     aclError ret = aclrtSetCurrentContext(cur_context_);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtSetCurrentContext failed! "<<ret<<std::endl;
+      std::cout << "aclrtSetCurrentContext failed! " << ret << std::endl;
   }
-  
-  for(size_t i=0; i<num_inputs_; i++){
+
+  for (size_t i = 0; i < num_inputs_; i++) {
     std::vector<int64_t> dims = inputs_shape_[i].Shape();
     aclmdlIODims current_dims;
     // std::cout<<"current_dims:";
     current_dims.dimCount = dims.size();
-    for(size_t k=0; k<dims.size(); k++){
+    for (size_t k = 0; k < dims.size(); k++) {
       current_dims.dims[k] = (int)dims[k];
       // std::cout<<current_dims.dims[k]<<",";
     }
@@ -268,34 +271,39 @@ ModelImpl::Run()
   }
 
   for (size_t i = 0; i < num_inputs_; i++) {
-    aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_inputs_, i);
-    void *data = aclGetDataBufferAddr(data_buffer);
+    aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_inputs_, i);
+    void* data = aclGetDataBufferAddr(data_buffer);
     uint32_t data_len = aclGetDataBufferSizeV2(data_buffer);
-    aclError ret = aclrtMemcpy(data, data_len, host_inputs_[i], data_len, ACL_MEMCPY_HOST_TO_DEVICE);
+    aclError ret = aclrtMemcpy(
+        data, data_len, host_inputs_[i], data_len, ACL_MEMCPY_HOST_TO_DEVICE);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMemcpy ACL_MEMCPY_HOST_TO_DEVICE failed! "<<ret<<std::endl;
+      std::cout << "aclrtMemcpy ACL_MEMCPY_HOST_TO_DEVICE failed! " << ret
+                << std::endl;
   }
 
   // aclmdlExecute(model_id_, device_inputs_, device_outputs_);
-  aclError ret =aclmdlExecuteAsync(model_id_, device_inputs_, device_outputs_, stream_);
+  aclError ret =
+      aclmdlExecuteAsync(model_id_, device_inputs_, device_outputs_, stream_);
   if (ret != ACL_SUCCESS)
-      std::cout<<"aclmdlExecuteAsync failed! "<<ret<<std::endl;
-  ret =aclrtSynchronizeStream(stream_);
+    std::cout << "aclmdlExecuteAsync failed! " << ret << std::endl;
+  ret = aclrtSynchronizeStream(stream_);
   if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtSynchronizeStream failed! " <<ret<<std::endl;
+    std::cout << "aclrtSynchronizeStream failed! " << ret << std::endl;
 
   for (size_t i = 0; i < num_outputs_; i++) {
-    aclDataBuffer *data_buffer = aclmdlGetDatasetBuffer(device_outputs_, i);
-    void *data = aclGetDataBufferAddr(data_buffer);
+    aclDataBuffer* data_buffer = aclmdlGetDatasetBuffer(device_outputs_, i);
+    void* data = aclGetDataBufferAddr(data_buffer);
     uint32_t data_len = aclGetDataBufferSizeV2(data_buffer);
-    aclError ret =aclrtMemcpy(host_outputs_[i], data_len, data, data_len, ACL_MEMCPY_DEVICE_TO_HOST);
+    aclError ret = aclrtMemcpy(
+        host_outputs_[i], data_len, data, data_len, ACL_MEMCPY_DEVICE_TO_HOST);
     if (ret != ACL_SUCCESS)
-      std::cout<<"aclrtMemcpy ACL_MEMCPY_DEVICE_TO_HOST failed! "<<ret<<std::endl;
+      std::cout << "aclrtMemcpy ACL_MEMCPY_DEVICE_TO_HOST failed! " << ret
+                << std::endl;
 
     aclmdlIODims current_dims;
     aclmdlGetCurOutputDims(model_desc_, i, &current_dims);
     std::vector<int64_t> dims(current_dims.dimCount);
-    for(size_t k=0; k<current_dims.dimCount; k++){
+    for (size_t k = 0; k < current_dims.dimCount; k++) {
       dims[k] = (int64_t)current_dims.dims[k];
     }
     outputs_shape_[i] = TRITONHUAWEI_Shape(dims);
@@ -600,9 +608,8 @@ class ModelInstanceState : public BackendModelInstance {
       const std::string& model_dir, std::string* model_path);
 
   void SetInputTensors(
-      BackendInputCollector* collector,
-      size_t total_batch_size, TRITONBACKEND_Request** requests,
-      const uint32_t request_count,
+      BackendInputCollector* collector, size_t total_batch_size,
+      TRITONBACKEND_Request** requests, const uint32_t request_count,
       std::vector<TRITONBACKEND_Response*>* responses);
 
   void ReadOutputTensors(
@@ -672,9 +679,8 @@ ModelInstanceState::ModelInstanceState(
 
 void
 ModelInstanceState::SetInputTensors(
-    BackendInputCollector* collector, 
-    size_t total_batch_size, TRITONBACKEND_Request** requests,
-    const uint32_t request_count,
+    BackendInputCollector* collector, size_t total_batch_size,
+    TRITONBACKEND_Request** requests, const uint32_t request_count,
     std::vector<TRITONBACKEND_Response*>* responses)
 {
   bool cuda_copy = false;
@@ -1045,7 +1051,8 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       TRITONSERVER_LOG_INFO,
       (std::string("backend configuration:\n") + buffer).c_str());
 
-  //std::string acl_config_path = "/home/liuqingjie/model_repo/ocr_lite_huawei/resource/acl.json";
+  // std::string acl_config_path =
+  // "/home/public/model_repo/ocr_lite_huawei/resource/acl.json";
   const char* location;
   TRITONBACKEND_ArtifactType artifact_type;
   RETURN_IF_ERROR(
@@ -1053,9 +1060,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
   std::string acl_config_path = std::string(location) + "/acl.json";
   aclError ret = aclInit(acl_config_path.c_str());
   if (ret != ACL_SUCCESS) {
-    std::cout<<"aclInit failed!"<<std::endl;
-  }else{
-    std::cout<<"aclInit success!"<<std::endl;
+    std::cout << "aclInit failed!" << std::endl;
+  } else {
+    std::cout << "aclInit success!" << std::endl;
   }
   return nullptr;  // success
 }

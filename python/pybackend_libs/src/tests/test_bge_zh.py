@@ -4,7 +4,7 @@ from pybackend_libs.dataelem.model import BGEZhEmbedding
 
 def test_bge_zh():
     params = {
-        'pretrain_path': '/home/hanfeng/projects/models/bge-large-zh',
+        'pretrain_path': '/home/public/projects/models/bge-large-zh',
         'devices': '8',
         'gpu_memory': 3
     }

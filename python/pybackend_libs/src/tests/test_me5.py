@@ -4,7 +4,7 @@ from pybackend_libs.dataelem.model import ME5Embedding
 
 def test_me5():
     params = {
-        'pretrain_path': '/home/hanfeng/projects/models/multilingual-e5-large',
+        'pretrain_path': '/home/public/projects/models/multilingual-e5-large',
         'devices': '8',
         'gpu_memory': 5
     }

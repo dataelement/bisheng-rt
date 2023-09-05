@@ -161,7 +161,7 @@ mask_to_bb(
 int
 main(int argc, char** argv)
 {
-  std::string data_dir = "/home/liuqingjie/data/test_data/";
+  std::string data_dir = "/home/public/data/test_data/";
   std::string read_name = "mrcnn_v5.1_graph.cvfs";
   std::string write_name = "mrcnn_v5.1_post_cc.cvfs";
   cv::FileStorage fs_rd(data_dir + read_name, cv::FileStorage::READ);

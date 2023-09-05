@@ -106,7 +106,7 @@ getroi(cv::Mat featmap, int h, int w)
 int
 main(int argc, char** argv)
 {
-  // std::string data_dir = "/home/liuqingjie/data/test_data/";
+  // std::string data_dir = "/home/public/data/test_data/";
   // std::string read_name = "ppdet_graph.cvfs";
   // std::string write_name = "ppdet_post_cc.cvfs";
 

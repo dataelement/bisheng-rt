@@ -13,7 +13,7 @@ project(tritondataelembackend LANGUAGES C CXX)
 # GPU support is disabled by default because dataelem backend doesn't
 # support GPUs.
 #
-set(PROJ_ROOT_DIR "/home/liuqingjie/projects/idpserver")
+set(PROJ_ROOT_DIR "/home/public/projects/idpserver")
 set(TRITON_SRC_DIR "${PROJ_ROOT_DIR}/src" CACHE STRING "")
 set(TRITON_THIRD_PARTY_INSTALL_PREFIX "${PROJ_ROOT_DIR}/tritonbuild/tritonserver/build/third-party" CACHE STRING "")
 
@@ -37,7 +37,7 @@ target_include_directories(
   openvino_test
   PRIVATE
     ${OpenCV_INCLUDE_DIRS}
-    "/home/liuqingjie/projects/idpserver/tritonbuild/third_party/libopenvino_v22.08_2022.2/include/"
+    "/home/public/projects/idpserver/tritonbuild/third_party/libopenvino_v22.08_2022.2/include/"
 )
 
 
@@ -45,5 +45,5 @@ target_link_libraries(
   openvino_test
   PRIVATE
     ${OpenCV_LIBS}
-    "-L/home/liuqingjie/projects/idpserver/tritonbuild/third_party/libopenvino_v22.08_2022.2/lib -lopenvino"
+    "-L/home/public/projects/idpserver/tritonbuild/third_party/libopenvino_v22.08_2022.2/lib -lopenvino"
   )

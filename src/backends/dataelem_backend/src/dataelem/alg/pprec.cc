@@ -306,7 +306,7 @@ PPRec::Execute(AlgRunContext* context)
     }*/
 
     // cv::FileStorage
-    // file("/home/liuqingjie/rec_test/rec_"+std::to_string(CNT0)+"_"+std::to_string(j)+".ext",
+    // file("/home/public/rec_test/rec_"+std::to_string(CNT0)+"_"+std::to_string(j)+".ext",
     // cv::FileStorage::WRITE); file << "imgs" << batched_imgs; file.release();
 
     batched_imgs_vec.push_back(batched_imgs);

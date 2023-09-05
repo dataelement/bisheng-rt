@@ -4,7 +4,7 @@ from pybackend_libs.dataelem.utils import convert_file_to_base64
 
 def test_visualglm_6b():
     params = {
-        'pretrain_path': '/home/hanfeng/models/visualglm-6b',
+        'pretrain_path': '/home/public/models/visualglm-6b',
         'devices': '6',
         'gpu_memory': 20,
     }

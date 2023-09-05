@@ -13,7 +13,7 @@ project(tritondataelembackend LANGUAGES C CXX)
 # GPU support is disabled by default because dataelem backend doesn't
 # support GPUs.
 #
-set(PROJ_ROOT_DIR "/home/liuqingjie/projects/idpserver")
+set(PROJ_ROOT_DIR "/home/public/projects/idpserver")
 set(TRITON_SRC_DIR "${PROJ_ROOT_DIR}/src" CACHE STRING "")
 set(TRITON_THIRD_PARTY_INSTALL_PREFIX "${PROJ_ROOT_DIR}/tritonbuild/tritonserver/build/third-party" CACHE STRING "")
 

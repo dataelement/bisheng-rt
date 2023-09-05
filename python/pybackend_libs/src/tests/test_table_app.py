@@ -8,7 +8,7 @@ from pybackend_libs.dataelem.model.ocr.ocr_client import OCRClient
 from pybackend_libs.dataelem.model.table import TableCellApp, TableRowColApp
 from pybackend_libs.dataelem.utils import convert_file_to_base64
 
-REPO = '/home/hanfeng/models/'
+REPO = '/home/public/models/'
 
 
 def test_ocr_client():

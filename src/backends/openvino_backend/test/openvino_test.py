@@ -155,7 +155,7 @@ def det():
     preprocess_op = create_operators(pre_process_list)
     postprocess_op = build_post_process(postprocess_params)
 
-    model_dir = '/home/liuqingjie/models/openvino_2022_2/ch_PP-OCRv3_det_infer'
+    model_dir = '/home/public/models/openvino_2022_2/ch_PP-OCRv3_det_infer'
     model_name = os.path.join(model_dir, 'model')
     ie = Core()
     model = ie.read_model(model=model_name + '.xml',
@@ -163,7 +163,7 @@ def det():
     compiled_model = ie.compile_model(model=model, device_name='CPU')
     output_layer = compiled_model.output(0)
 
-    img_name = '/home/liuqingjie/images/1.jpg'
+    img_name = '/home/public/images/1.jpg'
     img = cv2.imread(img_name)
     ori_img = img.copy()
     data = {'image': img}
@@ -206,7 +206,7 @@ def det():
 
 
 def cls(img, bboxes, imageH=48, maxW=192):
-    model_dir = '/home/liuqingjie/models/openvino_2022_2/ch_ppocr_mobile_v2.0_cls_infer'
+    model_dir = '/home/public/models/openvino_2022_2/ch_ppocr_mobile_v2.0_cls_infer'
     model_name = os.path.join(model_dir, 'model')
     ie = Core()
     model = ie.read_model(model=model_name + '.xml',
@@ -254,7 +254,7 @@ def cls(img, bboxes, imageH=48, maxW=192):
 
 
 def rec(crop_imgs, width_list):
-    model_dir = '/home/liuqingjie/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_matrix'
+    model_dir = '/home/public/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_matrix'
     model_name = os.path.join(model_dir, 'model')
     ie = Core()
     model = ie.read_model(model=model_name + '.xml',
@@ -301,7 +301,7 @@ def rec(crop_imgs, width_list):
     print(probs0)
 
     chars = load_chars(
-        '/home/liuqingjie/projects/TritonModels/ocr_lite/model_repository/rec_ch_graph/character_dict.txt'
+        '/home/public/projects/TritonModels/ocr_lite/model_repository/rec_ch_graph/character_dict.txt'
     )
     for i in range(inds.shape[0]):
         text, prob = get_text(inds[i], probs[i], chars)
@@ -320,7 +320,7 @@ def load_files(im_dir):
 
 
 def speed_test():
-    model_dir = '/home/liuqingjie/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_fp16_matrix'
+    model_dir = '/home/public/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_fp16_matrix'
     model_name = os.path.join(model_dir, 'model')
     ie = Core()
     model = ie.read_model(model=model_name + '.xml',
@@ -328,7 +328,7 @@ def speed_test():
     compiled_model = ie.compile_model(model=model, device_name='CPU')
     output_layer0 = compiled_model.output(0)
 
-    data_dir = '/home/liuqingjie/rec_test_sample'
+    data_dir = '/home/public/rec_test_sample'
     names = load_files(data_dir)
     cnt = 0
     elapes = 0
@@ -346,14 +346,14 @@ def speed_test():
 
 
 def test():
-    model_dir = '/home/liuqingjie/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_half_matrix'
+    model_dir = '/home/public/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_half_matrix'
     model_name = os.path.join(model_dir, 'model')
     ie = Core()
     model = ie.read_model(model=model_name + '.xml',
                           weights=model_name + '.bin')
     compiled_model = ie.compile_model(model=model, device_name='CPU')
     output_layer0 = compiled_model.output(0)
-    data_dir = '/home/liuqingjie/rec_test'
+    data_dir = '/home/public/rec_test'
     #fs = cv2.FileStorage(os.path.join(data_dir, "rec_0_0.ext"), cv2.FILE_STORAGE_READ)
     #data = fs.getNode("imgs").mat()
     fs = cv2.FileStorage('rec_in_img.ext', cv2.FILE_STORAGE_READ)
@@ -363,7 +363,7 @@ def test():
 
 
 def test_v2():
-    model_dir = '/home/liuqingjie/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_half_matrix'
+    model_dir = '/home/public/models/openvino_2022_2/ch_PP-OCRv3_rec_infer_half_matrix'
     model_name = os.path.join(model_dir, 'model')
     ie = Core()
     model = ie.read_model(model=model_name + '.xml',
@@ -371,7 +371,7 @@ def test_v2():
     model.reshape([(1, 32), 3, 48, (48, 1200)])
     compiled_model = ie.compile_model(model=model, device_name='CPU')
     output_layer0 = compiled_model.output(0)
-    data_dir = '/home/liuqingjie/rec_test'
+    data_dir = '/home/public/rec_test'
     #fs = cv2.FileStorage(os.path.join(data_dir, "rec_0_0.ext"), cv2.FILE_STORAGE_READ)
     #data = fs.getNode("imgs").mat()
     fs = cv2.FileStorage('rec_in_img.ext', cv2.FILE_STORAGE_READ)

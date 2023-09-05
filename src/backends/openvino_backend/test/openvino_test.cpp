@@ -14,7 +14,7 @@ void
 openvino_infer_det(cv::Mat img, std::string device_name = "CPU")
 {
   std::string model_path =
-      "/home/liuqingjie/models/openvino_2022_2/ch_PP-OCRv3_det_infer/model.xml";
+      "/home/public/models/openvino_2022_2/ch_PP-OCRv3_det_infer/model.xml";
   ov::Core core;
   std::shared_ptr<ov::Model> model = core.read_model(model_path);
 
@@ -69,7 +69,7 @@ void
 openvino_infer_cls(cv::Mat img, std::string device_name = "CPU")
 {
   std::string model_path =
-      "/home/liuqingjie/models/openvino_2022_2/ch_ppocr_mobile_v2.0_cls_infer/"
+      "/home/public/models/openvino_2022_2/ch_ppocr_mobile_v2.0_cls_infer/"
       "model.xml";
   ov::Core core;
   std::shared_ptr<ov::Model> model = core.read_model(model_path);
@@ -100,7 +100,7 @@ void
 openvino_infer_rec(cv::Mat img, std::string device_name = "CPU")
 {
   std::string model_path =
-      "/home/liuqingjie/models/openvino_2022_2/"
+      "/home/public/models/openvino_2022_2/"
       "ch_PP-OCRv3_rec_infer_fp16_matrix/model.xml";
   ov::Core core;
   std::shared_ptr<ov::Model> model = core.read_model(model_path);
