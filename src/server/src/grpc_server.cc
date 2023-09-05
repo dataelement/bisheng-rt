@@ -802,14 +802,6 @@ CommonHandler::SetUpAllRequests()
             ctx, request, responder, this->cq_, this->cq_, tag);
       };
 
-#ifdef LICENSE_STRATEGY
-  auto OnExecuteModelConfig = [this](
-                                  inference::ModelConfigRequest& request,
-                                  inference::ModelConfigResponse* response,
-                                  grpc::Status* status) {
-    *status = grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "not supported");
-  };
-#else
   auto OnExecuteModelConfig = [this](
                                   inference::ModelConfigRequest& request,
                                   inference::ModelConfigResponse* response,
@@ -840,7 +832,6 @@ CommonHandler::SetUpAllRequests()
     GrpcStatusUtil::Create(status, err);
     TRITONSERVER_ErrorDelete(err);
   };
-#endif
 
   new CommonCallData<
       grpc::ServerAsyncResponseWriter<inference::ModelConfigResponse>,
@@ -860,16 +851,6 @@ CommonHandler::SetUpAllRequests()
         this->service_->RequestModelStatistics(
             ctx, request, responder, this->cq_, this->cq_, tag);
       };
-
-#ifdef LICENSE_STRATEGY
-  auto OnExecuteModelStatistics =
-      [this](
-          inference::ModelStatisticsRequest& request,
-          inference::ModelStatisticsResponse* response, grpc::Status* status) {
-        *status =
-            grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "not supported");
-      };
-#else
 
   auto OnExecuteModelStatistics = [this](
                                       inference::ModelStatisticsRequest&
@@ -1147,7 +1128,6 @@ CommonHandler::SetUpAllRequests()
 #endif
   };
 
-#endif
 
   new CommonCallData<
       grpc::ServerAsyncResponseWriter<inference::ModelStatisticsResponse>,

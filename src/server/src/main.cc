@@ -74,11 +74,7 @@
 #include "grpc_server.h"
 #endif  // TRITON_ENABLE_GRPC
 
-#ifdef LICENSE_STRATEGY
-#include "license/license_utils.h"
-#else
 #include <signal.h>
-#endif
 
 #ifdef TRITON_ENABLE_GPU
 static_assert(
@@ -2335,36 +2331,6 @@ main(int argc, char** argv)
     }
 #endif  // TRITON_ENABLE_GPU
 
-#ifdef LICENSE_STRATEGY
-    std::string env_license =
-        triton::server::GetEnvironmentVariableOrDefault("LICENSE_MODE", "");
-    if (env_license == "hasp" || env_license == "dataelem") {
-      license_mode_ = env_license;
-    }
-    LOG_INFO << "ENTER DATAELEM AUTH PROCEDURE, USE MODE " << license_mode_;
-    if (license_mode_ == "hasp") {
-      bool auth_succ = dataelem::common::LicenseInfo::auth();
-      if (!auth_succ) {
-        LOG_INFO << "PLEASE GET AUTH from DATAELEM INC.";
-        return 0;
-      } else {
-        LOG_INFO << "AUTH SUCC. WELCOME TO USE THE SERVICE";
-      }
-    } else if (license_mode_ == "dataelem") {
-      bool auth_succ = dataelem::common::LicenseInfo::auth_dataelem();
-      if (!auth_succ) {
-        LOG_INFO << "PLEASE GET AUTH from DATAELEM INC.";
-        return 0;
-      } else {
-        LOG_INFO << "AUTH SUCC. WELCOME TO USE THE SERVICE";
-      }
-    } else {
-      LOG_INFO << "License mode must be hasp or dataelem, not:"
-               << license_mode_;
-      return 0;
-    }
-#endif
-
     // if (!Parse(&server_options, argc, argv)) {
     //   exit(1);
     // }
@@ -2383,13 +2349,6 @@ main(int argc, char** argv)
 
     auto server_err = TRITONSERVER_ServerNew(&server_ptr, server_options);
     if (server_err != nullptr) {
-#ifdef LICENSE_STRATEGY
-      dataelem::common::LicenseInfo::stop_monitor_thread() = true;
-      if (dataelem::common::LicenseInfo::monitor_thread().joinable()) {
-        dataelem::common::LicenseInfo::monitor_thread().join();
-      }
-      LOG_INFO << "SUCC TO STOP LICENSE MONITOR";
-#endif
       FAIL_IF_ERR(server_err, "creating server");
     }
 
@@ -2455,17 +2414,6 @@ main(int argc, char** argv)
     //  __lsan_do_leak_check();
 #endif  // TRITON_ENABLE_ASAN
 
-#ifdef LICENSE_STRATEGY
-    LOG_INFO << "MAIN SERVICE IS STOPED. WAIT "
-             << dataelem::common::LicenseInfo::monitor_interval_sec()
-             << "S TO STOP LICENSE MONITOR";
-
-    dataelem::common::LicenseInfo::stop_monitor_thread() = true;
-    if (dataelem::common::LicenseInfo::monitor_thread().joinable()) {
-      dataelem::common::LicenseInfo::monitor_thread().join();
-    }
-    LOG_INFO << "SUCC TO STOP LICENSE MONITOR";
-#endif
     return 0;
   };
 

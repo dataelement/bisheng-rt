@@ -53,8 +53,6 @@
 #include <cuda_runtime_api.h>
 #endif  // TRITON_ENABLE_GPU
 
-#include "triton/common/cipher/aes.hpp"
-
 //
 // PyTorch C++ (LibTorch) Backend that implements the TRITONBACKEND API.
 //
@@ -248,10 +246,7 @@ ModelState::LoadModel(
   // Serialize the torch model to string
   std::string model_data_str;
   if ((*model_path).find(".pri") != std::string::npos) {
-    std::vector<char> bytes;
-    // cipher::ReadAESBinary(*model_path, bytes);
-    cipher::ReadSimpleEncBinary(*model_path, bytes);
-    model_data_str = std::string(bytes.begin(), bytes.end());
+    // not supported
   } else {
     RETURN_IF_ERROR(ReadTextFile(*model_path, &model_data_str));
   }

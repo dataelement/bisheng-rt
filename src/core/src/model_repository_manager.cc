@@ -42,7 +42,6 @@
 #include "filesystem.h"
 #include "model.h"
 #include "model_config_utils.h"
-#include "triton/common/cipher/aes.hpp"
 #include "triton/common/logging.h"
 
 #include "server_config.pb.h"
@@ -2509,18 +2508,7 @@ ModelRepositoryManager::RegisterOpModels(const std::string& path)
     auto op_defs_config_path_pri = JoinPath({path, "ops.proto.pri"});
     FileExists(op_defs_config_path_pri, &exists);
     if (exists) {
-      std::vector<char> bytes;
-      cipher::ReadAESBinary(op_defs_config_path_pri, bytes);
-      MemBuffer sbuf(bytes.data(), bytes.data() + bytes.size());
-      std::istream istr(&sbuf);
-      inference::OpsDef opsdef;
-      opsdef.ParseFromIstream(&istr);
-      for (int i = 0; i < opsdef.ops_size(); i++) {
-        const auto& op_model_config = opsdef.ops(i);
-        auto name = op_model_config.name();
-        LOG_VERBOSE(1) << "ops registered: " << name;
-        ops_map_.emplace(name, op_model_config);
-      }
+      LOG_VERBOSE(1) << "pri mode not supported";
     } else {
       auto op_defs_config_path = JoinPath({path, "ops.pbtxt"});
       FileExists(op_defs_config_path, &exists);
@@ -2540,18 +2528,7 @@ ModelRepositoryManager::RegisterOpModels(const std::string& path)
     auto pipelines_config_path_pri = JoinPath({path, "pipelines.proto.pri"});
     FileExists(pipelines_config_path_pri, &exists);
     if (exists) {
-      std::vector<char> bytes;
-      cipher::ReadAESBinary(pipelines_config_path_pri, bytes);
-      MemBuffer sbuf(bytes.data(), bytes.data() + bytes.size());
-      std::istream istr(&sbuf);
-      inference::PipelinesDef pipelines_def;
-      pipelines_def.ParseFromIstream(&istr);
-      for (int i = 0; i < pipelines_def.pipelines_size(); i++) {
-        const auto& ens_model_config = pipelines_def.pipelines(i);
-        auto name = ens_model_config.name();
-        LOG_VERBOSE(1) << "pipeline registered: " << name;
-        pipelines_map_.emplace(name, ens_model_config);
-      }
+      LOG_VERBOSE(1) << "pri mode not supported";
     } else {
       auto pipelines_config_path = JoinPath({path, "pipelines.pbtxt"});
       exists = false;

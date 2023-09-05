@@ -13,7 +13,7 @@ def convert_b64(file):
     else:
         return None
 
-det_image_folder = '/home/gulixin/workspace/datasets/all_kinds_train_images_angle/val'
+det_image_folder = '/opt/workspace/datasets/all_kinds_train_images_angle/val'
 image_files = os.listdir(det_image_folder)
 
 # json_data = dict()
@@ -57,6 +57,8 @@ for index, file in enumerate(image_files):
 
     json_data["data"].append(inputs)
 
-with open(os.path.join(os.path.dirname(det_image_folder), 'val_data_padding_base64.json'), 'w') as f:
+with open(os.path.join(
+    os.path.dirname(det_image_folder),
+    'val_data_padding_base64.json'), 'w') as f:
     json.dump(json_data, f, ensure_ascii=False)
 

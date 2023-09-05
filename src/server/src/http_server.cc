@@ -40,9 +40,6 @@
 
 #include "classification.h"
 
-#ifdef LICENSE_STRATEGY
-#include "license/license_utils.h"
-#endif
 
 #define TRITONJSON_STATUSTYPE TRITONSERVER_Error*
 #define TRITONJSON_STATUSRETURN(M) \
@@ -1671,10 +1668,6 @@ HTTPAPIServer::HandleModelConfig(
     evhtp_request_t* req, const std::string& model_name,
     const std::string& model_version_str)
 {
-#ifdef LICENSE_STRATEGY
-  evhtp_send_reply(req, EVHTP_RES_FORBIDDEN);
-  return;
-#else
   if (req->method != htp_method_GET) {
     evhtp_send_reply(req, EVHTP_RES_METHNALLOWED);
     return;
@@ -1718,7 +1711,6 @@ HTTPAPIServer::HandleModelConfig(
     evhtp_send_reply(req, EVHTP_RES_BADREQ);
     TRITONSERVER_ErrorDelete(err);
   }
-#endif
 }
 
 void
@@ -1726,10 +1718,6 @@ HTTPAPIServer::HandleModelStats(
     evhtp_request_t* req, const std::string& model_name,
     const std::string& model_version_str)
 {
-#ifdef LICENSE_STRATEGY
-  evhtp_send_reply(req, EVHTP_RES_FORBIDDEN);
-  return;
-#else
   if (req->method != htp_method_GET) {
     evhtp_send_reply(req, EVHTP_RES_METHNALLOWED);
     return;
@@ -1774,7 +1762,6 @@ HTTPAPIServer::HandleModelStats(
     evhtp_send_reply(req, EVHTP_RES_BADREQ);
     TRITONSERVER_ErrorDelete(err);
   }
-#endif
 }
 
 void
@@ -2942,13 +2929,6 @@ HTTPAPIServer::HandleInfer(
     return;
   }
 
-// Increase the request count
-#ifdef LICENSE_STRATEGY
-#if (LICENSE_STRATEGY == LICENSE_HASP)
-  dataelem::common::LicenseInfo::increase_req_cnt();
-  dataelem::common::LicenseInfo::increase_req_cnt_per_day();
-#endif
-#endif
 
   bool connection_paused = false;
   int64_t requested_model_version;
@@ -4189,13 +4169,6 @@ HTTPAPIServer::HandleRestfulInfer(
     return;
   }
 
-// Increase the request count
-#ifdef LICENSE_STRATEGY
-#if (LICENSE_STRATEGY == LICENSE_HASP)
-  dataelem::common::LicenseInfo::increase_req_cnt();
-  dataelem::common::LicenseInfo::increase_req_cnt_per_day();
-#endif
-#endif
 
   // Step 0. parse the body
   // Decompress request body if it is compressed in supported type

@@ -65,11 +65,7 @@ set(FRAMEWORK_LIBS
 # compile tools
 
 set(tool_srcs
-  encrypt_file.cc
   # pbtxt2pb.cc
-  decrypt_file_v0.cc
-  license_mgr.cc
-  license_mgr_dataelem.cc
 )
 
 set(TRITON_COMMON_ENABLE_PROTOBUF ON)

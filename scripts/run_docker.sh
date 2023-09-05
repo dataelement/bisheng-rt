@@ -1,7 +1,7 @@
 #!/bin/bash
 
 function run_dev() {
-    MOUNT="-v /home/hanfeng:/home/hanfeng -v /home/public:/home/public"
+    MOUNT="-v /home/work:/home/work -v /home/public:/home/public"
     IMAGE="tritonserver:22.08"
     docker run --gpus=all --net=host -itd --shm-size=10G --name bisheng_rt_v0.0.1 ${MOUNT} $IMAGE bash
 }

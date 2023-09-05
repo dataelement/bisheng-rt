@@ -34,7 +34,6 @@
 
 #include "onnxruntime_utils.h"
 
-#include "triton/common/cipher/aes.hpp"
 
 namespace triton { namespace backend { namespace onnxruntime {
 
@@ -194,11 +193,7 @@ OnnxLoader::LoadSession(
           session_options, session);
     } else {
       if (ort_style_model_str.find(".pri") != std::string::npos) {
-        std::vector<char> bytes;
-        // cipher::ReadAESBinary(ort_style_model_str, bytes);
-        cipher::ReadSimpleEncBinary(ort_style_model_str, bytes);
-        status = ort_api->CreateSessionFromArray(
-            loader->env_, bytes.data(), bytes.size(), session_options, session);
+        // not supported in rt module
       } else {
         status = ort_api->CreateSession(
             loader->env_, ort_style_model_str.c_str(), session_options,

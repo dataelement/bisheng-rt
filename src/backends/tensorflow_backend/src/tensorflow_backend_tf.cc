@@ -49,8 +49,6 @@
 // #include "third_party/gpus/cuda/include/cuda_runtime_api.h"
 #include "cuda_runtime_api.h"
 
-#include "triton/common/cipher/aes.hpp"
-
 TRITONTF_Error* TRITONTF_ErrorNew(const std::string& str);
 TRITONTF_Shape* TRITONTF_ShapeNew(size_t rank, int64_t* dims);
 void TRITONTF_ShapeDelete(TRITONTF_Shape* shape);
@@ -854,13 +852,7 @@ TRITONTF_ModelCreateFromGraphDef(
   tensorflow::GraphDef graph_def;
   // Support load private model
   if (std::string(model_path).find(".pri") != std::string::npos) {
-    std::vector<char> bytes;
-    // cipher::ReadAESBinary(model_path, bytes);
-    cipher::ReadSimpleEncBinary(model_path, bytes);
-    if (!graph_def.ParseFromArray(bytes.data(), (int)bytes.size())) {
-      return TRITONTF_ErrorNew(
-          (std::string("failed to parse model:") + model_path));
-    }
+    // not supported
   } else {
     RETURN_IF_TF_ERROR(tensorflow::ReadBinaryProto(
         tensorflow::Env::Default(), model_path, &graph_def));

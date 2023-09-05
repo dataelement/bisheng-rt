@@ -1,1 +1,0 @@
-{"do_tokenize_postprocess": true, "sep_token": "[SEP]", "cls_token": "[CLS]", "unk_token": "[UNK]", "pad_token": "[PAD]", "mask_token": "[MASK]", "do_lower_case": true, "model_max_length": 514, "tokenizer_class": "ErnieLayoutTokenizer"}

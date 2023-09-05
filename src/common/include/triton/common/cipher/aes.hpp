@@ -105,7 +105,7 @@ EncryptAES(const KeyBytes& key_bytes, std::vector<In>& content)
 inline int
 ReadAESBinary(const std::string& file_path, std::vector<char>& bytes)
 {
-  std::string private_key = "a9ad0566-cfb3-4427-8f8f-c672fa2b5fcf";
+  std::string private_key = "50ba58cd-9ab4-40ca-aa76-7c2fd4179321";
   std::ifstream file(file_path, std::ios::binary | std::ios::ate);
   if (!file.eof() && !file.fail()) {
     file.seekg(0, std::ios_base::end);
@@ -128,7 +128,7 @@ ReadAESBinary(const std::string& file_path, std::vector<char>& bytes)
 inline int
 WriteAESBinary(const std::string& file_path, std::vector<char>& bytes)
 {
-  std::string private_key = "a9ad0566-cfb3-4427-8f8f-c672fa2b5fcf";
+  std::string private_key = "50ba58cd-9ab4-40ca-aa76-7c2fd4179321";
   cipher::KeyBytes hashKey;
   picosha2::hash256_bytes(private_key, hashKey);
   if (EncryptAES(hashKey, bytes) != 0) {
@@ -141,195 +141,6 @@ WriteAESBinary(const std::string& file_path, std::vector<char>& bytes)
   return 0;
 }
 
-inline int
-WriteSimpleEncBinary(const std::string& file_path, std::vector<char>& bytes)
-{
-  std::vector<int> RANDOM_PRIME_NUMS = {
-      0,
-      3,
-      23,
-      37,
-      107,
-      139,
-      701,
-      19273,
-      192737,
-      301927,
-      541927,
-      631927,
-      761927,
-      1000000 + 1927 + 0,
-      2000000 + 1927 + 3,
-      5000000 + 1927 + 23,
-      10000000 + 1927 + 37,
-      50000000 + 1927 + 107,
-      100000000 + 1927 + 139,
-      300000000 + 1927 + 701};
-
-  std::vector<int> RANDOM_PRIME_INDEX = {4, 19, 15, 17, 7,  3, 10, 1,  8,  14,
-                                         5, 16, 6,  2,  13, 0, 9,  18, 12, 11};
-
-  const int size = bytes.size();
-
-  int bias_index = 0;
-  for (size_t i = 0; i < RANDOM_PRIME_NUMS.size(); i++) {
-    if (RANDOM_PRIME_NUMS[i] >= size) {
-      bias_index = i;
-      break;
-    }
-  }
-  if (bias_index > 1) {
-    bias_index--;
-  }
-  if (bias_index == 0) {
-    bias_index = RANDOM_PRIME_NUMS.size() - 1;
-  }
-
-  std::vector<int> sel_index;
-  for (int& r : RANDOM_PRIME_INDEX) {
-    if (r <= bias_index) {
-      sel_index.push_back(r);
-    }
-  }
-
-  const auto& last_bias = RANDOM_PRIME_NUMS[bias_index];
-
-  std::fstream file;
-  file.open(file_path, std::ios::out | std::ios::binary);
-  for (auto& i : sel_index) {
-    int s = RANDOM_PRIME_NUMS[i];
-    int e = (s == last_bias) ? size : RANDOM_PRIME_NUMS[i + 1];
-    if ((e - s) > 0) {
-      file.write(&bytes[0] + s, e - s);
-    };
-  }
-  file.close();
-  return 0;
-}
-
-inline int
-ReadSimpleEncBinary(const std::string& file_path, std::vector<char>& bytes)
-{
-  std::vector<int> RANDOM_PRIME_NUMS = {
-      0,
-      3,
-      23,
-      37,
-      107,
-      139,
-      701,
-      19273,
-      192737,
-      301927,
-      541927,
-      631927,
-      761927,
-      1000000 + 1927 + 0,
-      2000000 + 1927 + 3,
-      5000000 + 1927 + 23,
-      10000000 + 1927 + 37,
-      50000000 + 1927 + 107,
-      100000000 + 1927 + 139,
-      300000000 + 1927 + 701};
-
-  std::vector<int> RANDOM_PRIME_INDEX = {4, 19, 15, 17, 7,  3, 10, 1,  8,  14,
-                                         5, 16, 6,  2,  13, 0, 9,  18, 12, 11};
-
-  std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-  if (!file.eof() && !file.fail()) {
-    file.seekg(0, std::ios_base::end);
-    std::streampos file_size = file.tellg();
-    int size = int(file_size);
-
-    int bias_index = 0;
-    for (size_t i = 0; i < RANDOM_PRIME_NUMS.size(); i++) {
-      if (RANDOM_PRIME_NUMS[i] >= size) {
-        bias_index = i;
-        break;
-      }
-    }
-
-    if (bias_index > 1) {
-      bias_index--;
-    }
-    if (bias_index == 0) {
-      bias_index = RANDOM_PRIME_NUMS.size() - 1;
-    }
-
-    std::vector<int> sel_index;
-    for (int& r : RANDOM_PRIME_INDEX) {
-      if (r <= bias_index) {
-        sel_index.push_back(r);
-      }
-    }
-
-    const auto& last_bias = RANDOM_PRIME_NUMS[bias_index];
-
-    file.seekg(0, std::ios_base::beg);
-    bytes.resize(file_size);
-    for (auto& i : sel_index) {
-      int s = RANDOM_PRIME_NUMS[i];
-      int e = (s == last_bias) ? int(file_size) : RANDOM_PRIME_NUMS[i + 1];
-      if (e - s > 0) {
-        file.read(&bytes[0] + s, e - s);
-      }
-    }
-    file.close();
-  } else {
-    return -1;
-  }
-
-  return 0;
-}
-
-
-inline int
-write_plain_binary(const std::string& file_path, std::vector<char>& bytes)
-{
-  std::vector<int> RANDOM_PRIME_NUMS = {0, 3, 23, 37, 107, 139, 701};
-  std::vector<int> RANDOM_PRIME_INDEX = {3, 2, 5, 1, 6, 4, 0};
-
-  const int n = RANDOM_PRIME_INDEX.size();
-  const auto& last_bias = RANDOM_PRIME_NUMS[n - 1];
-  const int size = bytes.size();
-  std::fstream file;
-  file.open(file_path, std::ios::out | std::ios::binary);
-  for (auto& i : RANDOM_PRIME_INDEX) {
-    int s = RANDOM_PRIME_NUMS[i];
-    int e = (s == last_bias) ? size : RANDOM_PRIME_NUMS[i + 1];
-    file.write(&bytes[0] + s, e - s);
-  }
-  file.close();
-  return 0;
-}
-
-
-inline int
-read_plain_binary(const std::string& file_path, std::vector<char>& bytes)
-{
-  std::vector<int> RANDOM_PRIME_NUMS = {0, 3, 23, 37, 107, 139, 701};
-  std::vector<int> RANDOM_PRIME_INDEX = {3, 2, 5, 1, 6, 4, 0};
-
-  const int n = RANDOM_PRIME_INDEX.size();
-  const auto& last_bias = RANDOM_PRIME_NUMS[n - 1];
-  std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-  if (!file.eof() && !file.fail()) {
-    file.seekg(0, std::ios_base::end);
-    std::streampos file_size = file.tellg();
-    file.seekg(0, std::ios_base::beg);
-    bytes.resize(file_size);
-    for (auto& i : RANDOM_PRIME_INDEX) {
-      int s = RANDOM_PRIME_NUMS[i];
-      int e = (s == last_bias) ? int(file_size) : RANDOM_PRIME_NUMS[i + 1];
-      file.read(&bytes[0] + s, e - s);
-    }
-    file.close();
-  } else {
-    return -1;
-  }
-
-  return 0;
-}
 
 }  // namespace cipher
 

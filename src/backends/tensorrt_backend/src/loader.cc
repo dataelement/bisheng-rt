@@ -32,7 +32,6 @@
 #include "logging.h"
 
 #include "triton/backend/backend_common.h"
-#include "triton/common/cipher/aes.hpp"
 
 namespace triton { namespace backend { namespace tensorrt {
 
@@ -73,8 +72,7 @@ LoadPlan(
     RETURN_IF_ERROR(ReadTextFile(plan_path, &model_data_str));
     model_data.assign(model_data_str.begin(), model_data_str.end());
   } else {
-    // cipher::ReadAESBinary(plan_path, model_data);
-    cipher::ReadSimpleEncBinary(plan_path, model_data);
+    // not supported
   }
 
   engine->reset(

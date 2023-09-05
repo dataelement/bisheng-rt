@@ -315,13 +315,6 @@ function build_server() {
   # If update common or core library, need to uncommont follow
   rm -fr tritonbuild/tritonserver/build/_deps/repo-core-build
 
-  #    --extra-core-cmake-arg="LICENSE_STRATEGY:STRING=LICENSE_HASP" \
-  #    --extra-core-cmake-arg="LICENSE_HASP_VCODE:STRING=DEMOMA" \
-
-  #  --extra-core-cmake-arg="LICENSE_STRATEGY:STRING=LICENSE_HASP" \
-  #  --extra-core-cmake-arg="LICENSE_HASP_VCODE:STRING=TBGBZ" \
-
-
   #VERBOSE="-v"
   VERBOSE=""
 
