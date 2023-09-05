@@ -446,7 +446,7 @@ def get_bbox_span_subset(spans, bbox, threshold=0.5):
 
 def overlaps(bbox1, bbox2, threshold=0.5):
     """
-    Test if more than "threshold" fraction of bbox1 overlaps with bbox2.
+    Test if more than `threshold` fraction of bbox1 overlaps with bbox2.
     """
     rect1 = Rect(list(bbox1))
     area1 = rect1.getArea()

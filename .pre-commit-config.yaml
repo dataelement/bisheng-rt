@@ -1,9 +1,9 @@
 exclude: ^scripts|docs|docker|requirements|README.md
 repos:
-  # - repo: https://github.com/PyCQA/flake8.git
-  #   rev: 3.8.3
-  #   hooks:
-  #     - id: flake8
+  - repo: https://github.com/PyCQA/flake8.git
+    rev: 3.8.3
+    hooks:
+      - id: flake8
   - repo: https://github.com/asottile/seed-isort-config
     rev: v2.2.0
     hooks:
@@ -34,16 +34,7 @@ repos:
       - id: mixed-line-ending
         args: ["--fix=lf"]
         files: \.(py|pyd)$
-  # - repo: https://github.com/jumanjihouse/pre-commit-hooks
-  #   rev: 2.1.4
-  #   hooks:
-  #     - id: markdownlint
-  #       args: ["-r", "~MD002,~MD013,~MD029,~MD033,~MD034,~MD005"]
-  # - repo: https://github.com/myint/docformatter
-  #   rev: v1.3.1
-  #   hooks:
-  #     - id: docformatter
-  #       args: ["--in-place", "--wrap-descriptions", "79"]
+        
   - repo: local
     hooks:
       - id: clang-format
