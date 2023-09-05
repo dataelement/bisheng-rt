@@ -1,5 +1,5 @@
 import time
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import torch
 from accelerate import (dispatch_model, infer_auto_device_map,

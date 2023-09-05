@@ -27,7 +27,8 @@ def load_graph(model_path):
 def add_cast_fp32_to_fp16_node(node_in_name, graph_def, node_out_name=None):
     new_node = graph_def.node.add()
     new_node.op = 'Cast'
-    new_node.name = f'{node_in_name}/Castfp16tofp32' if node_out_name is None else node_out_name
+    new_node.name = (f'{node_in_name}/Castfp16tofp32'
+                     if node_out_name is None else node_out_name)
     new_node.input.extend([node_in_name])
 
     new_node.attr['SrcT'].CopyFrom(
@@ -41,7 +42,8 @@ def add_cast_fp32_to_fp16_node(node_in_name, graph_def, node_out_name=None):
 def add_cast_fp16_to_fp32_node(node_in_name, graph_def, node_out_name=None):
     new_node = graph_def.node.add()
     new_node.op = 'Cast'
-    new_node.name = f'{node_in_name}/Castfp16tofp32' if node_out_name is None else node_out_name
+    new_node.name = (f'{node_in_name}/Castfp16tofp32'
+                     if node_out_name is None else node_out_name)
     new_node.input.extend([node_in_name])
 
     new_node.attr['SrcT'].CopyFrom(
@@ -55,8 +57,11 @@ def add_cast_fp16_to_fp32_node(node_in_name, graph_def, node_out_name=None):
 
 def rewrite_batch_norm_node(op_name, node, graph_def, target_type='fp16'):
     """
-    Rewrite FusedBatchNorm with FusedBatchNormV2 for reserve_space_1 and reserve_space_2 in FusedBatchNorm require float32 for
-    gradient calculation (See here: https://www .tensorflow.org/api_docs/cc/class/tensorflow/ops/fused-batch-norm)
+    Rewrite FusedBatchNorm with FusedBatchNormV2 for reserve_space_1 and
+    reserve_space_2 in FusedBatchNorm require float32 for
+    gradient calculation
+    (See here: https://www.tensorflow.org/
+        api_docs/cc/class/tensorflow/ops/fused-batch-norm)
     """
     if target_type == 'fp16':
         dtype = types_pb2.DT_HALF
@@ -65,7 +70,8 @@ def rewrite_batch_norm_node(op_name, node, graph_def, target_type='fp16'):
     else:
         dtype = types_pb2.DT_FLOAT
     new_node = graph_def.node.add()
-    new_node.op = 'FusedBatchNormV2' if op_name == 'FusedBatchNorm' else op_name
+    new_node.op = ('FusedBatchNormV2'
+                   if op_name == 'FusedBatchNorm' else op_name)
     new_node.name = node.name
     new_node.input.extend(node.input)
 
@@ -107,7 +113,7 @@ def rewrite_node_only_fp32(node, graph_def, target_type='fp16'):
     Rewrite CropAndResize, input 1: box, only support float
     """
 
-    dtype = types_pb2.DT_HALF
+    # dtype = types_pb2.DT_HALF
 
     new_node = graph_def.node.add()
     new_node.op = node.op
@@ -318,7 +324,7 @@ def test():
                           keep_fp32_node_name=keep_fp32_node_name)
 
     # test loading
-    sess = load_graph(save_path + '/' + name)
+    # sess = load_graph(save_path + '/' + name)
 
 
 test()

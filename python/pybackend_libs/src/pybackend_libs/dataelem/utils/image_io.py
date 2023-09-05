@@ -1,6 +1,7 @@
 import base64
 
 import cv2
+import numpy as np
 
 
 def decode_image_from_b64(b64_image):
