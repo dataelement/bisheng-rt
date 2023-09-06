@@ -1,4 +1,3 @@
-
 ## What is bisheng-rt?
 
 bisheng-rt is an open source inference serving framework that power the model inference and resource allocation.
@@ -30,7 +29,7 @@ todo: update later
 
 ### Using from pre-builded image
 
-todo: upadte later
+todo: update later
 
 ## Documentation
 
@@ -42,7 +41,7 @@ check out [bisheng-rt Dev Docs](https://m7a7tqsztt.feishu.cn/wiki/CTXNwpqGKiMs5F
 Reporting problems, asking questions
 We appreciate any feedback, questions or bug reporting regarding this project. 
 
-User can posting [Issues](https://github.com/dataelement/bisheng/issues), 
+User can post [Issues](https://github.com/dataelement/bisheng/issues), 
 follow the process outlined in the [Stack Overflow document](https://stackoverflow.com/help/mcve). 
 
 For questions, we recommend posting in our community GitHub [Discussions](https://github.com/dataelement/bisheng/discussions).
