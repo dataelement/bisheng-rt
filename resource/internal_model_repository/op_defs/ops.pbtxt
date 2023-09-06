@@ -1,0 +1,994 @@
+ops [
+  {
+    name: "dataelem.graph.MaskRCNNV5GraphTf"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+      { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+      { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+      { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ 
+      { count: 1, kind: KIND_GPU }
+    ]
+  },
+  {
+    name: "dataelem.graph.MaskRCNNV5GraphTrt"
+    backend: "tensorrt"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ 1, 1600, 1600, 3 ] }
+    ]
+
+    output [
+      { name: "output_detections", data_type: TYPE_FP32, dims: [ 1000, 8 ] },
+      { name: "output_masks", data_type: TYPE_FP32, dims: [ 1000, 1, 28, 28 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.TransformerPostGraph"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "output_ids", data_type: TYPE_INT32, dims: [ -1, -1, 5 ] },
+      { name: "parent_ids", data_type: TYPE_INT32, dims: [ -1, -1, 5 ] },
+      { name: "sequence_length", data_type: TYPE_INT32, dims: [ -1, 5 ] }
+    ]
+
+    output [
+      { name: "while/Exit_1", data_type: TYPE_STRING, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.TransformerGraphTrt"
+    backend: "tensorrt"
+    max_batch_size: 0
+
+    input [
+      { name: "inputs", data_type: TYPE_FP32, dims: [ -1, 32, -1, 1 ] },
+      { name: "inputs_shape",  data_type: TYPE_INT32, dims: [ -1, 2 ] }
+    ]
+
+    output [
+      { name: "output_ids", data_type: TYPE_INT32, dims: [ -1, -1, 5 ] },
+      { name: "parent_ids", data_type: TYPE_INT32, dims: [ -1, -1, 5 ] },
+      { name: "sequence_length", data_type: TYPE_INT32, dims: [ -1, 5 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.TransformerGraphTf"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 64
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ 32, -1, 1 ] },
+      { name: "image_shape", data_type: TYPE_INT32, dims: [ 2 ] }
+    ]
+
+    output [
+      { name: "while/Exit_1", data_type: TYPE_STRING, dims: [ 1 ] },
+      { name: "Transformer/strided_slice_16", data_type: TYPE_FP32, dims: [ 1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.TransformerGraphTfTiny"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 64
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ 16, -1, 1 ] },
+      { name: "image_shape", data_type: TYPE_INT32, dims: [ 2 ] }
+    ]
+
+    output [
+      { name: "while/Exit_1", data_type: TYPE_STRING, dims: [ 1 ] },
+      { name: "Transformer/strided_slice_16", data_type: TYPE_FP32, dims: [ 1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.ocr_format_elem"
+    backend: "python"
+    max_batch_size: 0
+    
+    parameters { key: "is_elem_ocr" value: { string_value: "1" } }
+
+    input [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+      { name: "boxes_score", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "texts", data_type: TYPE_STRING, dims: [ -1 ] },
+      { name: "texts_score", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "src_scale", data_type: TYPE_INT32, dims: [ 1, 3 ] },
+      { name: "params", data_type: TYPE_STRING, dims:[ 1 ], optional: true },
+      { name: "other_elems", data_type: TYPE_STRING, dims:[ -1 ], optional: true }
+    ]
+
+    output [
+      { name: "RESULTS", data_type: TYPE_STRING, dims:[ 1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.text_classify"
+    backend: "python"
+    max_batch_size: 0
+
+    input [
+      { name: "ocr_result", data_type: TYPE_STRING, dims: [ 1 ] },
+      { name: "params", data_type: TYPE_STRING, dims:[ 1 ], optional: true }
+    ]
+
+    output [
+      { name: "cls_result", data_type: TYPE_STRING, dims: [ 1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.TransformerV1"
+    backend: "dataelem"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "TransformerV1" } }
+    parameters { key: "dep_model_name" value: { string_value: "transformer_graph" } }
+    parameters { key: "fixed_height" value: { string_value: "32" } }
+    parameters { key: "W_min" value: { string_value: "40" } }
+    parameters { key: "W_max" value: { string_value: "800" } }
+    parameters { key: "downsample_rate" value: { string_value: "4" } }
+    parameters { key: "input_channels" value: { string_value: "1" } }
+    parameters { key: "batch_size" value: { string_value: "64" } }
+    parameters { key: "use_trt" value: { string_value: "0" } }
+
+    input [
+      { name: "image", data_type: TYPE_UINT8, dims: [ -1, -1, 3 ] },
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true },
+      { name: "patchs", data_type: TYPE_STRING, dims: [ -1 ], optional: true }
+    ]
+
+    output [
+      { name: "texts", data_type: TYPE_STRING, dims: [ -1 ] },
+      { name: "texts_score", data_type: TYPE_FP32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.MaskRCNN"
+    backend: "dataelem"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MaskRCNN" } }
+    parameters { key: "dep_model_name" value: { string_value: "maskrcnn_graph" } }
+    parameters { key: "version" value: { string_value: "v5" } }
+
+    input [
+      { name: "image", data_type: TYPE_UINT8, dims: [ -1, -1, 3 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+      { name: "boxes_score", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "src_scale", data_type: TYPE_INT32, dims: [ 1, 3 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.crnn_graph_trt"
+    platform: "tensorrt_plan"
+    max_batch_size: 32
+    
+    input [
+      { name: "x", data_type: TYPE_FP32, dims: [3, 32, -1] }
+    ]
+
+    output [
+      { name: "feat_ind", data_type: TYPE_INT32, dims: [-1] },
+      { name: "feat_prob", data_type: TYPE_FP32, dims: [-1] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.alg.CRNN"
+    backend: "dataelem"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "CRNN" } }
+    parameters { key: "dep_model_name" value: { string_value: "crnn_graph" } }
+    parameters { key: "fixed_height" value: { string_value: "32" } }
+    parameters { key: "W_min" value: { string_value: "40" } }
+    parameters { key: "W_max" value: { string_value: "800" } }
+    parameters { key: "downsample_rate" value: { string_value: "4" } }
+    parameters { key: "input_channels" value: { string_value: "3" } }
+    parameters { key: "batch_size" value: { string_value: "32" } }
+    parameters { key: "charset_name" value: { string_value: "elem_character_dict.txt" } }
+
+    input [
+      { name: "image", data_type: TYPE_UINT8, dims: [ -1, -1, 3 ] },
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true },
+      { name: "patchs", data_type: TYPE_STRING, dims: [ -1 ], optional: true }
+    ]
+
+    output [
+      { name: "texts", data_type: TYPE_STRING, dims: [ -1 ] },
+      { name: "texts_score", data_type: TYPE_FP32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.ellm_graph"
+    backend: "onnxruntime"
+    max_batch_size: 0
+
+    input [
+      { name: "input_ids", data_type: TYPE_INT64, dims: [-1, -1] },
+      { name: "token_type_ids", data_type: TYPE_INT64, dims:[-1, -1] },
+      { name: "position_ids", data_type: TYPE_INT64, dims:[-1, -1] },
+      { name: "attention_mask", data_type: TYPE_INT64, dims:[-1, -1] },
+      { name: "bbox", data_type: TYPE_INT64, dims:[-1, -1, 4] },
+      { name: "image", data_type: TYPE_FP32, dims:[-1, 3, 224, 224] }
+    ]
+
+    output [
+      { name: "sigmoid_1.tmp_0", data_type: TYPE_FP32, dims:[-1, 512] },
+      { name: "sigmoid_2.tmp_0", data_type: TYPE_FP32, dims:[-1, 512] }
+    ]
+
+    instance_group [{ count: 1, kind: KIND_GPU }]
+  },
+  {
+    name: "dataelem.graph.ellm_graph_trt"
+    backend: "tensorrt"
+    max_batch_size: 0
+
+    input [
+      { name: "input_ids", data_type: TYPE_INT32, dims: [-1, -1] },
+      { name: "token_type_ids", data_type: TYPE_INT32, dims:[-1, -1] },
+      { name: "position_ids", data_type: TYPE_INT32, dims:[-1, -1] },
+      { name: "attention_mask", data_type: TYPE_INT32, dims:[-1, -1] },
+      { name: "bbox", data_type: TYPE_INT32, dims:[-1, -1, 4] },
+      { name: "image", data_type: TYPE_FP32, dims:[-1, 3, 224, 224] }
+    ]
+
+    output [
+      { name: "sigmoid_1.tmp_0", data_type: TYPE_FP32, dims:[-1, 512] },
+      { name: "sigmoid_2.tmp_0", data_type: TYPE_FP32, dims:[-1, 512] }
+    ]
+
+    instance_group [{ count: 1, kind: KIND_GPU }]
+  },
+  {
+    name: "dataelem.alg.ellm"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "ELLM" } }
+    parameters { key: "dep_model_name" value: { string_value: "ELLM_graph" } }
+
+    input [
+      { name: "image", data_type: TYPE_UINT8, dims: [-1, -1, 3] },
+      { name: "ocr_results", data_type: TYPE_STRING, dims:[1] },
+      { name: "ellm_schema", data_type: TYPE_STRING, dims:[1] }
+    ]
+
+    output [
+      { name: "ellm_result", data_type: TYPE_STRING, dims:[1] }
+    ]
+
+    instance_group [{ count: 1, kind: KIND_CPU }]
+  },
+  {
+    name: "dataelem.op.general_table_detect_algo"
+    backend: "dataelem"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MaskRCNN" } }
+    parameters { key: "dep_model_name" value: { string_value: "general_table_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+        { name: "image", data_type: TYPE_UINT8, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ] optional: true}
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+        { name: "boxes_score", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "src_scale", data_type: TYPE_INT32, dims: [ 1, 3 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+
+  {
+    name: "dataelem.op.general_table_rowcol_detect_algo"
+    backend: "dataelem"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "TableMRCNN" } }
+    parameters { key: "dep_model_name" value: { string_value: "general_table_rowcol_detect_graph" } }
+
+
+    input [
+        { name: "image", data_type: TYPE_UINT8, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] },
+        { name: "scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "labels", data_type: TYPE_INT32, dims: [ -1 ] },
+        { name: "src_scale", data_type: TYPE_INT32, dims: [ 1, 3 ] }
+    ]
+
+    version_policy: { all { }}
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.CtcReviewGraphTf"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 64
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ 32, -1, 1 ] },
+      { name: "image_shape", data_type: TYPE_INT32, dims: [ 2 ] }
+    ]
+
+    output [
+      { name: "Transformer/prediction_ctc", data_type: TYPE_STRING, dims: [ 1 ] },
+      { name: "Transformer/scores_ctc", data_type: TYPE_FP32, dims: [ 1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.checkbox_post"
+    backend: "python"
+    max_batch_size: 0
+
+    input [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+      { name: "checkbox_boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+      { name: "scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "params", data_type: TYPE_STRING, dims:[ 1 ], optional: true }
+    ]
+
+    output [
+    { name: "text_boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+    { name: "text_scores", data_type: TYPE_FP32, dims: [ -1 ] }  
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.auto_hand_print"
+    backend: "python"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_UINT8, dims: [ -1, -1, 3], optional: true },
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] , optional: true},
+      { name: "params", data_type: TYPE_STRING, dims:[ 1 ], optional: true },
+      { name: "patchs", data_type: TYPE_STRING, dims:[ -1 ], optional: true }
+    ]
+    output [
+    { name: "texts", data_type: TYPE_STRING, dims: [ -1 ] },
+    { name: "texts_score", data_type: TYPE_FP32, dims: [ -1 ] }
+    ]
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.hw_classify_graph"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "inputs", data_type: TYPE_FP32, dims: [ -1, 224, 224, 3 ] }
+    ]
+    output [
+    { name: "output/Softmax", data_type: TYPE_FP32, dims: [ -1, 2 ] }
+    ]
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.general_table_cell_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+    output [
+        { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+        { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+        { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU }
+    ]
+  },
+  {
+    name: "dataelem.graph.general_table_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+    output [
+        { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+        { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+        { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.general_table_rowcol_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+        { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+        { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+        { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.alg.general_table_cell_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableCellDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "general_table_cell_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.general_table_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "general_table_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.general_table_rowcol_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableRowColDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "general_table_rowcol_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] },
+        { name: "scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU }
+    ]
+  },
+  {
+    name: "dataelem.graph.seal_curve_text_det"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+        { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+        { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+        { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU} ]
+  },
+  {
+    name: "dataelem.graph.seal_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+        { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+        { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+        { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.seal_quad_text_det"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+        { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+        { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+        { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.seal_text_reg"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 64
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ 32, -1, 3 ] },
+        { name: "image_shape", data_type: TYPE_INT32, dims: [ 2 ] }
+    ]
+
+    output [
+        { name: "while/Exit_1", data_type: TYPE_STRING, dims: [ 1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.alg.seal_curve_text_det"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnCurveTextDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "seal_curve_text_det_graph" } }
+    parameters { key: "scale_list" value: { string_value: "320 480 640" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.seal_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnSealDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "seal_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] },
+        { name: "labels", data_type: TYPE_INT32, dims: [ -1 ] },
+        { name: "boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+        { name: "boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.seal_quad_text_det"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnQuadTextDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "seal_quad_text_det_graph" } }
+    parameters { key: "scale_list" value: { string_value: "128 256 384 512 640" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] }
+    ]
+
+    version_policy: { all { }}
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.seal_text_reg"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "OcrTransformer" } }
+    parameters { key: "dep_model_name" value: { string_value: "seal_text_reg_graph" } }
+    parameters { key: "fixed_height" value: { string_value: "32" } }
+    parameters { key: "W_min" value: { string_value: "40" } }
+    parameters { key: "W_max" value: { string_value: "800" } }
+    parameters { key: "downsample_rate" value: { string_value: "4" } }
+    parameters { key: "input_channels" value: { string_value: "3" } }
+    parameters { key: "batch_size" value: { string_value: "64" } }
+
+    input [
+        { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, -1, -1 ] },
+        { name: "image_shape", data_type: TYPE_INT32, dims: [ -1, 2 ] },
+        { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+        { name: "while/Exit_1", data_type: TYPE_STRING, dims: [ -1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.detect_ps_net"
+    backend: "onnxruntime"
+    max_batch_size: 0
+
+    input [
+      { name: "model.conv1.weight", data_type: TYPE_FP32, dims: [1, 3, 512, 512] }
+    ]
+
+    output [
+    { name: "noise_extractor.model.fc.bias", data_type: TYPE_FP32, dims: [ 1,1,128,128 ] },
+    { name: "1410", data_type: TYPE_FP32, dims: [ 1,1,512,512 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.erase_moire_net"
+    platform: "tensorflow_graphdef"
+    max_batch_size: 0
+
+    input [
+      { name: "input_1", data_type: TYPE_FP32, dims: [1, -1, -1, 3] }
+    ]
+
+    output [
+    { name: "depth2_space_3/DepthToSpace", data_type: TYPE_FP32, dims: [ 1,-1,-1,3 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.erase_net"
+    backend: "onnxruntime"
+    max_batch_size: 0
+
+    input [
+      { name: "x", data_type: TYPE_FP32, dims:[1, 3, -1, -1] }
+    ]
+
+    output [
+      { name: "conv2d_143.tmp_1", data_type: TYPE_FP32, dims:[1, 3, -1, -1] }
+    ]
+
+    instance_group [{ count: 1, kind: KIND_GPU }]
+  },
+  {
+    name: "dataelem.graph.erase_net_wm"
+    backend: "onnxruntime"
+    max_batch_size: 0
+
+    input [
+      { name: "x", data_type: TYPE_FP32, dims:[1, 3, -1, -1] }
+    ]
+
+    output [
+      { name: "conv2d_143.tmp_1", data_type: TYPE_FP32, dims:[1, 3, -1, -1] }
+    ]
+
+    instance_group [{ count: 1, kind: KIND_GPU }]
+  },
+  {
+    name: "dataelem.graph.general_prep"
+    backend: "python"
+    max_batch_size: 0
+
+    input [
+      { name: "bin_images", data_type: TYPE_STRING, dims: [ -1] },
+      { name: "params", data_type: TYPE_STRING, dims:[ 1 ], optional: true }
+    ]
+    output [
+    { name: "prep_image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+    { name: "prep_params", data_type: TYPE_STRING, dims: [ -1 ] } 
+    ]
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.caibao_table_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+      { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+      { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+      { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_GPU }
+    ]
+  },
+  {
+    name: "dataelem.graph.caibao_table_rowcol_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+      { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+      { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+      { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.alg.caibao_table_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "caibao_table_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.caibao_table_rowcol_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableRowColDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "caibao_table_rowcol_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] },
+      { name: "scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.graph.liushui_table_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+      { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+      { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+      { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.graph.liushui_table_rowcol_detect"
+    platform: "tensorflow_graphdef"
+    backend: "tensorflow"
+    max_batch_size: 0
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] }
+    ]
+
+    output [
+      { name: "output/scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/masks", data_type: TYPE_FP32, dims: [ -1, 28, 28 ] },
+      { name: "output/boxes", data_type: TYPE_FP32, dims: [ -1, 4 ] },
+      { name: "output/boxes_cos", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/boxes_sin", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "output/labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_GPU } ]
+  },
+  {
+    name: "dataelem.alg.liushui_table_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "liushui_table_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.alg.liushui_table_rowcol_detect"
+    backend: "dataelem_python"
+    max_batch_size: 0
+
+    parameters { key: "algorithm_type" value: { string_value: "MrcnnTableRowColDetect" } }
+    parameters { key: "dep_model_name" value: { string_value: "liushui_table_rowcol_detect_graph" } }
+    parameters { key: "scale_list" value: { string_value: "600 800 1000 1200 1400 1600" } }
+
+    input [
+      { name: "image", data_type: TYPE_FP32, dims: [ -1, -1, 3 ] },
+      { name: "params", data_type: TYPE_STRING, dims: [ 1 ], optional: true }
+    ]
+
+    output [
+      { name: "boxes", data_type: TYPE_FP32, dims: [ -1, -1 ] },
+      { name: "scores", data_type: TYPE_FP32, dims: [ -1 ] },
+      { name: "labels", data_type: TYPE_INT32, dims: [ -1 ] }
+    ]
+
+    instance_group [ { kind: KIND_CPU } ]
+  },
+  {
+    name: "dataelem.pymodel.huggingface_model"
+    backend: "python"
+    max_batch_size: 0
+
+    parameters { key: "pymodel_type" value: { string_value: "" } }
+
+    input [
+      { name: "INPUT", data_type: TYPE_STRING, dims: [ 1 ] }
+    ]
+
+    output [
+      { name: "OUTPUT", data_type: TYPE_STRING, dims: [ 1 ] }
+    ]
+
+    instance_group [ { count: 1, kind: KIND_CPU } ]
+  }
+]

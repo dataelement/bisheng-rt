@@ -1,0 +1,23 @@
+name: "ocr_general_v3"
+backend: "bls_app"
+max_batch_size: 0
+
+parameters { key: "AppType" value: { string_value: "OCRApp" } }
+parameters { key: "det_models" value: { string_value: "dIns1 dIns2 dIns3" } }
+parameters { key: "recog_models" value: { string_value: "rIns1 rIns2 rIns3" } }
+parameters { key: "general_models" value: { string_value: "gIns1 gIns2 vie1 vie2" } }
+
+input [
+  {
+    name: "b64_image"
+    data_type: TYPE_STRING
+    dims: [ 1 ]
+  }
+]
+output []
+
+instance_group [
+  {
+    kind: KIND_CPU
+  }
+]

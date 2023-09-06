@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package inference;
+
+import "model_config.proto";
+
+message OpsDef
+{
+  repeated ModelConfig ops = 1;
+}
+
+message PipelinesDef
+{
+  repeated ModelConfig pipelines = 1;
+}
