@@ -1,12 +1,13 @@
 import copy
-import time
-from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
 
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
 from .qwen_utils import auto_configure_device_map
+
+# import time
+# from typing import Any, Dict, List, Literal, Optional, Union
 
 
 def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):

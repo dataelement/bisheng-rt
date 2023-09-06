@@ -1,15 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
-# This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
+# This software may be used and distributed according to the terms of the Llama 2 Community License Agreement. # noqa: E501
 
-import json
-import os
-import sys
-import time
-from pathlib import Path
-from typing import List, Literal, Optional, Tuple, TypedDict
+# import json
+# import os
+# import sys
+# import time
+# from pathlib import Path
+from typing import List, Literal, TypedDict
 
 import torch
-import torch.nn.functional as F
+
+# import torch.nn.functional as F
 
 Role = Literal['system', 'user', 'assistant']
 
@@ -87,12 +88,12 @@ class LlamaTokenizerHelper:
                 msg['role'] == 'user' for msg in dialog[::2]
             ]) and all([msg['role'] == 'assistant' for msg in dialog[1::2]]), (
                 "model only supports 'system', 'user' and 'assistant' roles, "
-                "starting with 'system', then 'user' and alternating (u/a/u/a/u...)"
+                "starting with 'system', then 'user' and alternating (u/a/u/a/u...)"  # noqa: E501
             )
             dialog_tokens: List[int] = sum(
                 [
                     self.encode(
-                        f"{B_INST} {(prompt['content']).strip()} {E_INST} {(answer['content']).strip()} ",
+                        f"{B_INST} {(prompt['content']).strip()} {E_INST} {(answer['content']).strip()} ",  # noqa: E501
                         bos=True,
                         eos=True,
                     ) for prompt, answer in zip(

@@ -1,6 +1,6 @@
 import base64
 import math
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List
 
 import cv2
 import lanms

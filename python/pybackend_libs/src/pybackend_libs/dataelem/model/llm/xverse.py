@@ -1,9 +1,12 @@
 import copy
-import time
-from typing import Any, Dict, List, Literal, Optional, Union
 
-from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
+import torch
+
+from .llm import (BaseLLM, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
+
+# import time
+# from typing import Any, Dict, List, Literal, Optional, Union
 
 
 class XverseChat(BaseLLM):
@@ -33,15 +36,16 @@ class XverseChat(BaseLLM):
                    gpu_memory,
                    use_generate_config=False)
 
-    def chat(self, **kwargs):
+    def predict(self, kwargs):
         req_dict = copy.copy(self.default_params)
         req_dict.update(kwargs)
+        model_name = kwargs.get('model')
 
         query = req_dict['messages'][-1].content
         inputs = self.tokenizer(query, return_tensors='pt').input_ids
         inputs = inputs.to(self.default_device)
         with torch.no_grad():
-            generated_ids = model.generate(
+            generated_ids = self.model.generate(
                 inputs,
                 max_length=req_dict['max_length'],
                 eos_token_id=self.tokenizer.eos_token_id,
@@ -61,7 +65,7 @@ class XverseChat(BaseLLM):
                                         object='chat.completion')
 
         torch_gc(self.devices)
-        return result
+        return result.dict()
 
-    def completion(self, **kwargs):
+    def completion(self, kwargs):
         pass

@@ -99,7 +99,7 @@ _C.BACKBONE.RESNET_NUM_BLOCKS = [3, 4, 23, 3]  # for resnet101
 # Use a base model with TF-preferred padding mode,
 # which may pad more pixels on right/bottom than top/left.
 # See https://github.com/tensorflow/tensorflow/issues/18213
-# In tensorpack model zoo, ResNet models with TF_PAD_MODE=False are marked with "-AlignPadding".
+# In tensorpack model zoo, ResNet models with TF_PAD_MODE=False are marked with "-AlignPadding". # noqa: E501
 # All other models under `ResNet/` in the model zoo are using TF_PAD_MODE=True.
 # Using either one should probably give the same performance.
 # We use the "AlignPadding" one just to be consistent with caffe2.
@@ -125,15 +125,15 @@ _C.RPN.ANCHOR_RATIOS = (0.1, 0.2, 0.5, 0.8, 1.0, 1.5, 2, 5, 10)
 
 # rpn training -------------------------
 _C.RPN.PROPOSAL_NMS_THRESH = 0.7
-# Anchors which overlap with a crowd box (IOA larger than threshold) will be ignored.
+# Anchors which overlap with a crowd box (IOA larger than threshold) will be ignored. # noqa: E501
 # Setting this to a value larger than 1.0 will disable the feature.
 # It is disabled by default because Detectron does not do this.
 
 # RPN proposal selection -------------------------------
 # for C4
 _C.RPN.TEST_PRE_NMS_TOPK = 6000
-_C.RPN.TEST_POST_NMS_TOPK = 1000  # if you encounter OOM in inference, set this to a smaller number
-# for FPN, #proposals per-level and #proposals after merging are (for now) the same
+_C.RPN.TEST_POST_NMS_TOPK = 1000  # if you encounter OOM in inference, set this to a smaller number # noqa: E501
+# for FPN, #proposals per-level and #proposals after merging are (for now) the same # noqa: E501
 # if FPN.PROPOSAL_MODE = 'Joint', these options have no effect
 _C.RPN.TEST_PER_LEVEL_NMS_TOPK = 2000
 
@@ -164,7 +164,7 @@ _C.CASCADE.BBOX_REG_WEIGHTS = [[10., 10., 5., 5.], [20., 20., 10., 10.],
 # testing -----------------------
 # _C.TEST.FRCNN_NMS_THRESH = 0.8
 
-# # Smaller threshold value gives significantly better mAP. But we use 0.05 for consistency with Detectron.
+# # Smaller threshold value gives significantly better mAP. But we use 0.05 for consistency with Detectron. # noqa: E501
 # _C.TEST.RESULT_SCORE_THRESH = 0.3
 # _C.TEST.RESULTS_PER_IM = 300
 

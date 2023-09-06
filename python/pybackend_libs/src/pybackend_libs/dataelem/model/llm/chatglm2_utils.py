@@ -1,7 +1,7 @@
-import os
-from typing import Dict, Optional, Tuple, Union
+# import os
+from typing import Dict
 
-import numpy as np
+# import numpy as np
 
 
 def auto_configure_device_map(model, max_memory,

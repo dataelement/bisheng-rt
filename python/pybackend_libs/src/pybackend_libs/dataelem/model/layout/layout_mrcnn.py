@@ -1,15 +1,16 @@
-import argparse
+# import argparse
 import base64
-import json
+# import json
 import os
-import time
-from typing import Any, Dict, List, Tuple, Union
 
 import cv2
 import numpy as np
-import requests
 import tensorflow as tf
 from shapely.geometry import Polygon
+
+# import time
+# from typing import Any, Dict, List, Tuple, Union
+# import requests
 
 CLASSES = ['印章', '图片', '标题', '段落', '表格', '页眉', '页码', '页脚', '其他']
 CLASS_MAP = {(k + 1): v for k, v in enumerate(CLASSES)}

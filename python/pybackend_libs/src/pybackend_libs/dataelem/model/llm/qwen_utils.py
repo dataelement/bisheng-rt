@@ -1,5 +1,5 @@
-import os
-from typing import Dict, Optional, Tuple, Union
+# import os
+from typing import Dict
 
 import numpy as np
 
@@ -10,7 +10,7 @@ def auto_configure_device_map(model, max_memory,
     num_trans_layers = 32
     devices = sorted(list(max_memory.keys()))
     num_gpus = len(devices)
-    per_gpu_layers = num_trans_layers / num_gpus
+    # per_gpu_layers = num_trans_layers / num_gpus
 
     layer_names = [
         'transformer.wte',

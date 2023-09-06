@@ -1,12 +1,13 @@
 import time
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import List, Optional
 
 import torch
 from accelerate import infer_auto_device_map, init_empty_weights
 from pydantic import BaseModel, Field
 from torch import Tensor
 from transformers import AutoConfig, AutoModel, AutoTokenizer
-from transformers.generation.utils import GenerationConfig
+
+# from transformers.generation.utils import GenerationConfig
 
 
 def average_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
@@ -52,9 +53,10 @@ class BaseEmbedding(object):
         torch_seed()
 
         if use_sentence_transformers:
-            torch.cuda.set_device(int(devices[0]))
-            self.model = SentenceTransformer(pretrain_path)
-            self.model.eval()
+            raise Exception('not support for sentence-transformers')
+            # torch.cuda.set_device(int(devices[0]))
+            # self.model = SentenceTransformer(pretrain_path)
+            # self.model.eval()
             return
 
         memory_per_device = int(int(gpu_memory) / len(devices))

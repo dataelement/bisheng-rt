@@ -13,31 +13,31 @@ def test_llama2_7b_chat():
 
     model = Llama2Chat(**params)
 
-    inp2 = {
-        'model':
-        'llama2_7b_chat',
-        'messages': [
-            {
-                'role': 'user',
-                'content': 'Hey, are you conscious? Can you talk to me?'
-            },
-        ]
-    }
+    # inp2 = {
+    #     'model':
+    #     'llama2_7b_chat',
+    #     'messages': [
+    #         {
+    #             'role': 'user',
+    #             'content': 'Hey, are you conscious? Can you talk to me?'
+    #         },
+    #     ]
+    # }
 
-    inp1 = {
-        'model':
-        'llama2_7b_chat',
-        'messages': [
-            {
-                'role': 'system',
-                'content': 'Always answer with Haiku'
-            },
-            {
-                'role': 'user',
-                'content': 'I am going to Paris, what should I see?'
-            },
-        ]
-    }
+    # inp1 = {
+    #     'model':
+    #     'llama2_7b_chat',
+    #     'messages': [
+    #         {
+    #             'role': 'system',
+    #             'content': 'Always answer with Haiku'
+    #         },
+    #         {
+    #             'role': 'user',
+    #             'content': 'I am going to Paris, what should I see?'
+    #         },
+    #     ]
+    # }
 
     inp = {
         'model':

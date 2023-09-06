@@ -1,12 +1,13 @@
-import base64
+# import base64
 import json
-import time
 
-import cv2
-import numpy as np
+# import cv2
+# import numpy as np
 from pybackend_libs.dataelem.model.ocr.ocr_client import OCRClient
 from pybackend_libs.dataelem.model.table import TableCellApp, TableRowColApp
 from pybackend_libs.dataelem.utils import convert_file_to_base64
+
+# import time
 
 REPO = '/home/public/models/'
 

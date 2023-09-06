@@ -1,9 +1,10 @@
 import base64
-import time
 
-import numpy as np
+# import numpy as np
 from pybackend_libs.dataelem.model.layout.layout_mrcnn import LayoutMrcnn
 from pybackend_libs.dataelem.model.layout.mrcnn_pt import LayoutMrcnnPt
+
+# import time
 
 
 def test_elem_layout_v1_fp16():

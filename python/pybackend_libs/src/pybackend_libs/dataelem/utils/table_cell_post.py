@@ -445,7 +445,8 @@ def ocr_result_matching(cell_bboxes, ocr_results, iou_thres=0.7, sep_char=''):
                     insert_staus = 0
                     for k, matched_box in enumerate(matched_bboxes):
                         delta_y = np.abs(box_text[1] - matched_box[1])
-                        if delta_y <= delta_y_threhold: continue
+                        if delta_y <= delta_y_threhold:
+                            continue
 
                         if box_text[1] < matched_box[1]:
                             matched_bboxes.insert(k, box_text)

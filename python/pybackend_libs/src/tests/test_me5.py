@@ -1,3 +1,4 @@
+# flake8: noqa
 import numpy as np
 from pybackend_libs.dataelem.model import ME5Embedding
 

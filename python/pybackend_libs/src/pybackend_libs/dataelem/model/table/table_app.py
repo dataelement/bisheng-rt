@@ -1,18 +1,18 @@
+# flake8: noqa
 import base64
 import copy
-import io
+# import io
 import json
 import math
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List
 
 import cv2
 import numpy as np
-from pybackend_libs.dataelem.utils import (decode_image_from_b64, intersection,
-                                           perspective_transform,
+from pybackend_libs.dataelem.utils import (intersection, perspective_transform,
                                            rotate_image_only,
                                            rotate_polys_only)
-from pybackend_libs.dataelem.utils.html_to_excel import document_to_workbook
+# from pybackend_libs.dataelem.utils.html_to_excel import document_to_workbook
 from pybackend_libs.dataelem.utils.table_cell_post import (PostCell,
                                                            area_to_html,
                                                            format_html)

@@ -1,11 +1,12 @@
 import copy
-import time
-from typing import Any, Dict, List, Literal, Optional, Union
 
 import torch
 
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
+
+# import time
+# from typing import Any, Dict, List, Literal, Optional, Union
 
 
 def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):

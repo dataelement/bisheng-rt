@@ -1,11 +1,11 @@
-import base64
-import time
+# import base64
+# import time
 
 import cv2
 import numpy as np
 from pybackend_libs.dataelem.model.table.table_mrcnn import (
     MrcnnTableCellDetect, MrcnnTableDetect, MrcnnTableRowColDetect)
-from pybackend_libs.dataelem.utils import convert_file_to_base64
+from pybackend_libs.dataelem.utils import convert_file_to_base64, crop
 
 REPO = '/home/public/models/'
 
