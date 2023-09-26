@@ -1,4 +1,5 @@
 import copy
+from functools import partial
 
 import torch
 
@@ -69,11 +70,17 @@ class QwenChat(BaseLLM):
         if precision == 'bf16':
             load_params = {'bf16': True}
 
+        num_layers = int(kwargs.get('num_layers', '40'))
+        device_map_func = partial(auto_configure_device_map,
+                                  num_trans_layers=num_layers)
+        use_safetensors = bool(kwargs.get('use_safetensors', '0'))
+
         self._load(pretrain_path,
                    precision,
                    devices,
                    gpu_memory,
-                   auto_configure_device_map=auto_configure_device_map,
+                   use_safetensors=use_safetensors,
+                   auto_configure_device_map=device_map_func,
                    **load_params)
         self.generation_config.update(**self.default_params)
         self.model.generation_config = self.generation_config
