@@ -4,10 +4,11 @@ from typing import Dict
 import numpy as np
 
 
-def auto_configure_device_map(model, max_memory,
-                              no_split_module_classes) -> Dict[str, int]:
-
-    num_trans_layers = 32
+def auto_configure_device_map(model,
+                              max_memory,
+                              no_split_module_classes,
+                              num_trans_layers=32) -> Dict[str, int]:
+    # num_trans_layers = 32
     devices = sorted(list(max_memory.keys()))
     num_gpus = len(devices)
     # per_gpu_layers = num_trans_layers / num_gpus
