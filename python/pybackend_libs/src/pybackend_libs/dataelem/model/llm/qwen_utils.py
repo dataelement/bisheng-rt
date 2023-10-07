@@ -4,6 +4,35 @@ from typing import Dict
 import numpy as np
 
 
+def auto_configure_device_map2(model,
+                               max_memory,
+                               no_split_module_classes,
+                               num_trans_layers=32,
+                               devices=None) -> Dict[str, int]:
+    # refer https://github.com/QwenLM/Qwen/blob/main/utils.py
+    num_gpus = len(max_memory.keys())
+    per_gpu_layers = (num_trans_layers + 2) / num_gpus
+
+    used_devices = [int(d) for d in devices]
+    device_map = {
+        'transformer.wte': used_devices[0],
+        'transformer.ln_f': used_devices[0],
+        'lm_head': used_devices[num_gpus - 1]
+    }
+
+    used = 1
+    gpu_target = 0
+    for i in range(num_trans_layers):
+        if used >= per_gpu_layers:
+            gpu_target += 1
+            used = 0 if gpu_target < num_gpus - 1 else 1
+        assert gpu_target < num_gpus
+        device_map[f'transformer.h.{i}'] = used_devices[gpu_target]
+        used += 1
+
+    return device_map
+
+
 def auto_configure_device_map(model,
                               max_memory,
                               no_split_module_classes,

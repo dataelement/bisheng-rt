@@ -5,7 +5,7 @@ import torch
 
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
-from .qwen_utils import auto_configure_device_map
+from .qwen_utils import auto_configure_device_map2
 
 # import time
 # from typing import Any, Dict, List, Literal, Optional, Union
@@ -71,8 +71,9 @@ class QwenChat(BaseLLM):
             load_params = {'bf16': True}
 
         num_layers = int(kwargs.get('num_layers', '40'))
-        device_map_func = partial(auto_configure_device_map,
-                                  num_trans_layers=num_layers)
+        device_map_func = partial(auto_configure_device_map2,
+                                  num_trans_layers=num_layers,
+                                  devices=devices)
         use_safetensors = bool(kwargs.get('use_safetensors', '0'))
 
         self._load(pretrain_path,
