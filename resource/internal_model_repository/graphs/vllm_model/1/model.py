@@ -93,6 +93,16 @@ def _get_optional_params(request, name):
     return json.loads(tensor.as_numpy()[0]) if tensor else {}
 
 
+class Messages2Prompt(object):
+    def __init__(self, model_type):
+        self.model_type = model_type
+
+    def run(self, messages):
+        # todo: support real logic, we need transform the messages to prompt
+        prompt = messages[-1].content
+        return prompt
+
+
 class TritonPythonModel:
     def initialize(self, args):
         self.logger = pb_utils.Logger
@@ -153,6 +163,8 @@ class TritonPythonModel:
             'tensor_parallel_size': tensor_parallel_size,
             'dtype': dtype,
         }
+
+        self.messages_to_prompt = Messages2Prompt(pymodel_type)
 
         # Create an AsyncLLMEngine from the config from JSON
         self.llm_engine = AsyncLLMEngine.from_engine_args(
@@ -269,7 +281,7 @@ class TritonPythonModel:
             inp = json.loads(inp_str)
             request = ChatCompletionRequest.parse_obj(inp)
 
-            prompt = request.messages[-1].content
+            prompt = self.messages_to_prompt(request.messages)
             stream = request.stream
 
             params_dict = request.sampling_parameters
