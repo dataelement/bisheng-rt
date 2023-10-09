@@ -36,6 +36,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import triton_python_backend_utils as pb_utils
+from pybackend_libs.dataelem.model.vllm.conversation import get_gen_prompt
 from pydantic import BaseModel, Field
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
@@ -98,15 +99,15 @@ class Messages2Prompt(object):
         self.model_type = model_type
 
     def run(self, messages):
-        # todo: support real logic, we need transform the messages to prompt
-        prompt = messages[-1].content
-        return prompt
+        messages = [m.dict() for m in messages]
+        return get_gen_prompt(self.model_type, messages)
 
 
 class TritonPythonModel:
     def initialize(self, args):
         self.logger = pb_utils.Logger
         self.model_config = json.loads(args['model_config'])
+        self.model_name = args['model_name']
 
         # assert are in decoupled mode. Currently, Triton needs to use
         # decoupled policy for asynchronously forwarding requests to
@@ -164,7 +165,7 @@ class TritonPythonModel:
             'dtype': dtype,
         }
 
-        self.messages_to_prompt = Messages2Prompt(pymodel_type)
+        self.messages_to_prompt = Messages2Prompt(self.model_name)
 
         # Create an AsyncLLMEngine from the config from JSON
         self.llm_engine = AsyncLLMEngine.from_engine_args(
@@ -250,15 +251,29 @@ class TritonPythonModel:
         Parses the output from the vLLM engine into Triton
         response.
         """
-        choice_data = ChatCompletionResponseChoice(index=0,
-                                                   message=ChatMessage(
-                                                       role='assistant',
-                                                       content=vllm_output),
-                                                   finish_reason='stop')
 
-        resp = ChatCompletionResponse(model=request.model,
-                                      choices=[choice_data],
-                                      object='chat.completion')
+        choices = []
+        for output in vllm_output.outputs:
+            choice_data = ChatCompletionResponseChoice(
+                index=output.index,
+                message=ChatMessage(role='assistant', content=output.text),
+                finish_reason=output.finish_reason,
+            )
+            choices.append(choice_data)
+
+        num_prompt_tokens = len(vllm_output.prompt_token_ids)
+        num_generated_tokens = sum(
+            len(output.token_ids) for output in vllm_output.outputs)
+        usage = UsageInfo(
+            prompt_tokens=num_prompt_tokens,
+            completion_tokens=num_generated_tokens,
+            total_tokens=num_prompt_tokens + num_generated_tokens,
+        )
+
+        resp = ChatCompletionResponse(model=self.model_name,
+                                      choices=choices,
+                                      object='chat.completion',
+                                      usage=usage)
 
         result_arr = np.array([resp.json()], dtype=np.object_)
 
