@@ -26,7 +26,7 @@ def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):
     if system_content:
         messages[-1]['content'] = system_content + messages[-1]['content']
 
-    messages = messages[::-1]
+    # messages = messages[::-1] # it is bug.
     with torch.no_grad():
         response = model.chat(tokenizer, messages)
 

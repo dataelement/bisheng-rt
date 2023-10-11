@@ -7,7 +7,7 @@ from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
 from .qwen_utils import auto_configure_device_map2
 
-# import time
+# from pybackend_libs.dataelem.utils import Timer
 # from typing import Any, Dict, List, Literal, Optional, Union
 
 
@@ -75,6 +75,8 @@ class QwenChat(BaseLLM):
                                   num_trans_layers=num_layers,
                                   devices=devices)
         use_safetensors = bool(kwargs.get('use_safetensors', '0'))
+        use_dispatch = bool(kwargs.get('use_dispatch', '0'))
+        load_params.update(use_dispatch=use_dispatch)
 
         self._load(pretrain_path,
                    precision,
