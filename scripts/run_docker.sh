@@ -7,15 +7,36 @@ function run_dev() {
 }
 
 
+function up_repo() {
+  projdir="$(pwd)"
+  output_dir="${projdir}/output/install"
+  
+  cp ${projdir}/python/pybackend_libs/requirements.txt ./output/deps/
+  rm -fr ${output_dir}/resource/internal_model_repository/*
+  cp -fr ${projdir}/resource/internal_model_repository/* \
+    ${output_dir}/resource/internal_model_repository/
+
+  rm -fr ${output_dir}/backends/python/pybackend_libs
+  cp -fr ${projdir}/python/pybackend_libs/src/pybackend_libs ${output_dir}/backends/python/
+  pushd ${output_dir}/backends/python
+  find ./ -name __pycache__ -exec rm -fr {} \;
+  popd
+}
+
 function build_image() {
     curr=$(pwd)
-    cd ./output/install/python && find ./ -name __pycache__ -exec rm -fr {} \;
-    cd $cur
-
-    pushd $cur/output
-    docker build -t dataelem/bisheng-rt:0.0.1 -f "$curr/docker/runtime.Dockerfile" .
+    up_repo
+    pushd ${curr}/output
+    docker build -t dataelement/bisheng-rt:0.0.2 -f "$curr/docker/runtime.Dockerfile" . --no-cache
     popd
 }
 
+function temp_build_image() {
+    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt image" bisheng_rt_v0.0.1 dataelement/bisheng-rt:0.0.2
+}
 
-run_dev
+
+temp_build_image
+# build_image
+# run_dev
+
