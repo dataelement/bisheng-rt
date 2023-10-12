@@ -33,7 +33,7 @@ import os
 import threading
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
-
+import argparse
 import numpy as np
 import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model.vllm.conversation import get_gen_prompt
@@ -42,7 +42,7 @@ from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.utils import random_uuid
-
+from dataclasses import dataclass
 
 class ChatMessage(BaseModel):
     role: Literal['user', 'assistant', 'system']
@@ -102,12 +102,28 @@ class Messages2Prompt(object):
         messages = [m.dict() for m in messages]
         return get_gen_prompt(self.model_type, messages)
 
+def parameters2parser(parameters):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", type=str, default=127.0.0.1)
+    # parser.add_argument("--port", type=int, default=8000)
+ 
+    parser = AsyncEngineArgs.add_cli_args(parser)
+    args = parser.parse_args()
+    args.model = vllm_engine_config["model"]
+    args.tokenizer = vllm_engine_config["tokenizer"]
+
+    engine_args = AsyncEngineArgs.from_cli_args(args)
+    return engine_args
+
+
 
 class TritonPythonModel:
     def initialize(self, args):
-        self.logger = pb_utils.Logger
+        print("==get into initialize")
+        #self.logger = pb_utils.Logger
         self.model_config = json.loads(args['model_config'])
         self.model_name = args['model_name']
+        model_instance_name = args['model_instance_name']
 
         # assert are in decoupled mode. Currently, Triton needs to use
         # decoupled policy for asynchronously forwarding requests to
@@ -148,7 +164,7 @@ class TritonPythonModel:
 
         disable_log_requests = parameters.pop('disable_log_requests', 'true')
         max_num_seqs = parameters.pop('max_num_seqs', 256)
-        max_num_batched_tokens = parameters.pop('max_num_batched_tokens', 2560)
+        max_num_batched_tokens = parameters.pop('max_num_batched_tokens', None)
         gpu_memory_utilization = parameters.pop('gpu_memory_utilization', 0.5)
         dtype = parameters.pop('dtype', 'auto')
         # tp model is more fast, but gpu memory will be equally allcoated.
@@ -156,20 +172,43 @@ class TritonPythonModel:
         tensor_parallel_size = len(devices.split(','))
 
         vllm_engine_config = {
-            'model': model_path,
-            'disable_log_requests': disable_log_requests,
-            'gpu_memory_utilization': gpu_memory_utilization,
-            'max_num_seqs': max_num_seqs,
-            'max_num_batched_tokens': max_num_batched_tokens,
-            'tensor_parallel_size': tensor_parallel_size,
-            'dtype': dtype,
+            'model': os.path.join("/opt/bisheng-rt",model_path),
+            'tokenizer': os.path.join("/opt/bisheng-rt",model_path),
+            'tokenizer_mode': 'auto', 
+            'trust_remote_code': False,
+            'download_dir': None, 
+            'load_format': 'auto',
+            'dtype': 'auto',
+            'seed': 0, 
+            'max_model_len': None, 
+            'worker_use_ray': False, 
+            'pipeline_parallel_size': 1, 
+            'tensor_parallel_size': 1, 
+            'block_size': 16, 
+            'swap_space': 4, 
+            'gpu_memory_utilization': 0.9,
+            'max_num_batched_tokens': None, 
+            'max_num_seqs': 256,
+            'disable_log_stats': False, 
+            'revision': None, 
+            'quantization': None, 
+            'engine_use_ray': False, 
+            'disable_log_requests': False, 
+            'max_log_len': None
+
+            # 'disable_log_requests': disable_log_requests,
+            # # 'gpu_memory_utilization': gpu_memory_utilization,
+            # # 'max_num_seqs': max_num_seqs,
+            # 'max_num_batched_tokens': max_num_batched_tokens,
+            # 'tensor_parallel_size': tensor_parallel_size,
+            
+            
         }
+        engine_args = parameters2parser(vllm_engine_config)
+        self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
 
+        print("vllm_engine_config:",vllm_engine_config)
         self.messages_to_prompt = Messages2Prompt(self.model_name)
-
-        # Create an AsyncLLMEngine from the config from JSON
-        self.llm_engine = AsyncLLMEngine.from_engine_args(
-            AsyncEngineArgs(**vllm_engine_config))
 
         # output_config = pb_utils.get_output_config_by_name(self.model_config, "TEXT")
         # self.output_dtype = pb_utils.triton_string_to_numpy(output_config["data_type"])
@@ -211,11 +250,13 @@ class TritonPythonModel:
 
         # Wait for the ongoing_requests
         while self.ongoing_request_count > 0:
-            self.logger.log_info('Awaiting remaining {} requests'.format(
-                self.ongoing_request_count))
+            #self.logger.log_info('Awaiting remaining {} requests'.format(
+            #    self.ongoing_request_count))
+            print("Awaiting remaining {} requests".format(self.ongoing_request_count))
             await asyncio.sleep(5)
 
-        self.logger.log_info('Shutdown complete')
+        #self.logger.log_info('Shutdown complete')
+        print("Shutdown complete")
 
     def get_sampling_params_dict(self, params_dict):
         """
@@ -287,6 +328,7 @@ class TritonPythonModel:
         """
         Forwards single request to LLM engine and returns responses.
         """
+        print("==get into generate")
         response_sender = request.get_response_sender()
         self.ongoing_request_count += 1
         try:
@@ -297,11 +339,14 @@ class TritonPythonModel:
             request = ChatCompletionRequest.parse_obj(inp)
 
             prompt = self.messages_to_prompt(request.messages)
+            print("prompt:",prompt)
             stream = request.stream
 
             params_dict = request.sampling_parameters
             sampling_params_dict = self.get_sampling_params_dict(params_dict)
+            print("sampling_params_dict:",sampling_params_dict)
             sampling_params = SamplingParams(**sampling_params_dict)
+            print("sampling_params:",sampling_params)
 
             last_output = None
             async for output in self.llm_engine.generate(
@@ -315,7 +360,8 @@ class TritonPythonModel:
                 response_sender.send(self.create_response(last_output))
 
         except Exception as e:
-            self.logger.log_info(f'Error generating stream: {e}')
+            #self.logger.log_info(f'Error generating stream: {e}')
+            print(f'Error generating stream: {e}')
             error = pb_utils.TritonError(f'Error generating stream: {e}')
             triton_output_tensor = pb_utils.Tensor(
                 'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
@@ -338,6 +384,7 @@ class TritonPythonModel:
         is too loaded.
         We are pushing all the requests on vllm and let it handle the full traffic.
         """
+        print("==get into execute")
         for request in requests:
             self.create_task(self.generate(request))
         return None
@@ -346,7 +393,8 @@ class TritonPythonModel:
         """
         Triton virtual method; called when the model is unloaded.
         """
-        self.logger.log_info('Issuing finalize to vllm backend')
+        #self.logger.log_info('Issuing finalize to vllm backend')
+        print("Issuing finalize to vllm backend")
         self._shutdown_event.set()
         if self._loop_thread is not None:
             self._loop_thread.join()
