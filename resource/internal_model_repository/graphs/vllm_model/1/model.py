@@ -44,6 +44,8 @@ from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.utils import random_uuid
 from dataclasses import dataclass
 
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+
 class ChatMessage(BaseModel):
     role: Literal['user', 'assistant', 'system']
     content: str
@@ -99,18 +101,20 @@ class Messages2Prompt(object):
         self.model_type = model_type
 
     def run(self, messages):
+        print("--a-----",messages)
         messages = [m.dict() for m in messages]
+        print("--b-----",messages)
+        print("after get_gen_prompt",get_gen_prompt(self.model_type, messages))
         return get_gen_prompt(self.model_type, messages)
 
-def parameters2parser(parameters):
+def parameters2parser(vllm_engine_config):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", type=str, default=127.0.0.1)
-    # parser.add_argument("--port", type=int, default=8000)
- 
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser = AsyncEngineArgs.add_cli_args(parser)
     args = parser.parse_args()
     args.model = vllm_engine_config["model"]
     args.tokenizer = vllm_engine_config["tokenizer"]
+    args.trust_remote_code = vllm_engine_config["trust_remote_code"]
 
     engine_args = AsyncEngineArgs.from_cli_args(args)
     return engine_args
@@ -124,7 +128,9 @@ class TritonPythonModel:
         self.model_config = json.loads(args['model_config'])
         self.model_name = args['model_name']
         model_instance_name = args['model_instance_name']
-
+        print("-- self.model_config:",self.model_config)
+        print("-- self.model_name:",self.model_name)
+        print("-- model_instance_name:",model_instance_name)
         # assert are in decoupled mode. Currently, Triton needs to use
         # decoupled policy for asynchronously forwarding requests to
         # vLLM engine.
@@ -154,31 +160,35 @@ class TritonPythonModel:
         instance_groups = parameters.pop('instance_groups')
         model_path = parameters.pop('model_path')
         group_idx = int(model_instance_name.rsplit('_', 1)[1])
+        print("--group_idx:",group_idx)
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
+        print("--gpus:",gpus)
         devices = gpus[group_idx]
+        print("--devices:",devices)
 
         # important, mark which devices to be used
         os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
         os.environ['CUDA_VISIBLE_DEVICES'] = devices
         os.environ['NCCL_IGNORE_DISABLED_P2P'] = '1'
 
-        disable_log_requests = parameters.pop('disable_log_requests', 'true')
-        max_num_seqs = parameters.pop('max_num_seqs', 256)
-        max_num_batched_tokens = parameters.pop('max_num_batched_tokens', None)
-        gpu_memory_utilization = parameters.pop('gpu_memory_utilization', 0.5)
-        dtype = parameters.pop('dtype', 'auto')
+        # disable_log_requests = parameters.pop('disable_log_requests', 'true')
+        # max_num_seqs = parameters.pop('max_num_seqs', 256)
+        # max_num_batched_tokens = parameters.pop('max_num_batched_tokens', None)
+        # gpu_memory_utilization = parameters.pop('gpu_memory_utilization', 0.5)
+        # dtype = parameters.pop('dtype', 'auto')
         # tp model is more fast, but gpu memory will be equally allcoated.
         # pp model can using huggingface+accelate
         tensor_parallel_size = len(devices.split(','))
+        print("--tensor_parallel_size:",tensor_parallel_size)
 
         vllm_engine_config = {
             'model': os.path.join("/opt/bisheng-rt",model_path),
             'tokenizer': os.path.join("/opt/bisheng-rt",model_path),
             'tokenizer_mode': 'auto', 
-            'trust_remote_code': False,
+            'trust_remote_code': True,
             'download_dir': None, 
             'load_format': 'auto',
-            'dtype': 'auto',
+            'dtype': parameters.pop('dtype', 'auto'),
             'seed': 0, 
             'max_model_len': None, 
             'worker_use_ray': False, 
@@ -186,14 +196,14 @@ class TritonPythonModel:
             'tensor_parallel_size': 1, 
             'block_size': 16, 
             'swap_space': 4, 
-            'gpu_memory_utilization': 0.9,
-            'max_num_batched_tokens': None, 
-            'max_num_seqs': 256,
+            'gpu_memory_utilization': parameters.pop('gpu_memory_utilization', 0.5),
+            'max_num_batched_tokens': parameters.pop('max_num_batched_tokens', None), 
+            'max_num_seqs': parameters.pop('max_num_seqs', 256),
             'disable_log_stats': False, 
             'revision': None, 
             'quantization': None, 
             'engine_use_ray': False, 
-            'disable_log_requests': False, 
+            'disable_log_requests': parameters.pop('disable_log_requests', False), 
             'max_log_len': None
 
             # 'disable_log_requests': disable_log_requests,
@@ -292,16 +302,29 @@ class TritonPythonModel:
         Parses the output from the vLLM engine into Triton
         response.
         """
+        # prompt = vllm_output.prompt
+        # print("  create_response prompt:",prompt)
+        # text_outputs = [
+        #     (prompt + output.text).encode("utf-8") for output in vllm_output.outputs
+        # ]
+        # print("  create_response text_outputs:",text_outputs)
+        # triton_output_tensor = pb_utils.Tensor(
+        #     "text_output", np.asarray(text_outputs, dtype=self.output_dtype)
+        # )
+        # print("  create_response triton_output_tensor:",triton_output_tensor)
+        # return pb_utils.InferenceResponse(output_tensors=[triton_output_tensor])
+
 
         choices = []
         for output in vllm_output.outputs:
+            print("  == output.text:",output.text)
             choice_data = ChatCompletionResponseChoice(
                 index=output.index,
                 message=ChatMessage(role='assistant', content=output.text),
                 finish_reason=output.finish_reason,
             )
             choices.append(choice_data)
-
+        print("  choices:",choices)
         num_prompt_tokens = len(vllm_output.prompt_token_ids)
         num_generated_tokens = sum(
             len(output.token_ids) for output in vllm_output.outputs)
@@ -331,18 +354,24 @@ class TritonPythonModel:
         print("==get into generate")
         response_sender = request.get_response_sender()
         self.ongoing_request_count += 1
-        try:
+        # try:
+        if 1:
             request_id = random_uuid()
 
             inp_str = _get_np_input(request, 'INPUT')[0]
+            print("  generate inp_str:",inp_str)
             inp = json.loads(inp_str)
+            print("  generate inp:",inp)
             request = ChatCompletionRequest.parse_obj(inp)
-
-            prompt = self.messages_to_prompt(request.messages)
+            print("  generate request:",request)
+            prompt = self.messages_to_prompt.run(request.messages)
             print("prompt:",prompt)
-            stream = request.stream
+            prompt = "The future of AI is"
 
+            stream = request.stream
+            print("stream:",stream)
             params_dict = request.sampling_parameters
+            print("params_dict:",params_dict)
             sampling_params_dict = self.get_sampling_params_dict(params_dict)
             print("sampling_params_dict:",sampling_params_dict)
             sampling_params = SamplingParams(**sampling_params_dict)
@@ -350,29 +379,67 @@ class TritonPythonModel:
 
             last_output = None
             async for output in self.llm_engine.generate(
-                    prompt, sampling_params, request_id):
+                prompt, sampling_params, request_id
+            ):
+                # if response_sender.is_cancelled():
+                #     await self.llm_engine.abort(request_id)
+                #     break
                 if stream:
                     response_sender.send(self.create_response(output))
                 else:
                     last_output = output
-
+            print(" last_output:",last_output)
             if not stream:
                 response_sender.send(self.create_response(last_output))
 
-        except Exception as e:
-            #self.logger.log_info(f'Error generating stream: {e}')
-            print(f'Error generating stream: {e}')
-            error = pb_utils.TritonError(f'Error generating stream: {e}')
-            triton_output_tensor = pb_utils.Tensor(
-                'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
-            response = pb_utils.InferenceResponse(
-                output_tensors=[triton_output_tensor], error=error)
-            response_sender.send(response)
-            raise e
-        finally:
+            # Streaming case
+            # async def stream_results() -> AsyncGenerator[bytes, None]:
+            #     async for request_output in results_generator:
+            #         prompt = request_output.prompt
+            #         print(" stream prompt:",prompt)
+            #         text_outputs = [
+            #             prompt + output.text for output in request_output.outputs
+            #         ]
+            #         print(" stream text_outputs:",text_outputs)
+            #         ret = {"text": text_outputs}
+            #         print(" stream ret:",ret)
+            #         yield (json.dumps(ret) + "\0").encode("utf-8")
+            # if stream:
+            #     return StreamingResponse(stream_results())
+
+            # # Non-streaming case
+            # final_output = None
+            # async for request_output in results_generator:
+            #     if await request.is_disconnected():
+            #         # Abort the request if the client disconnects.
+            #         await engine.abort(request_id)
+            #         return Response(status_code=499)
+            #     final_output = request_output
+
+            # assert final_output is not None
+            # prompt = final_output.prompt
+            # text_outputs = [prompt + output.text for output in final_output.outputs]
+            # ret = {"text": text_outputs}
+            # return JSONResponse(ret)
+            # if not stream:
+                # response_sender.send(self.create_response(last_output))
+
+        # except Exception as e:
+        #     #self.logger.log_info(f'Error generating stream: {e}')
+        #     print(f'Error generating stream: {e}')
+        #     error = pb_utils.TritonError(f'Error generating stream: {e}')
+        #     triton_output_tensor = pb_utils.Tensor(
+        #         'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+        #     response = pb_utils.InferenceResponse(
+        #         output_tensors=[triton_output_tensor], error=error)
+        #     response_sender.send(response)
+        #     raise e
+        # finally:
+        if 1:
             response_sender.send(
                 flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
             self.ongoing_request_count -= 1
+        print("   finish generate")
 
     def execute(self, requests):
         """
@@ -387,6 +454,7 @@ class TritonPythonModel:
         print("==get into execute")
         for request in requests:
             self.create_task(self.generate(request))
+        print("== finish execute")
         return None
 
     def finalize(self):
