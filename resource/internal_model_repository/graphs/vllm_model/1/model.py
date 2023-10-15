@@ -55,6 +55,10 @@ class DeltaMessage(BaseModel):
     role: Optional[Literal['user', 'assistant', 'system']] = None
     content: Optional[str] = None
 
+class UsageInfo(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    completion_tokens: Optional[int] = 0
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -73,19 +77,27 @@ class ChatCompletionResponseChoice(BaseModel):
     finish_reason: Literal['stop', 'length']
 
 
+
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int
     delta: DeltaMessage
     finish_reason: Optional[Literal['stop', 'length']]
 
 
-class ChatCompletionResponse(BaseModel):
-    model: str
-    object: Literal['chat.completion', 'chat.completion.chunk']
-    choices: List[Union[ChatCompletionResponseChoice,
-                        ChatCompletionResponseStreamChoice]]
-    created: Optional[int] = Field(default_factory=lambda: int(time.time()))
+# class ChatCompletionResponse(BaseModel):
+#     model: str
+#     object: Literal['chat.completion', 'chat.completion.chunk']
+#     choices: List[Union[ChatCompletionResponseChoice,
+#                         ChatCompletionResponseStreamChoice]]
+#     created: Optional[int] = Field(default_factory=lambda: int(time.time()))
 
+class ChatCompletionResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"chatcmpl-{random_uuid()}")
+    object: str = "chat.completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionResponseChoice]
+    usage: UsageInfo
 
 def _get_np_input(request, name, has_batch=True):
     return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
@@ -318,16 +330,24 @@ class TritonPythonModel:
         choices = []
         for output in vllm_output.outputs:
             print("  == output.text:",output.text)
+            print("  == output.index:",output.index)
+            output.finish_reason = 'stop'
+            print("  == output.finish_reason:",output.finish_reason)
+
             choice_data = ChatCompletionResponseChoice(
                 index=output.index,
                 message=ChatMessage(role='assistant', content=output.text),
                 finish_reason=output.finish_reason,
             )
+            print("  == choice_data:",choice_data)
             choices.append(choice_data)
         print("  choices:",choices)
+        print("prompt_token_ids:",vllm_output.prompt_token_ids)
         num_prompt_tokens = len(vllm_output.prompt_token_ids)
+        print("num_prompt_tokens:",num_prompt_tokens)
         num_generated_tokens = sum(
             len(output.token_ids) for output in vllm_output.outputs)
+        print("num_generated_tokens:",num_generated_tokens)
         usage = UsageInfo(
             prompt_tokens=num_prompt_tokens,
             completion_tokens=num_generated_tokens,
@@ -338,9 +358,9 @@ class TritonPythonModel:
                                       choices=choices,
                                       object='chat.completion',
                                       usage=usage)
-
+        print("resp.json():",resp.json())
         result_arr = np.array([resp.json()], dtype=np.object_)
-
+        
         out_tensor_0 = pb_utils.Tensor('OUTPUT', result_arr)
         inference_response = pb_utils.InferenceResponse(
             output_tensors=[out_tensor_0])
@@ -365,8 +385,9 @@ class TritonPythonModel:
             request = ChatCompletionRequest.parse_obj(inp)
             print("  generate request:",request)
             prompt = self.messages_to_prompt.run(request.messages)
-            print("prompt:",prompt)
             prompt = "The future of AI is"
+            print("prompt:",prompt)
+            
 
             stream = request.stream
             print("stream:",stream)
@@ -439,6 +460,7 @@ class TritonPythonModel:
             response_sender.send(
                 flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
             self.ongoing_request_count -= 1
+            return response_sender
         print("   finish generate")
 
     def execute(self, requests):
@@ -452,8 +474,10 @@ class TritonPythonModel:
         We are pushing all the requests on vllm and let it handle the full traffic.
         """
         print("==get into execute")
+        # resp = []
         for request in requests:
             self.create_task(self.generate(request))
+            # resp += self.generate(request)
         print("== finish execute")
         return None
 
