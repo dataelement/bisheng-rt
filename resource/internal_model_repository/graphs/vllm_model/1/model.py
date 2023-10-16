@@ -33,7 +33,7 @@ import os
 import threading
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
-
+import argparse
 import numpy as np
 import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model.vllm.conversation import get_gen_prompt
@@ -42,7 +42,9 @@ from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.utils import random_uuid
+from dataclasses import dataclass
 
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 class ChatMessage(BaseModel):
     role: Literal['user', 'assistant', 'system']
@@ -53,6 +55,10 @@ class DeltaMessage(BaseModel):
     role: Optional[Literal['user', 'assistant', 'system']] = None
     content: Optional[str] = None
 
+class UsageInfo(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    completion_tokens: Optional[int] = 0
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -71,19 +77,27 @@ class ChatCompletionResponseChoice(BaseModel):
     finish_reason: Literal['stop', 'length']
 
 
+
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int
     delta: DeltaMessage
     finish_reason: Optional[Literal['stop', 'length']]
 
 
-class ChatCompletionResponse(BaseModel):
-    model: str
-    object: Literal['chat.completion', 'chat.completion.chunk']
-    choices: List[Union[ChatCompletionResponseChoice,
-                        ChatCompletionResponseStreamChoice]]
-    created: Optional[int] = Field(default_factory=lambda: int(time.time()))
+# class ChatCompletionResponse(BaseModel):
+#     model: str
+#     object: Literal['chat.completion', 'chat.completion.chunk']
+#     choices: List[Union[ChatCompletionResponseChoice,
+#                         ChatCompletionResponseStreamChoice]]
+#     created: Optional[int] = Field(default_factory=lambda: int(time.time()))
 
+class ChatCompletionResponse(BaseModel):
+    id: str = Field(default_factory=lambda: f"chatcmpl-{random_uuid()}")
+    object: str = "chat.completion"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    choices: List[ChatCompletionResponseChoice]
+    usage: UsageInfo
 
 def _get_np_input(request, name, has_batch=True):
     return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
@@ -99,24 +113,48 @@ class Messages2Prompt(object):
         self.model_type = model_type
 
     def run(self, messages):
+        print("--a-----",messages)
         messages = [m.dict() for m in messages]
+        print("--b-----",messages)
+        print("after get_gen_prompt",get_gen_prompt(self.model_type, messages))
         return get_gen_prompt(self.model_type, messages)
+
+def parameters2parser(vllm_engine_config):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", type=str, default="127.0.0.1")
+    parser = AsyncEngineArgs.add_cli_args(parser)
+    args = parser.parse_args()
+    args.model = vllm_engine_config["model"]
+    args.tokenizer = vllm_engine_config["tokenizer"]
+    args.trust_remote_code = vllm_engine_config["trust_remote_code"]
+    args.tensor_parallel_size = vllm_engine_config["tensor_parallel_size"]
+    args.dtype = vllm_engine_config["dtype"]
+    args.max_num_batched_tokens = vllm_engine_config["max_num_batched_tokens"]
+
+
+    engine_args = AsyncEngineArgs.from_cli_args(args)
+    return engine_args
+
 
 
 class TritonPythonModel:
     def initialize(self, args):
-        self.logger = pb_utils.Logger
+        print("==get into initialize")
+        #self.logger = pb_utils.Logger
         self.model_config = json.loads(args['model_config'])
         self.model_name = args['model_name']
-
+        model_instance_name = args['model_instance_name']
+        print("-- self.model_config:",self.model_config)
+        print("-- self.model_name:",self.model_name)
+        print("-- model_instance_name:",model_instance_name)
         # assert are in decoupled mode. Currently, Triton needs to use
         # decoupled policy for asynchronously forwarding requests to
         # vLLM engine.
-        self.using_decoupled = pb_utils.using_decoupled_model_transaction_policy(
-            self.model_config)
-        assert (
-            self.using_decoupled
-        ), 'vLLM Triton backend must be configured to use decoupled model transaction policy'
+        # self.using_decoupled = pb_utils.using_decoupled_model_transaction_policy(
+        #     self.model_config)
+        # assert (
+        #     self.using_decoupled
+        # ), 'vLLM Triton backend must be configured to use decoupled model transaction policy'
 
         # engine_args_filepath = os.path.join(
         #     args["model_repository"], _VLLM_ENGINE_ARGS_FILENAME
@@ -138,38 +176,65 @@ class TritonPythonModel:
         instance_groups = parameters.pop('instance_groups')
         model_path = parameters.pop('model_path')
         group_idx = int(model_instance_name.rsplit('_', 1)[1])
+        print("--group_idx:",group_idx)
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
+        print("--gpus:",gpus)
         devices = gpus[group_idx]
+        print("--devices:",devices)
 
         # important, mark which devices to be used
         os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
         os.environ['CUDA_VISIBLE_DEVICES'] = devices
         os.environ['NCCL_IGNORE_DISABLED_P2P'] = '1'
 
-        disable_log_requests = parameters.pop('disable_log_requests', 'true')
-        max_num_seqs = parameters.pop('max_num_seqs', 256)
-        max_num_batched_tokens = parameters.pop('max_num_batched_tokens', 2560)
-        gpu_memory_utilization = parameters.pop('gpu_memory_utilization', 0.5)
-        dtype = parameters.pop('dtype', 'auto')
+        # disable_log_requests = parameters.pop('disable_log_requests', 'true')
+        # max_num_seqs = parameters.pop('max_num_seqs', 256)
+        # max_num_batched_tokens = parameters.pop('max_num_batched_tokens', None)
+        # gpu_memory_utilization = parameters.pop('gpu_memory_utilization', 0.5)
+        # dtype = parameters.pop('dtype', 'auto')
         # tp model is more fast, but gpu memory will be equally allcoated.
         # pp model can using huggingface+accelate
         tensor_parallel_size = len(devices.split(','))
+        print("--tensor_parallel_size:",tensor_parallel_size)
 
         vllm_engine_config = {
-            'model': model_path,
-            'disable_log_requests': disable_log_requests,
-            'gpu_memory_utilization': gpu_memory_utilization,
-            'max_num_seqs': max_num_seqs,
-            'max_num_batched_tokens': max_num_batched_tokens,
-            'tensor_parallel_size': tensor_parallel_size,
-            'dtype': dtype,
+            'model': os.path.join("/opt/bisheng-rt",model_path),
+            'tokenizer': os.path.join("/opt/bisheng-rt",model_path),
+            'tokenizer_mode': 'auto', 
+            'trust_remote_code': True,
+            'download_dir': None, 
+            'load_format': 'auto',
+            'dtype': parameters.pop('dtype', 'auto'),
+            'seed': 0, 
+            'max_model_len': None, 
+            'worker_use_ray': False, 
+            'pipeline_parallel_size': 1, 
+            'tensor_parallel_size': tensor_parallel_size, 
+            'block_size': 16, 
+            'swap_space': 4, 
+            'gpu_memory_utilization': parameters.pop('gpu_memory_utilization', 0.5),
+            'max_num_batched_tokens': parameters.pop('max_num_batched_tokens', None), 
+            'max_num_seqs': parameters.pop('max_num_seqs', 256),
+            'disable_log_stats': False, 
+            'revision': None, 
+            'quantization': None, 
+            'engine_use_ray': False, 
+            'disable_log_requests': parameters.pop('disable_log_requests', False), 
+            'max_log_len': None
+
+            # 'disable_log_requests': disable_log_requests,
+            # # 'gpu_memory_utilization': gpu_memory_utilization,
+            # # 'max_num_seqs': max_num_seqs,
+            # 'max_num_batched_tokens': max_num_batched_tokens,
+            # 'tensor_parallel_size': tensor_parallel_size,
+            
+            
         }
+        engine_args = parameters2parser(vllm_engine_config)
+        self.llm_engine = AsyncLLMEngine.from_engine_args(engine_args)
 
+        print("vllm_engine_config:",vllm_engine_config)
         self.messages_to_prompt = Messages2Prompt(self.model_name)
-
-        # Create an AsyncLLMEngine from the config from JSON
-        self.llm_engine = AsyncLLMEngine.from_engine_args(
-            AsyncEngineArgs(**vllm_engine_config))
 
         # output_config = pb_utils.get_output_config_by_name(self.model_config, "TEXT")
         # self.output_dtype = pb_utils.triton_string_to_numpy(output_config["data_type"])
@@ -190,7 +255,7 @@ class TritonPythonModel:
         """
         assert (self._shutdown_event.is_set() is
                 False), 'Cannot create tasks after shutdown has been requested'
-
+        print("----create_task:",asyncio.run_coroutine_threadsafe(coro, self._loop))
         return asyncio.run_coroutine_threadsafe(coro, self._loop)
 
     def engine_loop(self, loop):
@@ -211,11 +276,13 @@ class TritonPythonModel:
 
         # Wait for the ongoing_requests
         while self.ongoing_request_count > 0:
-            self.logger.log_info('Awaiting remaining {} requests'.format(
-                self.ongoing_request_count))
+            #self.logger.log_info('Awaiting remaining {} requests'.format(
+            #    self.ongoing_request_count))
+            print("Awaiting remaining {} requests".format(self.ongoing_request_count))
             await asyncio.sleep(5)
 
-        self.logger.log_info('Shutdown complete')
+        #self.logger.log_info('Shutdown complete')
+        print("Shutdown complete")
 
     def get_sampling_params_dict(self, params_dict):
         """
@@ -251,19 +318,27 @@ class TritonPythonModel:
         Parses the output from the vLLM engine into Triton
         response.
         """
-
         choices = []
         for output in vllm_output.outputs:
+            print("  == output.text:",output.text)
+            print("  == output.index:",output.index)
+            output.finish_reason = 'stop'
+            print("  == output.finish_reason:",output.finish_reason)
+
             choice_data = ChatCompletionResponseChoice(
                 index=output.index,
                 message=ChatMessage(role='assistant', content=output.text),
                 finish_reason=output.finish_reason,
             )
+            print("  == choice_data:",choice_data)
             choices.append(choice_data)
-
+        print("  choices:",choices)
+        print("prompt_token_ids:",vllm_output.prompt_token_ids)
         num_prompt_tokens = len(vllm_output.prompt_token_ids)
+        print("num_prompt_tokens:",num_prompt_tokens)
         num_generated_tokens = sum(
             len(output.token_ids) for output in vllm_output.outputs)
+        print("num_generated_tokens:",num_generated_tokens)
         usage = UsageInfo(
             prompt_tokens=num_prompt_tokens,
             completion_tokens=num_generated_tokens,
@@ -274,9 +349,9 @@ class TritonPythonModel:
                                       choices=choices,
                                       object='chat.completion',
                                       usage=usage)
-
+        print("resp.json():",resp.json())
         result_arr = np.array([resp.json()], dtype=np.object_)
-
+        
         out_tensor_0 = pb_utils.Tensor('OUTPUT', result_arr)
         inference_response = pb_utils.InferenceResponse(
             output_tensors=[out_tensor_0])
@@ -287,48 +362,72 @@ class TritonPythonModel:
         """
         Forwards single request to LLM engine and returns responses.
         """
-        response_sender = request.get_response_sender()
+        print("==get into generate")
+        # response_sender = request.get_response_sender()
+        # response = None
         self.ongoing_request_count += 1
-        try:
+        # try:
+        if 1:
             request_id = random_uuid()
 
             inp_str = _get_np_input(request, 'INPUT')[0]
+            print("  generate inp_str:",inp_str)
             inp = json.loads(inp_str)
+            print("  generate inp:",inp)
             request = ChatCompletionRequest.parse_obj(inp)
+            print("  generate request:",request)
+            prompt = self.messages_to_prompt.run(request.messages)
+            # prompt = "The future of AI is"
+            print("prompt:",prompt)
+            
 
-            prompt = self.messages_to_prompt(request.messages)
             stream = request.stream
-
+            stream = False
+            print("stream:",stream)
             params_dict = request.sampling_parameters
+            print("params_dict:",params_dict)
             sampling_params_dict = self.get_sampling_params_dict(params_dict)
+            print("sampling_params_dict:",sampling_params_dict)
             sampling_params = SamplingParams(**sampling_params_dict)
+            print("sampling_params:",sampling_params)
 
             last_output = None
             async for output in self.llm_engine.generate(
-                    prompt, sampling_params, request_id):
+                prompt, sampling_params, request_id
+            ):
+                print("---output:",output)
                 if stream:
-                    response_sender.send(self.create_response(output))
+                    # response_sender.send(self.create_response(output))
+                    response = self.create_response(output)
+
                 else:
                     last_output = output
-
+            # print(" last_output:",last_output)
             if not stream:
-                response_sender.send(self.create_response(last_output))
+                # response_sender.send(self.create_response(last_output))
+                response = self.create_response(last_output)
+                print("---type:",type(response))
+            return response
 
-        except Exception as e:
-            self.logger.log_info(f'Error generating stream: {e}')
-            error = pb_utils.TritonError(f'Error generating stream: {e}')
-            triton_output_tensor = pb_utils.Tensor(
-                'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
-            response = pb_utils.InferenceResponse(
-                output_tensors=[triton_output_tensor], error=error)
-            response_sender.send(response)
-            raise e
-        finally:
-            response_sender.send(
-                flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
-            self.ongoing_request_count -= 1
+        # except Exception as e:
+        #     #self.logger.log_info(f'Error generating stream: {e}')
+        #     print(f'Error generating stream: {e}')
+        #     error = pb_utils.TritonError(f'Error generating stream: {e}')
+        #     triton_output_tensor = pb_utils.Tensor(
+        #         'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+        #     response = pb_utils.InferenceResponse(
+        #         output_tensors=[triton_output_tensor], error=error)
+        #     response_sender.send(response)
+        #     raise e
+        # finally:
+        #     # if 1: # finally内容
+        #     response_sender.send(
+        #         flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
+        #     self.ongoing_request_count -= 1
+        #     # return response_sender
+        #     print("   finish generate")
 
-    def execute(self, requests):
+    async def execute(self, requests):
         """
         Triton core issues requests to the backend via this method.
 
@@ -338,15 +437,24 @@ class TritonPythonModel:
         is too loaded.
         We are pushing all the requests on vllm and let it handle the full traffic.
         """
+        print("==get into execute")
+        resp = []
         for request in requests:
-            self.create_task(self.generate(request))
-        return None
+            # self.create_task(self.generate(request))
+            # print("~~~~~~~~~~~~~~aa:",aa)
+            resp.append(await self.generate(request))
+            print("type:",type(resp[-1]))
+        print("== finish execute")
+        # print("***** resp:",resp)
+        # return None
+        return resp
 
     def finalize(self):
         """
         Triton virtual method; called when the model is unloaded.
         """
-        self.logger.log_info('Issuing finalize to vllm backend')
+        #self.logger.log_info('Issuing finalize to vllm backend')
+        print("Issuing finalize to vllm backend")
         self._shutdown_event.set()
         if self._loop_thread is not None:
             self._loop_thread.join()
