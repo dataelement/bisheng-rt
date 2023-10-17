@@ -4,8 +4,8 @@ from pybackend_libs.dataelem.model import ChatGLM2
 def test_chatglm2_6b():
     # params = {'pretrain_path': '/home/public/llm/chatglm2-6b'}
     params = {
-        'pretrain_path': '/home/public/projects/models/chatglm2-6b',
-        'devices': '8',
+        'pretrain_path': '/home/public/llm/chatglm2-6b',
+        'devices': '3,8',
         'gpu_memory': 20,
         'max_tokens': 256,
     }

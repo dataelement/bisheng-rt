@@ -985,14 +985,14 @@ register_conv_template(
 
 def get_gen_prompt(model, messages) -> str:
     model_to_template_map = {
-        'qwen-7b': 'qwen-7b-chat',
-        'qwen-14b': 'qwen-7b-chat',
-        'baichuan-13b': 'baichuan-chat',
-        'baichuan2-13b': 'baichuan2-chat',
-        'chatglm-6b': 'chatglm',
-        'chatglm2-6b': 'chatglm2',
-        'llama2': 'llama-2',
-        'internlm-chat': 'internlm-chat',
+        'Qwen7bChat': 'qwen-7b-chat',
+        'Qwen14bChat': 'qwen-7b-chat',
+        'BaichuanChat': 'baichuan-chat',
+        'Baichuan2Chat': 'baichuan2-chat',
+        'Chatglm': 'chatglm',
+        'Chatglm2': 'chatglm2',
+        'Llama2': 'llama-2',
+        'InternlmChat': 'internlm-chat',
     }
 
     assert model in model_to_template_map, f'{model} not supported'
