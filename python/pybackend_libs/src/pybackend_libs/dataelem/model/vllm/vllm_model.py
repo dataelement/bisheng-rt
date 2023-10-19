@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 from vllm import SamplingParams
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.engine.async_llm_engine import AsyncLLMEngine
-from vllm.utils import random_uuid
 
 from .conversation import get_gen_prompt
+
+# from vllm.utils import random_uuid
 
 
 class GenerateParams(BaseModel):
@@ -82,7 +83,7 @@ class UsageInfo(BaseModel):
 
 
 class ChatCompletionResponse(BaseModel):
-    id: str = Field(default_factory=lambda: f'chatcmpl-{random_uuid()}')
+    id: str = Field(default_factory=lambda: 'chatcmpl-1016')
     created: Optional[int] = Field(default_factory=lambda: int(time.time()))
     object: str = 'chat.completion'
     model: str
@@ -98,14 +99,14 @@ class VLLMModel(object):
         os.environ['CUDA_VISIBLE_DEVICES'] = devices
         os.environ['NCCL_IGNORE_DISABLED_P2P'] = '1'
 
-        self.verbose = bool(parameters.get('verbose', '0'))
+        self.verbose = bool(int(parameters.get('verbose', '0')))
 
         if self.verbose:
             print('Cuda support:', torch.cuda.is_available(), ':',
                   torch.cuda.device_count(), 'devices')
 
         model_type = parameters.get('model_type')
-        model_path = parameters.get('model_path')
+        model_path = parameters.get('pretrain_path')
         pymodel_params = json.loads(parameters.get('pymodel_params', '{}'))
         disable_log_requests = pymodel_params.pop('disable_log_requests',
                                                   'true')
@@ -155,41 +156,62 @@ class VLLMModel(object):
         request = ChatCompletionRequest.parse_obj(inp)
         prompt = self.messages_to_prompt.run(request.messages)
         # stream = request.stream
-        if self.verbose:
-            print('prompt', [prompt])
-
+        # For the locale limit, cjk characters can not be printed in sysstd
+        # if self.verbose:
+        #     print('prompt', [prompt])
         sampling_parameters = request.sampling_parameters
         gen_params = self.generate_params.copy(update=sampling_parameters)
         sampling_params = SamplingParams(**gen_params.dict())
-
         async for output in self.llm_engine.generate(prompt, sampling_params,
                                                      request_id):
             yield output
 
-    def make_response(self, vllm_output):
+    def make_response(self,
+                      vllm_output,
+                      previous_texts,
+                      stream=True,
+                      model_name='chat_llm'):
         choices = []
+        has_finish = not stream
         for output in vllm_output.outputs:
-            choice_data = ChatCompletionResponseChoice(
-                index=output.index,
-                message=ChatMessage(role='assistant', content=output.text),
-                finish_reason=output.finish_reason,
-            )
+            i = output.index
+            output_text = output.text[len(previous_texts[i]):]
+            if not stream:
+                choice_data = ChatCompletionResponseChoice(
+                    index=output.index,
+                    message=ChatMessage(role='assistant', content=output_text),
+                    finish_reason=output.finish_reason)
+            else:
+                if output.finish_reason is not None:
+                    has_finish = True
+                choice_data = ChatCompletionResponseStreamChoice(
+                    index=output.index,
+                    delta=DeltaMessage(role='assistant', content=output_text),
+                    finish_reason=output.finish_reason)
+
             choices.append(choice_data)
 
-        num_prompt_tokens = len(vllm_output.prompt_token_ids)
-        num_generated_tokens = sum(
-            len(output.token_ids) for output in vllm_output.outputs)
-        usage = UsageInfo(
-            prompt_tokens=num_prompt_tokens,
-            completion_tokens=num_generated_tokens,
-            total_tokens=num_prompt_tokens + num_generated_tokens,
-        )
+        if has_finish:
+            num_prompt_tokens = len(vllm_output.prompt_token_ids)
+            num_generated_tokens = sum(
+                len(output.token_ids) for output in vllm_output.outputs)
+            usage = UsageInfo(
+                prompt_tokens=num_prompt_tokens,
+                completion_tokens=num_generated_tokens,
+                total_tokens=num_prompt_tokens + num_generated_tokens,
+            )
+        else:
+            usage = UsageInfo()
 
-        resp = ChatCompletionResponse(model=self.model_name,
+        object_str = 'chat.completion.chunk' if stream else 'chat.completion'
+        resp = ChatCompletionResponse(model=model_name,
                                       choices=choices,
-                                      object='chat.completion',
+                                      object=object_str,
                                       usage=usage)
         return resp.dict()
+
+    def get_n(self):
+        return self.generate_params.n
 
     def predict(self, kwargs):
         raise Exception('not implemented')

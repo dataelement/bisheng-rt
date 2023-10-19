@@ -23,6 +23,7 @@ def _get_optional_params(request, name):
 class TritonPythonModel:
     def initialize(self, args):
         # self.logger = pb_utils.Logger
+        model_instance_name = args['model_instance_name']
         self.model_config = json.loads(args['model_config'])
         self.model_name = args['model_name']
 
@@ -50,7 +51,8 @@ class TritonPythonModel:
 
         model_cate, model_cls_name = pymodel_type.split('.', 1)
         parameters.update(model_type=model_cls_name)
-        cls_type = get_model(model_cls_name)
+        vllm_model_cls_name = 'VLLMModel'
+        cls_type = get_model(vllm_model_cls_name)
         if cls_type is None:
             raise pb_utils.TritonModelException(
                 f'{model_cls_name} is not existed')
@@ -105,13 +107,15 @@ class TritonPythonModel:
         print('Shutdown complete')
         # self.logger.log_info('Shutdown complete')
 
-    def create_response(self, vllm_output):
+    def create_response(self, vllm_output, previous_texts=None, stream=False):
         """
         Parses the output from the vLLM engine into Triton
         response.
         """
+        resp = self.model.make_response(vllm_output, previous_texts, stream,
+                                        self.model_name)
+        # resp_str = json.dumps(resp, ensure_ascii=False).encode('utf-8')
 
-        resp = self.model.make_response(vllm_output)
         result_arr = np.array([json.dumps(resp)], dtype=np.object_)
         out_tensor_0 = pb_utils.Tensor('OUTPUT', result_arr)
         inference_response = pb_utils.InferenceResponse(
@@ -127,17 +131,26 @@ class TritonPythonModel:
         self.ongoing_request_count += 1
         try:
             request_id = str(uuid.uuid4().hex)
-            inp_str = _get_np_input(request, 'INPUT')[0]
-            inp = json.loads(inp_str)
+            inp_bytes = _get_np_input(request, 'INPUT')[0]
+            inp = json.loads(inp_bytes)
+            # inp = json.loads(inp_bytes.decode(encoding='utf-8'))
+            # print('inp', [inp_bytes], [inp])
+            stream = inp.get('stream', False)
             last_output = None
-            async for output in self.model.generate(inp, request_id):
+            previous_texts = [''] * self.model.get_n()
+            async for vllm_output in self.model.generate(inp, request_id):
                 if stream:
-                    response_sender.send(self.create_response(output))
+                    response_sender.send(
+                        self.create_response(vllm_output, previous_texts,
+                                             stream))
+                    for output in vllm_output.outputs:
+                        previous_texts[output.index] = output.text
                 else:
-                    last_output = output
+                    last_output = vllm_output
 
             if not stream:
-                response_sender.send(self.create_response(last_output))
+                response_sender.send(
+                    self.create_response(last_output, previous_texts, stream))
 
         except Exception as e:
             # self.logger.log_info(f'Error generating stream: {e}')

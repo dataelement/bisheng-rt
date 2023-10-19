@@ -9,11 +9,13 @@ from .llm.qwen import QwenChat
 from .llm.xverse import XverseChat
 from .mmu.visualglm import VisualGLM
 from .table import MrcnnTableDetect, TableCellApp, TableRowColApp
+from .vllm.vllm_model import VLLMModel
 
 __all__ = [
     'ChatGLM2', 'BaichuanChat', 'QwenChat', 'Llama2Chat', 'ME5Embedding',
     'BGEZhEmbedding', 'GTEEmbedding', 'LayoutMrcnn', 'TableCellApp',
-    'TableRowColApp', 'MrcnnTableDetect', 'VisualGLM', 'XverseChat'
+    'TableRowColApp', 'MrcnnTableDetect', 'VisualGLM', 'XverseChat',
+    'VLLMModel'
 ]
 
 
@@ -32,6 +34,7 @@ def get_model(name: str):
         'MrcnnTableDetect': MrcnnTableDetect,
         'VisualGLM': VisualGLM,
         'XverseChat': XverseChat,
+        'VLLMModel': VLLMModel,
     }
 
     return model_name_mapping.get(name, None)
