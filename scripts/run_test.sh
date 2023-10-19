@@ -27,6 +27,6 @@ function run_container() {
       --shm-size=10G --name bisheng_rt_v002 ${MOUNT} $IMAGE ./bin/rtserver f
 }
 
-# run_container_dev
+run_container_dev
 # run_container
 # run_test

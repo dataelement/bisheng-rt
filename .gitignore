@@ -6,6 +6,5 @@ sftp-config.json
 .isort.cfg
 ./third_party
 build/
-patches/
 .DS_Store
 test/models

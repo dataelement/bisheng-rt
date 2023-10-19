@@ -95,8 +95,6 @@ class TritonPythonModel:
             pymodel_params_info = {'gpu_memory_utilization': util_ratio}
             parameters['pymodel_params'] = json.dumps(pymodel_params_info)
 
-        print('---param', parameters)
-
         model_cate, model_cls_name = pymodel_type.split('.', 1)
         parameters.update(model_type=model_cls_name)
         vllm_model_cls_name = 'VLLMModel'
