@@ -1,10 +1,21 @@
 import json
-import os
+# import os
+import subprocess as sp
 
 import numpy as np
-import torch
+# import torch
 import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model import get_model
+
+
+def get_gpu_memory():
+    command = 'nvidia-smi --query-gpu=memory.free --format=csv'
+    memory_free_info = sp.check_output(
+        command.split()).decode('ascii').split('\n')[:-1][1:]
+    memory_free_values = [
+        int(x.split()[0]) for i, x in enumerate(memory_free_info)
+    ]
+    return memory_free_values
 
 
 class TritonPythonModel:
@@ -27,6 +38,19 @@ class TritonPythonModel:
         group_idx = int(model_instance_name.rsplit('_', 1)[1])
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
         parameters['devices'] = gpus[group_idx]
+
+        # Do gpu memory check
+        free_gpu_memories = get_gpu_memory()
+        device_iarr = [int(d) for d in gpus[group_idx].split(',')]
+        gpu_unit = 1024.0
+        free_memories = [free_gpu_memories[i] / gpu_unit for i in device_iarr]
+        gpu_memory = int(parameters.get('gpu_memory'))
+        per_device_alloc_memory = gpu_memory / len(device_iarr)
+        for device_id, free_memory in zip(device_iarr, free_memories):
+            if free_memory < per_device_alloc_memory:
+                raise pb_utils.TritonModelException(
+                    f'need to allocate {per_device_alloc_memory}GB '
+                    f'on GPU-{device_id}, but only have {free_memory}GB freed')
 
         if pymodel_params:
             parameters.update(pymodel_params)

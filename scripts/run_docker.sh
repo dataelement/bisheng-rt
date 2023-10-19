@@ -32,7 +32,9 @@ function build_image() {
 }
 
 function temp_build_image() {
-    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt image" bisheng_rt_v0.0.1 dataelement/bisheng-rt:0.0.2
+    LOCAL_HOME=$HOME
+    docker exec bisheng_rt_v001 bash -c "cd ${LOCAL_HOME}/projects/bisheng-rt && bash src/tests/scripts/model_repo_test.sh update"
+    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt image" bisheng_rt_v001 dataelement/bisheng-rt:0.0.2
 }
 
 
