@@ -2,3 +2,14 @@ Hello, my name is
 The most dangerous animal is
 The capital of France is
 The future of AI is
+Summarize the main ideas of Jeff Walker's Product Launch Formula into bullet points as it pertains to a growth marketing agency implementing these strategies and tactics for their clients..
+Summarize the main ideas of Brendon Burchard's Experts Academy into bullet points as it pertains to a growth marketing agency implementing these strategies and tactics for their clients...
+What are the mental triggers in Jeff Walker's Product Launch Formula and "Launch" book?
+Write a summary of why scarcity and urgency are the strongest mental triggers and have been the driving force behind many of our best performing campaigns over the last 8 years.
+Summarize the 6 human needs as Tony Robbins explains...
+Summarize Russell Brunson's Perfect Webinar Script...
+How to tell if a customer segment is well segmented? In 3 bullet points.
+In Java, I want to replace string like "This is a new {object} at {place}" with a Map, {object: "student", "point 3, 4"}, and get a result "This is a new student at point 3, 4". How can I do?
+Top 20 Global and Indian Manufacturers of PEEK for gas separation Membrane applications
+Why are anti viral drugs only used for life threatening viruses?
+I am on a Mac, how do I configure `pytesseract` and acquire the necessary binary?

@@ -19,6 +19,7 @@ function unload_model() {
 }
 
 
+load_model "Qwen-14B-Chat"
 # load_model "Qwen-7B-Chat"
 # unload_model "Qwen-7B-Chat"
-python3 vllm_model_client.py -u 192.168.106.12:9010 -m "Qwen-7B-Chat"
+# python3 vllm_model_client.py -u 192.168.106.12:9010 -m "Qwen-7B-Chat"

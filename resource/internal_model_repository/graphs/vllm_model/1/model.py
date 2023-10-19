@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import subprocess as sp
 import threading
 import time
 import uuid
@@ -18,6 +19,22 @@ def _get_np_input(request, name, has_batch=True):
 def _get_optional_params(request, name):
     tensor = pb_utils.get_input_tensor_by_name(request, name)
     return json.loads(tensor.as_numpy()[0]) if tensor else {}
+
+
+def get_gpu_memory_v2():
+    command = 'nvidia-smi --query-gpu=memory.free,memory.total --format=csv'
+    memory_free_info = sp.check_output(
+        command.split()).decode('ascii').split('\n')[:-1][1:]
+
+    gpu_unit = 1024.0
+    memory_frees = []
+    memory_totals = []
+    for info in memory_free_info:
+        free_info, total_info = info.split(',')
+        memory_frees.append(int(free_info.split()[0]) / gpu_unit)
+        memory_totals.append(int(total_info.split()[0]) / gpu_unit)
+
+    return memory_frees, memory_totals
 
 
 class TritonPythonModel:
@@ -49,6 +66,37 @@ class TritonPythonModel:
         devices = gpus[group_idx]
         parameters.update(devices=devices)
 
+        # Do gpu memory check, vllm is very fragile, core will occur if out of cuda memory.
+        # avoid breakdown all rt service.
+        free_gpu_memories, total_gpu_memories = get_gpu_memory_v2()
+        device_iarr = [int(d) for d in devices.split(',')]
+
+        free_memories = [free_gpu_memories[i] for i in device_iarr]
+        gpu_memory = int(parameters.get('gpu_memory'))
+        per_device_alloc_memory = gpu_memory / len(device_iarr)
+        for device_id, free_memory in zip(device_iarr, free_memories):
+            if free_memory < per_device_alloc_memory:
+                raise pb_utils.TritonModelException(
+                    f'need to allocate {per_device_alloc_memory}GB '
+                    f'on GPU-{device_id}, but only have {free_memory}GB freed')
+
+        if total_gpu_memories:
+            assert len(
+                set(total_gpu_memories)) == 1, ('need same gpu device on host')
+
+        truncate_func = lambda x: float(int(x * (1000)) / (1000))
+        util_ratio = per_device_alloc_memory / total_gpu_memories[0]
+        util_ratio = truncate_func(util_ratio)
+        if 'pymodel_params' in parameters:
+            pymodel_params_info = json.loads(parameters['pymodel_params'])
+            pymodel_params_info['gpu_memory_utilization'] = util_ratio
+            parameters['pymodel_params'] = json.dumps(pymodel_params_info)
+        else:
+            pymodel_params_info = {'gpu_memory_utilization': util_ratio}
+            parameters['pymodel_params'] = json.dumps(pymodel_params_info)
+
+        print('---param', parameters)
+
         model_cate, model_cls_name = pymodel_type.split('.', 1)
         parameters.update(model_type=model_cls_name)
         vllm_model_cls_name = 'VLLMModel'
@@ -69,6 +117,7 @@ class TritonPythonModel:
         self._loop_thread = threading.Thread(target=self.engine_loop,
                                              args=(self._loop, ))
         self._shutdown_event = asyncio.Event()
+
         self._loop_thread.start()
 
     def create_task(self, coro):
@@ -85,7 +134,10 @@ class TritonPythonModel:
         Runs the engine's event loop on a separate thread.
         """
         asyncio.set_event_loop(loop)
-        self._loop.run_until_complete(self.await_shutdown())
+        try:
+            self._loop.run_until_complete(self.await_shutdown())
+        except Exception:
+            pass
 
     async def await_shutdown(self):
         """
@@ -103,6 +155,14 @@ class TritonPythonModel:
             print('Awaiting remaining {} requests'.format(
                 self.ongoing_request_count))
             await asyncio.sleep(5)
+
+        try:
+            for task in asyncio.Task.all_tasks(self._loop):
+                if not (task.done() or task.cancelled()):
+                    task.cancel()
+                    await task
+        except asyncio.CancelledError:
+            pass
 
         print('Shutdown complete')
         # self.logger.log_info('Shutdown complete')
