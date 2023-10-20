@@ -49,12 +49,16 @@ class TritonPythonModel:
         # vLLM engine.
         self.using_decoupled = pb_utils.using_decoupled_model_transaction_policy(
             self.model_config)
-        assert (
-            self.using_decoupled
-        ), 'vLLM Triton backend must be configured to use decoupled model transaction policy'
 
         params = self.model_config['parameters']
         parameters = dict((k, v['string_value']) for k, v in params.items())
+
+        stream = parameters.pop('use_decoupled', '1') == 1
+        if stream:
+            assert self.using_decoupled, (
+                'vLLM Triton backend must be configured '
+                'to use decoupled model transaction policy')
+        print('using_decoupled', self.using_decoupled)
 
         pymodel_type = parameters.pop('pymodel_type')
         model_path = parameters.pop('model_path')
@@ -190,6 +194,35 @@ class TritonPythonModel:
 
         return inference_response
 
+    async def nondecoupled_generate(self, request):
+        """
+        Forwards single request to LLM engine and returns responses.
+        """
+        response = None
+        self.ongoing_request_count += 1
+        try:
+            request_id = str(uuid.uuid4().hex)
+            inp_bytes = _get_np_input(request, 'INPUT')[0]
+            inp = json.loads(inp_bytes)
+            previous_texts = [''] * self.model.get_n()
+            async for vllm_output in await self.model.generate(
+                    inp, request_id):
+                last_output = vllm_output
+
+            response = self.create_response(last_output, previous_texts, False)
+        except Exception as e:
+            # self.logger.log_info(f'Error generating stream: {e}')
+            print(f'Error generating stream: {e}')
+            error = pb_utils.TritonError(f'Error generating stream: {e}')
+            triton_output_tensor = pb_utils.Tensor(
+                'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+            response = pb_utils.InferenceResponse(
+                output_tensors=[triton_output_tensor], error=error)
+        finally:
+            self.ongoing_request_count -= 1
+
+        return response
+
     async def generate(self, request):
         """
         Forwards single request to LLM engine and returns responses.
@@ -245,9 +278,16 @@ class TritonPythonModel:
         is too loaded.
         We are pushing all the requests on vllm and let it handle the full traffic.
         """
-        for request in requests:
-            self.create_task(self.generate(request))
-        return None
+        if self.using_decoupled:
+            for request in requests:
+                self.create_task(self.generate(request))
+            return None
+        else:
+            futures = []
+            for request in requests:
+                future = self.create_task(self.nondecoupled_generate(request))
+                futures.append(future)
+            return [future.result() for future in futures]
 
     def finalize(self):
         """

@@ -39,9 +39,11 @@ function temp_build_image() {
 
 
 function temp_build_image_v003() {
+    docker rmi dataelement/bisheng-rt:0.0.3
     LOCAL_HOME=$HOME
     # docker exec bisheng_rt_v001 bash -c "cd ${LOCAL_HOME}/projects/bisheng-rt && bash src/tests/scripts/model_repo_test.sh update"
-    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt image" bisheng_rt_v002_dev dataelement/bisheng-rt:0.0.3
+    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt image" bisheng_rt_v003_dev dataelement/bisheng-rt:0.0.3
+    docker push dataelement/bisheng-rt:0.0.3
 }
 
 

@@ -1,0 +1,6 @@
+{
+  "model": "Qwen-7B-Chat",
+  "messages": [
+    {"role": "user", "content": "hello"}
+   ]
+}

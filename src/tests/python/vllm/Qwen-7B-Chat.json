@@ -1,6 +1,7 @@
 {
   "parameters": {
     "type": "dataelem.pymodel.vllm_model",
+    "decoupled": "1",
     "pymodel_type": "llm.vLLMQwen7bChat",
     "pymodel_params": "{\"temperature\": 0.0, \"stop\": [\"<|im_end|>\", \"<|im_start|>\"]}",
     "gpu_memory": "30",

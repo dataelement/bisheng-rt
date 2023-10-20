@@ -909,7 +909,6 @@ ModelRepositoryManager::LoadUnloadModel(
       }
     }
 
-
     if (has_model_type) {
       std::vector<std::string> model_defs = absl::StrSplit(model_type, '.');
       std::string graph_path = model_defs[model_defs.size() - 1];
@@ -1034,6 +1033,19 @@ ModelRepositoryManager::LoadUnloadModel(
           return status;
         }
       }
+
+      // update decoupled, default decoupled mode is false
+      bool decoupled = false;
+      for (auto* parameter : model.second) {
+        if (parameter->Name().compare("decoupled") == 0) {
+          auto decoupled_value = parameter->ValueString();
+          if (decoupled_value.compare("1") == 0) {
+            decoupled = true;
+          }
+          break;
+        }
+      }
+      model_config.mutable_model_transaction_policy()->set_decoupled(decoupled);
 
       model_config.set_name(model_name);
 

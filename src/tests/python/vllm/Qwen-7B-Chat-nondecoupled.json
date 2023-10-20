@@ -1,11 +1,10 @@
 {
   "parameters": {
     "type": "dataelem.pymodel.vllm_model",
-    "decoupled": "1",
-    "pymodel_type": "llm.vLLMQwen14bChat",
+    "pymodel_type": "llm.vLLMQwen7bChat",
     "pymodel_params": "{\"temperature\": 0.0, \"stop\": [\"<|im_end|>\", \"<|im_start|>\"]}",
-    "gpu_memory": "50",
-    "instance_groups": "device=gpu;gpus=3,5,6,8",
+    "gpu_memory": "30",
+    "instance_groups": "device=gpu;gpus=5,6",
     "reload": "1",
     "verbose": "0"
   }
