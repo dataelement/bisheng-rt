@@ -59,6 +59,7 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
+    stop: Optional[Union[str, List[str]]] = None
     stream: Optional[bool] = False
     do_sample: Optional[bool] = False
     sampling_parameters: Optional[Dict[Any, Any]] = None
@@ -159,12 +160,28 @@ class VLLMModel(object):
         # For the locale limit, cjk characters can not be printed in sysstd
         # if self.verbose:
         #     print('prompt', [prompt])
+
         sampling_parameters = request.sampling_parameters
         gen_params = self.generate_params.copy(update=sampling_parameters)
+        if request.top_p is not None:
+            gen_params.top_p = request.top_p
+
+        if request.temperature is not None:
+            gen_params.temperature = request.temperature
+
+        if request.max_tokens is not None:
+            gen_params.max_tokens = request.max_tokens
+
+        # support stop
+        if request.stop is not None:
+            stop = request.stop
+            if isinstance(request.stop, str):
+                stop = [request.stop]
+
+            gen_params.stop = list(set(gen_params.stop + stop))
+
         sampling_params = SamplingParams(**gen_params.dict())
-        async for output in self.llm_engine.generate(prompt, sampling_params,
-                                                     request_id):
-            yield output
+        return self.llm_engine.generate(prompt, sampling_params, request_id)
 
     def make_response(self,
                       vllm_output,

@@ -15,6 +15,7 @@ def create_request(prompt, stream, request_id, sampling_parameters,
     input_template = {
         'model': model_name,
         'messages': [],
+        'stream': stream,
         **sampling_parameters,
     }
     input0 = input_template.copy()
@@ -42,7 +43,7 @@ def create_request(prompt, stream, request_id, sampling_parameters,
 
 
 async def main(FLAGS):
-    model_name = 'vllm'
+    model_name = FLAGS.model_name
     sampling_parameters = {'temperature': '0.1', 'top_p': '0.95'}
     stream = FLAGS.streaming_mode
     with open(FLAGS.input_prompts, 'r') as file:
@@ -54,6 +55,11 @@ async def main(FLAGS):
     async with grpcclient.InferenceServerClient(
             url=FLAGS.url, verbose=FLAGS.verbose) as triton_client:
         # Request iterator that yields the next request
+        model_ready = await triton_client.is_model_ready(model_name)
+        if not model_ready:
+            print(f'model {model_name} is not exist in server')
+            return
+
         async def async_request_iterator():
             try:
                 for iter in range(FLAGS.iterations):
@@ -78,9 +84,8 @@ async def main(FLAGS):
                     print(f'Encountered error while processing: {error}')
                 else:
                     output = result.as_numpy('OUTPUT')
-                    print('output', output)
-                    # for i in output:
-                    #     results_dict[result.get_response().id].append(i)
+                    # print('output', output)
+                    results_dict[result.get_response().id].append(output[0])
 
         except InferenceServerException as error:
             print(error)
@@ -116,7 +121,7 @@ if __name__ == '__main__':
         '--url',
         type=str,
         required=False,
-        default='localhost:9010',
+        default='localhost:19000',
         help='Server URL and it gRPC port. Default is localhost:9010.',
     )
     parser.add_argument(
