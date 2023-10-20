@@ -162,6 +162,15 @@ class TritonPythonModel:
         except asyncio.CancelledError:
             pass
 
+        if not self.model.llm_engine.is_running():
+            return
+
+        vllm_loop = self.model.llm_engine.background_loop
+        for task in asyncio.Task.all_tasks(vllm_loop):
+            if not (task.done() or task.cancelled()):
+                task.cancel()
+                await task
+
         print('Shutdown complete')
         # self.logger.log_info('Shutdown complete')
 
@@ -196,7 +205,8 @@ class TritonPythonModel:
             stream = inp.get('stream', False)
             last_output = None
             previous_texts = [''] * self.model.get_n()
-            async for vllm_output in self.model.generate(inp, request_id):
+            async for vllm_output in await self.model.generate(
+                    inp, request_id):
                 if stream:
                     response_sender.send(
                         self.create_response(vllm_output, previous_texts,

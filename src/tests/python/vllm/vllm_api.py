@@ -1,17 +1,17 @@
-import time
+import json
+# import time
 import uuid
 
 import numpy as np
 import tritonclient.grpc.aio as grpcclient
-from tritonclient.utils import InferenceServerException
+
+# from tritonclient.utils import InferenceServerException
 
 MAX_TIMEOUT = 20
 
-class TryAgain(Exception):
-    pass
 
-class VLLMChatCompletion(EngineAPIResource):
-    OBJECT_NAME = "chat.completions"
+class ChatCompletion(object):
+    OBJECT_NAME = 'chat.completions'
 
     @classmethod
     def create_request(cls, chat_input, request_id, model_name):
@@ -30,7 +30,7 @@ class VLLMChatCompletion(EngineAPIResource):
         # Issue the asynchronous sequence inference.
         return {
             'model_name': model_name,
-            'inputs': inputs,q
+            'inputs': inputs,
             'outputs': outputs,
             'request_id': str(request_id),
         }
@@ -38,66 +38,46 @@ class VLLMChatCompletion(EngineAPIResource):
     @classmethod
     async def _acreate(
         cls,
-        api_key=None,
         api_base=None,
-        api_type=None,
         request_id=None,
-        api_version=None,
-        organization=None,
         **params,
     ):
-
-        model_name = params.get('model_name')
-        # sampling_parameters = {'temperature': '0.1', 'top_p': '0.95'}
+        model_name = params.get('model')
         stream = params.get('stream', False)
-        verbose = params.get('verbose', False)
-        chat_input = {
-            'model_name': model_name,
-            'messages': params.get('messages', [])
-            'stream': stream,
-        }
+        verbose = params.pop('verbose', False)
+        timeout = params.pop('timeout', MAX_TIMEOUT)
+        chat_input = params
 
-        async with grpcclient.InferenceServerClient(
-                url=api_base, verbose=verbose) as triton_client:
-            # Request iterator that yields the next request
-            model_ready = await triton_client.is_model_ready(model_name)
-            if not model_ready:
-                raise Exception(f'model {model_name} is not exist in server')
+        triton_client = grpcclient.InferenceServerClient(url=api_base,
+                                                         verbose=verbose)
 
-            async def async_request_iterator():
-                request_id = str(uuid.uuid4().hex)
-                yield cls.create_request(chat_input, request_id, model_name)
+        # Request iterator that yields the next request
+        model_ready = await triton_client.is_model_ready(model_name)
+        if not model_ready:
+            raise Exception(f'model {model_name} is not exist in server')
 
-            try:
-                # Start streaming
-                response_iterator = triton_client.stream_infer(
-                    inputs_iterator=async_request_iterator(),
-                    stream_timeout=FLAGS.stream_timeout,
-                )
+        async def async_request_iterator():
+            request_id = str(uuid.uuid4().hex)
+            yield cls.create_request(chat_input, request_id, model_name)
 
-                # Read response from the stream
-                if stream:
-                    return (
-                        json.loads(result[0].as_numpy('OUTPUT')[0])
-                        async for response in response_iterator
-                    )
-                else:
-                    async for response in response_iterator:
-                        last_output = response
-                    output = json.loads(last_output[0].as_numpy('OUTPUT')[0])
-            except InferenceServerException as error:
-                raise error
+        # Start streaming
+        response_iterator = triton_client.stream_infer(
+            inputs_iterator=async_request_iterator(),
+            stream_timeout=timeout,
+        )
 
-            return output
+        # Read response from the stream
+        if stream:
+            return (json.loads(response[0].as_numpy('OUTPUT')[0])
+                    async for response in response_iterator)
+        else:
+            async for response in response_iterator:
+                last_output = response
+            output = json.loads(last_output[0].as_numpy('OUTPUT')[0])
+
+        await triton_client.close()
+        return output
 
     @classmethod
     async def acreate(cls, *args, **kwargs):
-        start = time.time()
-        timeout = kwargs.pop("timeout", None)
-
-        while True:
-            try:
-                return await cls._acreate(*args, **kwargs)
-            except TryAgain as e:
-                if timeout is not None and time.time() > start + timeout:
-                    raise
+        return await cls._acreate(*args, **kwargs)

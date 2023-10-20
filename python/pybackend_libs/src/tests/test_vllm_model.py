@@ -30,7 +30,7 @@ def test_message_to_prompt():
 async def run(model, inp, request_id):
     seq = 0
     previous_texts = ['']
-    async for vllm_output in model.generate(inp, request_id):
+    async for vllm_output in await model.generate(inp, request_id):
         # for output in vllm_output.outputs:
         #     print(seq, output.index, output.text, output.finish_reason)
         # seq += 1
@@ -133,6 +133,6 @@ def test_vllm_chatglm2_chat():
 
 
 # test_message_to_prompt()
-# test_vllm_qwen7b_chat()
-test_vllm_qwen14b_chat()
+test_vllm_qwen7b_chat()
+# test_vllm_qwen14b_chat()
 # test_vllm_chatglm2_chat()
