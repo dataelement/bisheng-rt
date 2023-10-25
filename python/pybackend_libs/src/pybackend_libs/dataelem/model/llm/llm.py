@@ -138,3 +138,30 @@ class ChatCompletionResponse(BaseModel):
     choices: List[Union[ChatCompletionResponseChoice,
                         ChatCompletionResponseStreamChoice]]
     created: Optional[int] = Field(default_factory=lambda: int(time.time()))
+
+
+class CompletionRequest(BaseModel):
+    model: str
+    prompt: str
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    max_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    do_sample: Optional[bool] = False
+    stop: Optional[Union[str, List[str]]] = None
+    top_k: Optional[int] = None
+
+
+class Choise(BaseModel):
+    text: str
+    index: int = 0
+    logprobs: Optional[float] = None
+    finish_reason: Optional[Literal['stop', 'length']] = 'stop'
+
+
+class CompletionResponse(BaseModel):
+    id: str = 'cmpl-elem-1024',
+    object: str = 'text_completion'
+    model: str
+    created: Optional[int] = Field(default_factory=lambda: int(time.time()))
+    choices: List[Choise] = []
