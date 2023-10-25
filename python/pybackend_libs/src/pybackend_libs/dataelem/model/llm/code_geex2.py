@@ -2,7 +2,6 @@ import copy
 import os
 
 import torch
-from fastllm_pytools import llm
 from transformers import AutoModel, AutoTokenizer
 
 from .chatglm2_utils import auto_configure_device_map
@@ -69,6 +68,8 @@ class CodeGeeX2(BaseLLM):
         }
 
         if self.engine_type == 'llm':
+            from fastllm_pytools import llm
+
             flm_model_path = os.path.join(pretrain_path, 'model.flm')
             # support tensor parallel
             llm_devices = [f'cuda:{d}' for d in devices]
