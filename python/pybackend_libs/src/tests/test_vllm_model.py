@@ -132,7 +132,41 @@ def test_vllm_chatglm2_chat():
     asyncio.run(run(model, inp, '0001'))
 
 
+def test_vllm_baichuan2_13b_chat():
+    pymodel_params = {
+        'temperature': 0.0,
+        'gpu_memory_utilization': 0.5,
+        'stop': ['<reserved_107>', '<reserved_106>'],
+    }
+
+    params = {
+        'pretrain_path': '/home/public/llm/Baichuan2-13B-Chat',
+        'devices': '3,5,6,8',
+        'gpu_memory': 40,
+        'precision': 'fp16',
+        'max_tokens': 256,
+        'model_type': 'vLLMBaichuan2Chat',
+        'pymodel_params': json.dumps(pymodel_params),
+        'verbose': '1'
+    }
+
+    print('params', [json.dumps(pymodel_params)])
+    return
+
+    model = VLLMModel(**params)
+    inp = {
+        'model': 'Baichuan-13B-Chat',
+        'messages': [{
+            'role': 'user',
+            'content': '你是谁'
+        }],
+    }
+
+    asyncio.run(run(model, inp, '0001'))
+
+
 # test_message_to_prompt()
-test_vllm_qwen7b_chat()
+# test_vllm_qwen7b_chat()
 # test_vllm_qwen14b_chat()
 # test_vllm_chatglm2_chat()
+test_vllm_baichuan2_13b_chat()
