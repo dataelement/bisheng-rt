@@ -4,6 +4,7 @@ from .embedding.me5 import ME5Embedding
 from .layout.layout_mrcnn import LayoutMrcnn
 from .llm.baichuan import BaichuanChat
 from .llm.chatglm2 import ChatGLM2
+from .llm.code_geex2 import CodeGeeX2
 from .llm.internlm import InternLMChat
 from .llm.llama2 import Llama2Chat
 from .llm.qwen import QwenChat
@@ -16,7 +17,7 @@ __all__ = [
     'ChatGLM2', 'BaichuanChat', 'QwenChat', 'Llama2Chat', 'ME5Embedding',
     'BGEZhEmbedding', 'GTEEmbedding', 'LayoutMrcnn', 'TableCellApp',
     'TableRowColApp', 'MrcnnTableDetect', 'VisualGLM', 'XverseChat',
-    'VLLMModel', 'InternLMChat',
+    'VLLMModel', 'InternLMChat', 'CodeGeeX2'
 ]
 
 
@@ -37,6 +38,7 @@ def get_model(name: str):
         'XverseChat': XverseChat,
         'VLLMModel': VLLMModel,
         'InternLMChat': InternLMChat,
+        'CodeGeeX2': CodeGeeX2,
     }
 
     return model_name_mapping.get(name, None)

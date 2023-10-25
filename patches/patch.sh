@@ -7,4 +7,11 @@ function patch_vllm() {
 }
 
 
-patch_vllm
+function patch_code_geex2() {
+  MODEL_REPO="/home/public/llm/codegeex2-6b"
+  CHATGLM2_MODEL_REPO="/home/public/llm/chatglm2-6b"
+  cp $CHATGLM2_MODEL_REPO/totokenization_chatglm.py $MODEL_REPO
+}
+
+
+# patch_vllm
