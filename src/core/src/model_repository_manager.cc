@@ -42,9 +42,8 @@
 #include "filesystem.h"
 #include "model.h"
 #include "model_config_utils.h"
-#include "triton/common/logging.h"
-
 #include "server_config.pb.h"
+#include "triton/common/logging.h"
 
 #ifdef TRITON_ENABLE_ENSEMBLE
 #include "ensemble_model.h"
@@ -275,6 +274,27 @@ IsModified(const std::string& path, int64_t* last_ns)
   return modified;
 }
 
+void
+GetModelNamesFromServerConfig(
+    const inference::ServerConfig& config, std::vector<std::string>& models)
+{
+  for (int i = 0; i < config.app_size(); i++) {
+    const auto& logic_model = config.app(i);
+    models.push_back(logic_model.name());
+    for (int j = 0; j < logic_model.dep_size(); j++) {
+      models.push_back(logic_model.dep(j).name());
+    }
+  }
+
+  for (int i = 0; i < config.model_size(); i++) {
+    const auto& logic_model = config.model(i);
+    models.push_back(logic_model.name());
+    for (int j = 0; j < logic_model.dep_size(); j++) {
+      models.push_back(logic_model.dep(j).name());
+    }
+  }
+}
+
 }  // namespace
 
 struct ModelRepositoryManager::ModelInfo {
@@ -434,11 +454,20 @@ ModelRepositoryManager::Create(
 
 Status
 ModelRepositoryManager::LoadModelsFromConfig(
-    const std::string& config_file, bool* all_models_polled)
+    const std::string& config_file, bool* all_models_polled,
+    void* server_config_obj)
 {
   auto status = Status::Success;
+  inference::ServerConfig* server_config_ptr = nullptr;
   inference::ServerConfig server_config;
-  ReadTextProto(config_file, &server_config);
+  if (server_config_obj != nullptr) {
+    server_config_ptr =
+        reinterpret_cast<inference::ServerConfig*>(server_config_obj);
+  } else {
+    ReadTextProto(config_file, &server_config);
+    server_config_ptr = &server_config;
+  }
+
   std::unordered_map<std::string, std::vector<const InferenceParameter*>>
       models;
   std::unordered_map<std::string, std::vector<InferenceParameter>> params_store;
@@ -447,7 +476,7 @@ ModelRepositoryManager::LoadModelsFromConfig(
 #ifdef TRITON_ENABLE_GPU
   RETURN_IF_ERROR(GetSupportedGPUs(&supported_gpus, 0.0));
 #endif  // TRITON_ENABLE_GPU
-  auto params = server_config.basic_config().gpu_config().parameters();
+  auto params = server_config_ptr->basic_config().gpu_config().parameters();
   auto deit = params.find("devices");
   std::string devices = deit != params.end() ? deit->second : "";
   std::vector<int> v_devices;
@@ -474,15 +503,19 @@ ModelRepositoryManager::LoadModelsFromConfig(
 
   // step 1. create the poll model map
   std::vector<inference::LogicModel> logic_models;
-  for (int i = 0; i < server_config.model_size(); i++) {
-    logic_models.emplace_back(server_config.model(i));
-    auto model = server_config.model(i);
+  for (int i = 0; i < server_config_ptr->model_size(); i++) {
+    logic_models.emplace_back(server_config_ptr->model(i));
+    auto model = server_config_ptr->model(i);
     for (int j = 0; j < model.dep_size(); j++) {
       logic_models.emplace_back(model.dep(j));
     }
   }
-  for (int i = 0; i < server_config.app_size(); i++) {
-    logic_models.emplace_back(server_config.app(i));
+  for (int i = 0; i < server_config_ptr->app_size(); i++) {
+    logic_models.emplace_back(server_config_ptr->app(i));
+    auto app = server_config_ptr->app(i);
+    for (int j = 0; j < app.dep_size(); j++) {
+      logic_models.emplace_back(app.dep(j));
+    }
   }
 
   for (size_t i = 0; i < logic_models.size(); i++) {
@@ -502,9 +535,24 @@ ModelRepositoryManager::LoadModelsFromConfig(
       }
       model_config.CopyFrom(ops_map_[model_type]);
       if (model_type.rfind("dataelem.alg", 0) == 0 ||
-          model_type.rfind("dataelem.op", 0) == 0) {
+          model_type.rfind("dataelem.op", 0) == 0 ||
+          model_type.rfind("dataelem.app", 0) == 0) {
         model_path = "dummyop";
       }
+
+      if (model_type.rfind("dataelem.python", 0) == 0) {
+        model_path = "elem_alg_model";
+      }
+
+      if (model_type.rfind("dataelem.pymodel", 0) == 0) {
+        const size_t PARTS_SIZE = 3;
+        std::vector<std::string> parts = absl::StrSplit(model_type, '.');
+        if (parts.size() != PARTS_SIZE) {
+          return Status(Status::Code::INVALID_ARG, "model type is not valid");
+        }
+        model_path = parts[PARTS_SIZE - 1];
+      }
+
     } else if (model_type.empty()) {
       // local model
       std::string model_config_file = "";
@@ -656,7 +704,7 @@ ModelRepositoryManager::LoadModelsFromConfig(
   const auto& load_status = LoadModelByDependency();
   if (status.IsOk() && (type == ActionType::LOAD)) {
     std::string load_error_message = "";
-    for (const auto& model : current_models) {
+    for (const auto& model : models) {
       auto it = load_status.find(model.first);
       // If 'model.first' not in load status, it means the (re-)load is not
       // necessary because there is no change in the model's directory
@@ -880,6 +928,13 @@ ModelRepositoryManager::LoadUnloadModel(
       new_models;
   std::unordered_map<std::string, std::vector<InferenceParameter>> params_store;
 
+  // Support for private models, update 2023.10.21
+  // E.g. {"type": "dataelem.private_model.elem_ocr_v3"}
+  // E.g. {"type": "dataelem.private_model.auto_planning_v2"}
+  const std::string APP_MODEL_TYPE = "dataelem.private_model.App";
+  const std::string APP_MODEL_CONFIG_FILE = "app_config.pbtxt";
+  std::vector<std::string> app_models;
+
   for (const auto& model : models) {
     std::string model_name = model.first;
     bool has_model_type = false;
@@ -910,6 +965,12 @@ ModelRepositoryManager::LoadUnloadModel(
     }
 
     if (has_model_type) {
+      // update app model information, do load later.
+      if (model_type.compare(APP_MODEL_TYPE) == 0) {
+        app_models.push_back(model.first);
+        continue;
+      }
+
       std::vector<std::string> model_defs = absl::StrSplit(model_type, '.');
       std::string graph_path = model_defs[model_defs.size() - 1];
       inference::ModelConfig model_config;
@@ -1063,14 +1124,229 @@ ModelRepositoryManager::LoadUnloadModel(
         new_models[model_name].emplace_back(&p);
       }
     } else {
+      // add logic for support unload app model.
+      bool is_app_model = false;
+      for (const auto& repository_path : repository_paths_) {
+        auto model_name_path = JoinPath({repository_path, model_name});
+        bool exists;
+        FileExists(model_name_path, &exists);
+        if (exists) {
+          bool exists_app_conifg = false;
+          auto app_config_file =
+              JoinPath({model_name_path, APP_MODEL_CONFIG_FILE});
+          FileExists(app_config_file, &exists_app_conifg);
+          if (exists_app_conifg) {
+            is_app_model = true;
+            break;
+          }
+        }
+      }
+
+      if (is_app_model) {
+        app_models.push_back(model_name);
+        // do unload later
+        continue;
+      }
+
       // support for the normal model load
       new_models[model_name];
       for (const auto& p : model.second) {
         new_models[model_name].emplace_back(p);
       }
     }
+  }  // for
+
+  // Support for private models
+  for (auto& model_name : app_models) {
+    auto status = Status::Success;
+    std::string model_path_full;
+    for (const auto& repository_path : repository_paths_) {
+      auto model_name_path = JoinPath({repository_path, model_name});
+      bool exists = false;
+      FileExists(model_name_path, &exists);
+      if (exists) {
+        model_path_full = model_name_path;
+        break;
+      }
+    }
+    if (model_path_full.empty()) {
+      return Status(
+          Status::Code::INVALID_ARG,
+          model_name + " not exists in model repository");
+    }
+
+    auto app_config_file = JoinPath({model_path_full, APP_MODEL_CONFIG_FILE});
+    inference::ServerConfig app_config;
+    ReadTextProto(app_config_file, &app_config);
+
+    if (type == ActionType::LOAD) {
+      // update device and app model
+      // parse device info from online parameters.
+      const size_t MAX_GROUP_CNT = 20;
+      std::vector<std::vector<int>> gpus(MAX_GROUP_CNT);
+      const std::string INSTANCE_GROUP_NAME = "instance_groups";
+      std::string instance_group_info;
+      for (const auto* parameter : models.at(model_name)) {
+        if (parameter->Name().compare(INSTANCE_GROUP_NAME) == 0) {
+          instance_group_info = parameter->ValueString();
+          break;
+        }
+      }
+      if (!instance_group_info.empty()) {
+        auto splitter = [](const std::string& str, const char& sep) {
+          std::vector<std::string> str_list = absl::StrSplit(str, sep);
+          return str_list;
+        };
+
+        do {
+          auto ig_device_gpus_info = splitter(instance_group_info, ';');
+          if (ig_device_gpus_info.size() != 2) {
+            status = Status(
+                Status::Code::INVALID_ARG,
+                model_name +
+                    "  wrong format of instance_groups in parameters.");
+            break;
+          }
+          auto device_info = splitter(ig_device_gpus_info[0], '=');
+          auto gpus_info = splitter(ig_device_gpus_info[1], '=');
+          if (device_info.size() != 2 || gpus_info.size() != 2) {
+            status = Status(
+                Status::Code::INVALID_ARG,
+                model_name +
+                    "  wrong format of instance_groups in parameters.");
+            break;
+          }
+          auto device_type = device_info[1];
+
+          std::vector<std::string> gpus_group = splitter(gpus_info[1], '|');
+          size_t group_cnt = gpus_group.size();
+          if (gpus_info[1].empty()) {
+            group_cnt = 0;
+          }
+          if (group_cnt >= MAX_GROUP_CNT) {
+            status = Status(
+                Status::Code::INVALID_ARG,
+                model_name +
+                    "  wrong format of instance_groups in parameters.");
+            break;
+          }
+          for (size_t i = 0; i < gpus_group.size(); i++) {
+            std::vector<std::string> group_ids = splitter(gpus_group[i], ',');
+            for (auto gpu : group_ids) {
+              int id = 0;
+              absl::SimpleAtoi(gpu, &id);
+              gpus[i].emplace_back(id);
+            }
+          }
+        } while (0);
+
+        if (!status.IsOk()) {
+          return status;
+        }
+      }
+
+      if (gpus[0].size() > 0) {
+        auto* gpu = app_config.mutable_basic_config()->mutable_gpu_config();
+        std::string devices_str = std::to_string(gpus[0][0]);
+        for (size_t i = 1; i < gpus[0].size(); i++) {
+          devices_str += std::string(",") + std::to_string(gpus[0][i]);
+        }
+        gpu->mutable_parameters()->at("devices") = devices_str;
+      }
+
+      const std::string MODEL_TYPE_NAME = "model_type";
+      std::string model_type;
+      for (const auto* parameter : models.at(model_name)) {
+        if (parameter->Name().compare(MODEL_TYPE_NAME) == 0) {
+          model_type = parameter->ValueString();
+          break;
+        }
+      }
+
+      if (model_type.empty()) {
+        return Status(
+            Status::Code::INTERNAL, "model_type is empty in parameters");
+      }
+
+      std::vector<std::string> app_dep_model_names;
+      GetModelNamesFromServerConfig(app_config, app_dep_model_names);
+      auto* app_model = app_config.add_app();
+      app_model->set_name(model_name);
+      app_model->set_type(model_type);
+      // update dependence
+      if (app_dep_model_names.size() > 0) {
+        std::string dep_model_name = app_dep_model_names[0];
+        for (size_t i = 1; i < app_dep_model_names.size(); i++) {
+          dep_model_name += std::string(" ") + app_dep_model_names[i];
+        }
+        (*app_model->mutable_parameters())["dep_model_name"] = dep_model_name;
+      }
+
+      bool polled = true;
+      status = LoadModelsFromConfig("", &polled, &app_config);
+      if (!status.IsOk() || !polled) {
+        // todo: unload_dependence not work for app config models, impelment it
+        // unload all loaded models
+        for (const auto& name : app_dep_model_names) {
+          new_models[name];
+        }
+
+        new_models[model_name];
+        // new_models[model_name];
+        LoadUnloadModels(new_models, ActionType::UNLOAD, true, &polled);
+        return status;
+      }
+
+    } else {
+      // todo: unload_dependence not work for app config models, impelment it
+      bool polled = true;
+      std::vector<std::string> app_dep_model_names;
+      GetModelNamesFromServerConfig(app_config, app_dep_model_names);
+      for (const auto& name : app_dep_model_names) {
+        new_models[name];
+      }
+
+      new_models[model_name];
+
+      if (new_models.size() == 0) {
+        return Status::Success;
+      }
+      RETURN_IF_ERROR(LoadUnloadModels(new_models, type, true, &polled));
+    }
+
+    // check status
+    const auto version_states = model_life_cycle_->VersionStates(model_name);
+    if (type == ActionType::LOAD) {
+      if (version_states.empty()) {
+        return Status(
+            Status::Code::INTERNAL,
+            "failed to load '" + model_name + "', no version is available");
+      }
+      if (infos_.find(model_name) == infos_.end()) {
+        return Status(
+            Status::Code::INTERNAL,
+            "failed to load '" + model_name +
+                "', failed to poll from model repository");
+      }
+    } else {
+      std::string ready_version_str;
+      for (const auto& version_state : version_states) {
+        if (version_state.second.first == ModelReadyState::READY) {
+          ready_version_str += std::to_string(version_state.first);
+          ready_version_str += ",";
+        }
+      }
+      if (!ready_version_str.empty()) {
+        ready_version_str.pop_back();
+        return Status(
+            Status::Code::INTERNAL,
+            "failed to unload '" + model_name +
+                "', versions that are still available: " + ready_version_str);
+      }
+    }
   }
 
+  // normal model load/unload
   if (new_models.size() == 0) {
     return Status::Success;
   }
@@ -1829,6 +2105,11 @@ ModelRepositoryManager::Poll(
             break;
           }
         }
+        if (!exists_in_this_repo) {
+          LOG_ERROR << "failed to poll model " << model.first << ", graph "
+                    << graph_file << " not exist in the graphs directory";
+          *all_models_polled = false;
+        }
         continue;
       }
 
@@ -2259,12 +2540,13 @@ ModelRepositoryManager::InitializeModelInfo(
   if (has_version) {
     RETURN_IF_ERROR(GetDirectoryContents(version_path, &version_dir_content));
   }
-  auto default_model_fname = linfo->model_config_.default_model_filename();
-  auto default_model_fname_pri = default_model_fname + ".pri";
-  if (version_dir_content.find(default_model_fname_pri) !=
-      version_dir_content.end()) {
-    linfo->model_config_.set_default_model_filename(default_model_fname_pri);
-  }
+
+  // auto default_model_fname = linfo->model_config_.default_model_filename();
+  // auto default_model_fname_pri = default_model_fname + ".pri";
+  // if (version_dir_content.find(default_model_fname_pri) !=
+  //     version_dir_content.end()) {
+  //   linfo->model_config_.set_default_model_filename(default_model_fname_pri);
+  // }
 
   // If the model is mapped, update its config name based on the
   // mapping.

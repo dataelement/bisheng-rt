@@ -30,6 +30,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+
 #include "infer_parameter.h"
 #include "model_config.pb.h"
 #include "model_lifecycle.h"
@@ -328,7 +329,8 @@ class ModelRepositoryManager {
 
   // New Logic for config control
   Status LoadModelsFromConfig(
-      const std::string& config_file, bool* all_models_polled);
+      const std::string& config_file, bool* all_models_polled,
+      void* server_config_obj = nullptr);
 
 
   std::set<std::string> repository_paths_;

@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 import cv2
 import lanms
 import numpy as np
-from pybackend_libs.dataelem.framework.tf_graph import TFGraph
 
 
 def paste_mask(box, mask, shape):
@@ -248,16 +247,27 @@ class Mrcnn(object):
             ]
         }
 
-        devices = kwargs.get('devices')
-        used_device = devices.split(',')[0]
+        self.has_graph_executor = kwargs.get('has_graph_executor', False)
 
-        self.graph = TFGraph(sig, used_device, **kwargs)
+        if not self.has_graph_executor:
+            from pybackend_libs.dataelem.framework.tf_graph import TFGraph
+            devices = kwargs.get('devices')
+            used_device = devices.split(',')[0]
+
+            self.graph = TFGraph(sig, used_device, **kwargs)
+        else:
+            self.xs = ['image']
+            self.ys = [
+                'output/scores', 'output/masks', 'output/boxes',
+                'output/boxes_cos', 'output/boxes_sin', 'output/labels'
+            ]
+
         if 'scale_list' in kwargs:
             scale_list = kwargs.get('scale_list')
             self.scale_list = np.asarray(scale_list, dtype=np.float32)
         else:
             self.scale_list = np.asarray(
-                [200, 400, 600, 800, 1000, 1200, 1600])
+                [200, 400, 600, 800, 1000, 1200, 1400, 1600])
 
     def predict(self, context: Dict[str, Any], inputs) -> List[np.ndarray]:
         # b64_image = context.pop('b64_image')
@@ -267,7 +277,13 @@ class Mrcnn(object):
 
         img = inputs[0]
         context, prep_outputs = self.preprocess(context, [img])
-        graph_outputs = self.graph.run(prep_outputs)
+        if not self.has_graph_executor:
+            graph_outputs = self.graph.run(prep_outputs)
+        else:
+            graph_executor = context.get('graph_executor')
+            prep_outputs = [prep_outputs[0].astype(np.float32)]
+            graph_outputs = graph_executor.run(self.ys, self.xs, prep_outputs)
+
         outputs = self.postprocess(context, graph_outputs)
         return outputs
 
@@ -318,6 +334,7 @@ class Mrcnn(object):
 
 class MrcnnTableDetect(Mrcnn):
     def __init__(self, **kwargs):
+        self.has_graph_executor = kwargs.get('has_graph_executor', False)
         super(MrcnnTableDetect, self).__init__(**kwargs)
 
     def predict(self, context: Dict[str, Any]) -> List[np.ndarray]:
@@ -327,7 +344,14 @@ class MrcnnTableDetect(Mrcnn):
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
 
         context, prep_outputs = self.preprocess(context, [img])
-        graph_outputs = self.graph.run(prep_outputs)
+
+        if self.has_graph_executor:
+            graph_executor = context.get('graph_executor')
+            prep_outputs = [prep_outputs[0].astype(np.float32)]
+            graph_outputs = graph_executor.run(self.ys, self.xs, prep_outputs)
+        else:
+            graph_outputs = self.graph.run(prep_outputs)
+
         outputs = self.postprocess(context, graph_outputs)
         return outputs
 
@@ -385,6 +409,7 @@ class MrcnnTableDetect(Mrcnn):
 
 class MrcnnTableCellDetect(Mrcnn):
     def __init__(self, **kwargs):
+        self.has_graph_executor = kwargs.get('has_graph_executor', False)
         super(MrcnnTableCellDetect, self).__init__(**kwargs)
 
     def postprocess(self, context, inputs):
@@ -440,6 +465,7 @@ class MrcnnTableCellDetect(Mrcnn):
 
 class MrcnnTableRowColDetect(Mrcnn):
     def __init__(self, **kwargs):
+        self.has_graph_executor = kwargs.get('has_graph_executor', False)
         super(MrcnnTableRowColDetect, self).__init__(**kwargs)
 
     def postprocess(self, context, inputs):

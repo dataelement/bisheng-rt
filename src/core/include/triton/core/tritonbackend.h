@@ -106,7 +106,8 @@ struct TRITONBACKEND_BackendAttribute;
 /// by Triton.
 /// \return a TRITONSERVER_Error indicating success or failure.
 TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ApiVersion(
-    uint32_t* major, uint32_t* minor, uint32_t* patch = nullptr);
+    uint32_t* major, uint32_t* minor, uint32_t* patch = nullptr,
+    uint32_t* sub_patch = nullptr);
 
 
 /// TRITONBACKEND_ArtifactType

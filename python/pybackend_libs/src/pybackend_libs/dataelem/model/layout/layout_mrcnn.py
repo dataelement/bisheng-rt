@@ -5,7 +5,6 @@ import os
 
 import cv2
 import numpy as np
-import tensorflow as tf
 from shapely.geometry import Polygon
 
 # import time
@@ -82,6 +81,8 @@ class Mrcnn(object):
         self.ys = []
 
     def load_pb(self, variable_scope, device):
+        import tensorflow as tf
+
         if self.with_angle:
             sig = {
                 'inputs': ['image:0'],
@@ -137,19 +138,32 @@ class LayoutMrcnn(Mrcnn):
     Layout
     """
     def __init__(self, **kwargs):
-        model_path = kwargs.get('model_path', None)
-        if model_path is None:
-            model_path = kwargs.get('pretrain_path')
+        self.has_graph_executor = kwargs.get('has_graph_executor', False)
+        if not self.has_graph_executor:
+            model_path = kwargs.get('model_path', None)
+            if model_path is None:
+                model_path = kwargs.get('pretrain_path')
 
-        model_path = os.path.join(model_path, 'model.graphdef')
-        super().__init__(model_path=model_path)
-        devices = kwargs.get('devices')
-        used_device = devices.split(',')[0]
-        self.precision = kwargs.get('precision', 'float32')
-        self.load_pb('table_structure_row_col', device=used_device)
+            model_path = os.path.join(model_path, 'model.graphdef')
+            super().__init__(model_path=model_path)
+            devices = kwargs.get('devices')
+            used_device = devices.split(',')[0]
+            self.precision = kwargs.get('precision', 'float32')
+            self.load_pb('layout_mrcnn', device=used_device)
+        else:
+            # for graph exectuor, tensor names is only needed
+            self.xs = ['image']
+            self.ys = [
+                    'output/boxes',
+                    'output/scores',
+                    'output/boxes_cos',
+                    'output/boxes_sin',
+                    'output/masks',
+                    'output/labels']
+
         self.scale_list = np.array([600, 800, 1000, 1200, 1400, 1600])
 
-    def infer(self, img, longer_edge_size=0):
+    def infer(self, img, longer_edge_size=0, graph_executor=None):
         orig_shape = img.shape[:2]
         # prep
         h = orig_shape[0]
@@ -178,14 +192,25 @@ class LayoutMrcnn(Mrcnn):
 
         # start = time.time()
         # graph infer
-        (
-            pre_boxes,
-            pre_scores,
-            pre_boxes_cos,
-            pre_boxes_sin,
-            pre_masks,
-            pre_labels,
-        ) = self.sess.run(self.ys, feed_dict={self.xs[0]: resized_img})
+        if graph_executor is None:
+            (
+                pre_boxes,
+                pre_scores,
+                pre_boxes_cos,
+                pre_boxes_sin,
+                pre_masks,
+                pre_labels,
+            ) = self.sess.run(self.ys, feed_dict={self.xs[0]: resized_img})
+        else:
+            resized_img = resized_img.astype(np.float32)
+            (
+                pre_boxes,
+                pre_scores,
+                pre_boxes_cos,
+                pre_boxes_sin,
+                pre_masks,
+                pre_labels,
+            ) = graph_executor.run(self.ys, self.xs, [resized_img])
 
         # end = time.time()
         # print('[Layout Analysis] %d ms per frame' % ((end - start) * 1000))
@@ -214,7 +239,12 @@ class LayoutMrcnn(Mrcnn):
         img = base64.b64decode(img)
         img = np.fromstring(img, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
-        boxes, scores, labels = self.infer(img, longer_edge_size)
+        graph_executor = None
+        if self.has_graph_executor:
+            graph_executor = inp['graph_executor']
+
+        boxes, scores, labels = self.infer(
+            img, longer_edge_size, graph_executor)
         res = []
         for i, box in enumerate(boxes):
             tmp_dict = {}

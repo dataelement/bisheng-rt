@@ -1,0 +1,63 @@
+basic_config {
+    gpu_config {
+      parameters {
+        key: "devices"
+        value: "0"
+      }
+    }
+}
+
+app {
+    name: "elem_layout_v1"
+    type: "dataelem.pymodel.elem_alg_v1"
+    parameters { key: "dep_model_name", value: "elem_layout_v1_graph" }
+    parameters { key: "pymodel_type", value: "layout.LayoutMrcnn" }
+
+    instance_group { count: 1, kind: KIND_CPU }
+    dep {
+        name: "elem_layout_v1_graph"
+        type: "dataelem.graph.MaskRCNNV5LayoutGraphTf"
+        instance_group { kind: KIND_GPU }
+    }
+}
+
+app {
+    name: "elem_table_detect_v1"
+    type: "dataelem.pymodel.elem_alg_v1"
+    parameters { key: "dep_model_name", value: "elem_table_detect_v1_graph" }
+    parameters { key: "pymodel_type", value: "table.MrcnnTableDetect" }
+
+    instance_group { count: 1, kind: KIND_CPU }
+    dep {
+        name: "elem_table_detect_v1_graph"
+        type: "dataelem.graph.MaskRCNNV5LayoutGraphTf"
+        instance_group { kind: KIND_GPU }
+    }
+}
+
+app {
+    name: "elem_table_cell_detect_v1"
+    type: "dataelem.pymodel.elem_alg_v1"
+    parameters { key: "dep_model_name" value: "elem_table_cell_detect_v1_graph" }
+    parameters { key: "pymodel_type" value: "table.TableCellApp" }
+    instance_group { count: 1, kind: KIND_CPU }
+    dep {
+        name: "elem_table_cell_detect_v1_graph"
+        type: "dataelem.graph.MaskRCNNV5LayoutGraphTf"
+        instance_group { kind: KIND_GPU }
+    }
+}
+
+app {
+    name: "elem_table_rowcol_detect_v1"
+    type: "dataelem.pymodel.elem_alg_v1"
+    parameters { key: "dep_model_name", value: "elem_table_rowcol_detect_v1_graph" }
+    parameters { key: "pymodel_type", value: "table.TableRowColApp" }
+
+    instance_group { count: 1, kind: KIND_CPU }
+    dep {
+        name: "elem_table_rowcol_detect_v1_graph"
+        type: "dataelem.graph.MaskRCNNV5LayoutGraphTf"
+        instance_group { kind: KIND_GPU }
+    }
+}

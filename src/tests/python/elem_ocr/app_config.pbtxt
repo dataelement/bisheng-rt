@@ -1,0 +1,320 @@
+basic_config {
+  gpu_config {
+    parameters {
+      key: "devices"
+      value: "0"
+    }
+  }
+}
+
+model {
+  name: "ocr_format_elem"
+  type: "dataelem.graph.ocr_format_elem"
+  path: "ocr_format"
+  instance_group {
+    count: 1
+    kind: KIND_CPU
+  }
+}
+model {
+  name: "mrcnn-v5.1"
+  type: "dataelem.alg.MaskRCNN"
+  parameters {
+    key: "dep_model_name"
+    value: "maskrcnn_general_ch_v5.1"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "maskrcnn_general_ch_v5.1"
+    type: "dataelem.graph.MaskRCNNV5GraphTf"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "general_text_det_mrcnn_v1.0"
+  type: "dataelem.alg.MaskRCNN"
+  parameters {
+    key: "dep_model_name"
+    value: "general_text_det_mrcnn_v1.0_graph"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "general_text_det_mrcnn_v1.0_graph"
+    type: "dataelem.graph.MaskRCNNV5GraphTf"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "mrcnn_cn_eng_Insv1"
+  type: "dataelem.alg.MaskRCNN"
+  parameters {
+    key: "dep_model_name"
+    value: "maskrcnn_ch_eng_v1"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "maskrcnn_ch_eng_v1"
+    type: "dataelem.graph.MaskRCNNV5GraphTf"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "transformer-v2.8-gamma-faster"
+  type: "dataelem.alg.TransformerV1"
+  parameters {
+    key: "dep_model_name"
+    value: "transformer-v2.8-gamma_trt transformer_post_graph_2.8gamma"
+  }
+  parameters {
+    key: "use_trt"
+    value: "1"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "transformer-v2.8-gamma_trt"
+    type: "dataelem.graph.TransformerGraphTrt"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "transformer_post_graph_2.8gamma"
+    type: "dataelem.graph.TransformerPostGraph"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "transformer-blank-v0.2-faster"
+  type: "dataelem.alg.TransformerV1"
+  parameters {
+    key: "dep_model_name"
+    value: "transformer-blank-v0.2_trt transformer_blank_v0.2_post"
+  }
+  parameters {
+    key: "downsample_rate"
+    value: "8"
+  }
+  parameters {
+    key: "use_trt"
+    value: "1"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "transformer-blank-v0.2_trt"
+    type: "dataelem.graph.TransformerGraphTrt"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "transformer_blank_v0.2_post"
+    type: "dataelem.graph.TransformerPostGraph"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "transformer-hand-v1.16-faster"
+  type: "dataelem.alg.TransformerV1"
+  parameters {
+    key: "dep_model_name"
+    value: "transformer-hand-v1.16_trt transformer_hand_post_graph"
+  }
+  parameters {
+    key: "use_trt"
+    value: "1"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "transformer-hand-v1.16_trt"
+    type: "dataelem.graph.TransformerGraphTrt"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "transformer_hand_post_graph"
+    type: "dataelem.graph.TransformerPostGraph"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "transformer-rare-v1.3"
+  type: "dataelem.alg.TransformerV1"
+  parameters {
+    key: "dep_model_name"
+    value: "transformer-rare-v1.3_trt transformer_rare_post_graph"
+  }
+  parameters {
+    key: "downsample_rate"
+    value: "8"
+  }
+  parameters {
+    key: "use_trt"
+    value: "1"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "transformer-rare-v1.3_trt"
+    type: "dataelem.graph.TransformerGraphTrt"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "transformer_rare_post_graph"
+    type: "dataelem.graph.TransformerPostGraph"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "transInsEnglish"
+  type: "dataelem.alg.TransformerV1"
+  parameters {
+    key: "dep_model_name"
+    value: "transformer-english_tiny-v0.5_tf"
+  }
+  parameters {
+    key: "fixed_height"
+    value: "16"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "transformer-english_tiny-v0.5_tf"
+    type: "dataelem.graph.TransformerGraphTfTiny"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "std_checkbox"
+  type: "dataelem.alg.MaskRCNN"
+  parameters {
+    key: "dep_model_name"
+    value: "det_std_checkbox"
+  }
+  instance_group {
+    count: 3
+    kind: KIND_CPU
+  }
+  dep {
+    name: "det_std_checkbox"
+    type: "dataelem.graph.MaskRCNNV5GraphTf"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "checkbox_post"
+  type: "dataelem.graph.checkbox_post"
+  instance_group {
+    count: 1
+    kind: KIND_CPU
+  }
+}
+model {
+  name: "general_prep"
+  type: "dataelem.graph.general_prep"
+  parameters {
+    key: "dep_model_name"
+    value: "detect_ps_net erase_moire_net erase_net erase_net_wm cut_edge_model"
+  }
+  path: "general_prep"
+  instance_group {
+    count: 1
+    kind: KIND_CPU
+  }
+  dep {
+    name: "detect_ps_net"
+    type: "dataelem.graph.detect_ps_net"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "erase_moire_net"
+    type: "dataelem.graph.erase_moire_net"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "erase_net"
+    type: "dataelem.graph.erase_net"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "erase_net_wm"
+    type: "dataelem.graph.erase_net_wm"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+  dep {
+    name: "cut_edge_model"
+    type: "dataelem.graph.cut_edge_model"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}
+model {
+  name: "seal_detect_algo"
+  type: "dataelem.alg.seal_detect"
+  parameters {
+    key: "dep_model_name"
+    value: "seal_detect_graph"
+  }
+  instance_group {
+    count: 1
+    kind: KIND_CPU
+  }
+  dep {
+    name: "seal_detect_graph"
+    type: "dataelem.graph.seal_detect"
+    instance_group {
+      kind: KIND_GPU
+    }
+  }
+}

@@ -1,44 +1,38 @@
-from .embedding.bge import BGEZhEmbedding
-from .embedding.gte import GTEEmbedding
-from .embedding.me5 import ME5Embedding
-from .layout.layout_mrcnn import LayoutMrcnn
-from .llm.baichuan import BaichuanChat
-from .llm.chatglm2 import ChatGLM2
-from .llm.code_geex2 import CodeGeeX2
-from .llm.internlm import InternLMChat
-from .llm.llama2 import Llama2Chat
-from .llm.qwen import QwenChat
-from .llm.xverse import XverseChat
-from .mmu.visualglm import VisualGLM
-from .table import MrcnnTableDetect, TableCellApp, TableRowColApp
-from .vllm.vllm_model import VLLMModel
+from pybackend_libs.dataelem.utils.lazy_loader import lazy
 
-__all__ = [
-    'ChatGLM2', 'BaichuanChat', 'QwenChat', 'Llama2Chat', 'ME5Embedding',
-    'BGEZhEmbedding', 'GTEEmbedding', 'LayoutMrcnn', 'TableCellApp',
-    'TableRowColApp', 'MrcnnTableDetect', 'VisualGLM', 'XverseChat',
-    'VLLMModel', 'InternLMChat', 'CodeGeeX2'
-]
+bge = lazy('pybackend_libs.dataelem.model.embedding.bge')
+gte = lazy('pybackend_libs.dataelem.model.embedding.gte')
+me5 = lazy('pybackend_libs.dataelem.model.embedding.me5')
+baichuan = lazy('pybackend_libs.dataelem.model.llm.baichuan')
+chatglm2 = lazy('pybackend_libs.dataelem.model.llm.chatglm2')
+code_geex2 = lazy('pybackend_libs.dataelem.model.llm.code_geex2')
+internlm = lazy('pybackend_libs.dataelem.model.llm.internlm')
+llama2 = lazy('pybackend_libs.dataelem.model.llm.llama2')
+qwen = lazy('pybackend_libs.dataelem.model.llm.qwen')
+xverse = lazy('pybackend_libs.dataelem.model.llm.xverse')
+visualglm = lazy('pybackend_libs.dataelem.model.mmu.visualglm')
+vllm_model = lazy('pybackend_libs.dataelem.model.vllm.vllm_model')
+layout_mrcnn = lazy('pybackend_libs.dataelem.model.layout.layout_mrcnn')
+table_mrcnn = lazy('pybackend_libs.dataelem.model.table.table_mrcnn')
+table_app = lazy('pybackend_libs.dataelem.model.table.table_app')
 
 
 def get_model(name: str):
     model_name_mapping = {
-        'ChatGLM2': ChatGLM2,
-        'BaichuanChat': BaichuanChat,
-        'QwenChat': QwenChat,
-        'Llama2Chat': Llama2Chat,
-        'ME5Embedding': ME5Embedding,
-        'BGEZhEmbedding': BGEZhEmbedding,
-        'GTEEmbedding': GTEEmbedding,
-        'LayoutMrcnn': LayoutMrcnn,
-        'TableCellApp': TableCellApp,
-        'TableRowColApp': TableRowColApp,
-        'MrcnnTableDetect': MrcnnTableDetect,
-        'VisualGLM': VisualGLM,
-        'XverseChat': XverseChat,
-        'VLLMModel': VLLMModel,
-        'InternLMChat': InternLMChat,
-        'CodeGeeX2': CodeGeeX2,
+        'ChatGLM2': chatglm2,
+        'BaichuanChat': baichuan,
+        'QwenChat': qwen,
+        'Llama2Chat': llama2,
+        'VisualGLM': visualglm,
+        'XverseChat': xverse,
+        'InternLM': internlm,
+        'ME5Embedding': me5,
+        'BGEZhEmbedding': bge,
+        'GTEEmbedding': gte,
+        'LayoutMrcnn': layout_mrcnn,
+        'TableCellApp': table_app,
+        'TableRowColApp': table_app,
+        'MrcnnTableDetect': table_mrcnn,
     }
-
-    return model_name_mapping.get(name, None)
+    assert name in model_name_mapping, f'Unknown model name: {name}'
+    return getattr(model_name_mapping[name], name)

@@ -1,0 +1,10 @@
+{
+  "parameters": {
+    "type": "dataelem.private_model.App",
+    "model_type": "dataelem.app.ocr_app",
+    "model_params": "{\"gpus.maskrcnn_general_ch_v5.1\":\"0,1\",\"gpus.general_text_det_mrcnn_v1.0_graph\":\"1,2\"}",
+    "gpu_memory": "20",
+    "instance_groups": "device=gpu;gpus=0,1,2",
+    "reload": "1"
+  }
+}

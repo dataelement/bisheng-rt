@@ -453,27 +453,9 @@ TRITONBACKEND_Initialize(TRITONBACKEND_Backend* backend)
       TRITONSERVER_LOG_INFO,
       (std::string("TRITONBACKEND_Initialize: ") + name).c_str());
 
-#ifdef ENALBE_PRIVATE_USE
-  // Check the backend API version that Triton supports vs. what this
-  // backend was compiled against.
-  uint32_t api_version_major, api_version_minor;
-  uint32_t MAGIC_NUMBER = 1947;
-  uint32_t patch;
-  RETURN_IF_ERROR(
-      TRITONBACKEND_ApiVersion(&api_version_major, &api_version_minor, &patch));
-
-  if (patch != MAGIC_NUMBER) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_UNSUPPORTED,
-        (std::string("dataelem backend is not compatiable") +
-         " with server component. use the right server.")
-            .c_str());
-  }
-#else
   uint32_t api_version_major, api_version_minor;
   RETURN_IF_ERROR(
       TRITONBACKEND_ApiVersion(&api_version_major, &api_version_minor));
-#endif
 
   LOG_MESSAGE(
       TRITONSERVER_LOG_INFO,
