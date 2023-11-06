@@ -15,37 +15,16 @@ model {
 }
 
 model {
-  name: "general_text_det_mrcnn_v1.0"
+  name: "general_text_det_mrcnn_v2.0"
   type: "dataelem.alg.MaskRCNN"
   parameters {
     key: "dep_model_name"
-    value: "general_text_det_mrcnn_v1.0_graph"
+    value: "general_text_det_mrcnn_v2.0_graph"
   }
   instance_group { count: 3, kind: KIND_CPU }
   dep {
-    name: "general_text_det_mrcnn_v1.0_graph"
+    name: "general_text_det_mrcnn_v2.0_graph"
     type: "dataelem.graph.MaskRCNNV5GraphTf"
-    instance_group { kind: KIND_GPU }
-  }
-}
-
-model {
-  name: "transformer-v2.8-gamma-faster"
-  type: "dataelem.alg.TransformerV1"
-  parameters {
-    key: "dep_model_name"
-    value: "transformer-v2.8-gamma_trt transformer_post_graph_2.8gamma"
-  }
-  parameters { key: "use_trt", value: "1" }
-  instance_group { count: 3, kind: KIND_CPU }
-  dep {
-    name: "transformer-v2.8-gamma_trt"
-    type: "dataelem.graph.TransformerGraphTrt"
-    instance_group { kind: KIND_GPU }
-  }
-  dep {
-    name: "transformer_post_graph_2.8gamma"
-    type: "dataelem.graph.TransformerPostGraph"
     instance_group { kind: KIND_GPU }
   }
 }

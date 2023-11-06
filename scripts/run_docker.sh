@@ -54,7 +54,17 @@ function temp_build_image_v003_alpha1() {
     docker push dataelement/bisheng-rt:0.0.3.alpha1
 }
 
-temp_build_image_v003_alpha1
+function temp_build_image_v004_alpha1() {
+    docker rmi dataelement/bisheng-rt:0.0.4.alpha1
+    LOCAL_HOME=$HOME
+    # docker exec bisheng_rt_v001 bash -c "cd ${LOCAL_HOME}/projects/bisheng-rt && bash src/tests/scripts/model_repo_test.sh update"
+    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt image" bisheng_rt_v003_dev dataelement/bisheng-rt:0.0.4.alpha1
+    # docker push dataelement/bisheng-rt:0.0.4.alpha1
+}
+
+
+temp_build_image_v004_alpha1
+# temp_build_image_v003_alpha1
 # temp_build_image_v003
 # temp_build_image
 # build_image

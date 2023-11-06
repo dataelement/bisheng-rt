@@ -8,7 +8,8 @@ import requests
 class OCRClient(object):
     def __init__(self, **kwargs):
         url = kwargs.get('url')
-        self.ep = f'{url}/v2/idp/idp_app/infer'
+        elem_ocr_collection_v3 = kwargs.get('model_name')
+        self.ep = f'{url}/v2.1/models/{elem_ocr_collection_v3}/infer'
         self.client = requests.Session()
         self.timeout = kwargs.get('timeout', 10000)
         self.params = {
@@ -19,16 +20,12 @@ class OCRClient(object):
         }
 
         self.scene_mapping = {
-            'doc': {
-                'det': 'general_text_det_mrcnn_v1.0',
-                'recog': 'transformer-v2.8-gamma-faster'
-            },
-            'form': {
-                'det': 'mrcnn-v5.1',
-                'recog': 'transformer-v2.8-gamma-faster'
+            'print': {
+                'det': 'general_text_det_mrcnn_v2.0',
+                'recog': 'transformer-blank-v0.2-faster'
             },
             'hand': {
-                'det': 'mrcnn-v5.1',
+                'det': 'general_text_det_mrcnn_v2.0',
                 'recog': 'transformer-hand-v1.16-faster'
             }
         }
@@ -41,7 +38,6 @@ class OCRClient(object):
         params.update(inp)
 
         req_data = {'param': params, 'data': [b64_image]}
-
         try:
             r = self.client.post(url=self.ep,
                                  json=req_data,

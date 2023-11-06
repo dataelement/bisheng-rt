@@ -4409,7 +4409,12 @@ HTTPAPIServer::Handle(evhtp_request_t* req)
   std::string app_name;
   if (RE2::FullMatch(
           std::string(req->uri->path->full), app_regex_, &app_name)) {
-    HandleRestfulInfer(req, app_name, false);
+    // todo: update later
+    if (app_name.find("ocr") != std::string::npos) {
+      HandleRestfulInfer(req, app_name);
+    } else {
+      HandleRestfulInfer(req, app_name, false);
+    }
     return;
   }
 

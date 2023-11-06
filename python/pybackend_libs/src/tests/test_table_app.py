@@ -4,7 +4,8 @@ import json
 # import cv2
 # import numpy as np
 from pybackend_libs.dataelem.model.ocr.ocr_client import OCRClient
-from pybackend_libs.dataelem.model.table import TableCellApp, TableRowColApp
+from pybackend_libs.dataelem.model.table.table_app import (TableCellApp,
+                                                           TableRowColApp)
 from pybackend_libs.dataelem.utils import convert_file_to_base64
 
 # import time
@@ -13,18 +14,22 @@ REPO = '/home/public/models/'
 
 
 def test_ocr_client():
-    params = {'url': 'http://192.168.106.12:36001'}
+    params = {
+        'url': 'http://192.168.106.12:19001',
+        'model_name': 'elem_layout_collection_v1'}
 
     model = OCRClient(**params)
 
     test_image = '../data/table1.jpg'
-    outp = model.predict(test_image)
+    b64 = convert_file_to_base64(test_image)
+    inp = {'b64_image': b64}
+    outp = model.predict(inp)
 
     print(outp)
 
 
 def test_table_row_col_app():
-    params = {'url': 'http://192.168.106.12:36001'}
+    params = {'url': 'http://192.168.106.12:19001'}
     model = OCRClient(**params)
     test_image = '../data/table1.jpg'
     b64 = convert_file_to_base64(test_image)
@@ -53,7 +58,7 @@ def test_table_row_col_app():
 
 
 def test_table_cell_app():
-    params = {'url': 'http://192.168.106.12:36001'}
+    params = {'url': 'http://192.168.106.12:19001'}
     model = OCRClient(**params)
     test_image = '../data/table1.jpg'
     b64 = convert_file_to_base64(test_image)
@@ -144,7 +149,7 @@ def test2():
     print(outp)
 
 
-# test_ocr_client()
+test_ocr_client()
 # test_table_row_col_app()
 # test_table_cell_app()
-test2()
+# test2()

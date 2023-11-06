@@ -20,3 +20,4 @@ scipy
 vllm==0.2.1
 SwissArmyTransformer
 torchvision==0.15.2
+scikit-image
