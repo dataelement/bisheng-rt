@@ -1,6 +1,7 @@
 import time
 from typing import List, Optional
 
+import numpy as np
 import torch
 from accelerate import infer_auto_device_map, init_empty_weights
 from pydantic import BaseModel, Field
@@ -41,6 +42,19 @@ class BaseEmbedding(object):
 
     def predict(self, kwargs):
         raise Exception('not implemented')
+
+    def _batch_predict(self, batch_size, texts, infer_handler):
+        n = len(texts)
+        batchs = int(np.ceil(n / batch_size))
+        embs = []
+        # todo: use parallel infer
+        for i in range(batchs):
+            start = i * batch_size
+            end = (i + 1) * batch_size
+            batch_texts = texts[start:end]
+            embs.extend(infer_handler(batch_texts))
+
+        return embs
 
     def _load(self,
               pretrain_path,

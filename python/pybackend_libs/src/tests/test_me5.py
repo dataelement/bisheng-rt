@@ -1,11 +1,11 @@
 # flake8: noqa
 import numpy as np
-from pybackend_libs.dataelem.model import ME5Embedding
+from pybackend_libs.dataelem.model.embedding.me5 import ME5Embedding
 
 
 def test_me5():
     params = {
-        'pretrain_path': '/home/public/projects/models/multilingual-e5-large',
+        'pretrain_path': '/home/public/llm/multilingual-e5-large',
         'devices': '8',
         'gpu_memory': 5
     }

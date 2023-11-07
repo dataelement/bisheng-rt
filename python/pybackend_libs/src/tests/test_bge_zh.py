@@ -1,11 +1,11 @@
 # flake8: noqa
 import numpy as np
-from pybackend_libs.dataelem.model import BGEZhEmbedding
+from pybackend_libs.dataelem.model.embedding.bge import BGEZhEmbedding
 
 
 def test_bge_zh():
     params = {
-        'pretrain_path': '/home/public/projects/models/bge-large-zh',
+        'pretrain_path': '/home/public/llm/bge-large-zh',
         'devices': '8',
         'gpu_memory': 3
     }

@@ -31,7 +31,7 @@ class OCRClient(object):
         }
 
     def predict(self, inp):
-        scene = inp.pop('scene', 'doc')
+        scene = inp.pop('scene', 'print')
         b64_image = inp.pop('b64_image')
         params = copy.deepcopy(self.params)
         params.update(self.scene_mapping[scene])
