@@ -26,9 +26,29 @@ def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):
     if system_content:
         messages[-1]['content'] = system_content + messages[-1]['content']
 
-    # messages = messages[::-1] # it is bug.
+    gen_config = {}
+    if request.max_tokens is not None:
+        gen_config.update(max_new_tokens=request.max_tokens)
+
+    if request.top_p is not None:
+        gen_config.update(top_p=request.top_p)
+
+    if request.temperature is not None:
+        gen_config.update(temperature=request.temperature)
+
+    if request.do_sample is not None:
+        gen_config.update(do_sample=request.do_sample)
+
+    if gen_config:
+        generation_config = copy.copy(model.generation_config)
+        generation_config.update(**gen_config)
+    else:
+        generation_config = model.generation_config
+
     with torch.no_grad():
-        response = model.chat(tokenizer, messages)
+        response = model.chat(
+            tokenizer, messages,
+            generation_config=generation_config)
 
     choice_data = ChatCompletionResponseChoice(index=0,
                                                message=ChatMessage(

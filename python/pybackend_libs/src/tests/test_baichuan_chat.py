@@ -1,4 +1,4 @@
-from pybackend_libs.dataelem.model import BaichuanChat
+from pybackend_libs.dataelem.model.llm.baichuan import BaichuanChat
 
 
 def test_baichuan_13b_chat():
