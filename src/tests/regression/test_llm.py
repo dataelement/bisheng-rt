@@ -22,7 +22,9 @@ def test1():
         payload['model'] = model
         ep = '{0}/{1}/infer'.format(ep_prefix, model)
         response = requests.post(url=ep, json=payload).json()
-        assert response['status_code'] == 200, response
+        choices = response.get('choices', [])
+        assert choices, response
+        print(f'model {model} was envoked', choices)
 
 
 test1()
