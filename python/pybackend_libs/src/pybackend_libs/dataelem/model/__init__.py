@@ -33,6 +33,7 @@ def get_model(name: str):
         'TableCellApp': table_app,
         'TableRowColApp': table_app,
         'MrcnnTableDetect': table_mrcnn,
+        'VLLMModel': vllm_model,
     }
     assert name in model_name_mapping, f'Unknown model name: {name}'
     return getattr(model_name_mapping[name], name)

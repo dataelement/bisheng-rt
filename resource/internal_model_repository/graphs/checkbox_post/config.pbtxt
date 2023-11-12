@@ -1,0 +1,17 @@
+name: "checkbox_post"
+backend: "python"
+max_batch_size: 0
+
+input [
+  { name: "boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+  { name: "checkbox_boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+  { name: "scores", data_type: TYPE_FP32, dims: [ -1 ] },
+  { name: "params", data_type: TYPE_STRING, dims:[ 1 ], optional: true }
+]
+
+output [
+ { name: "text_boxes", data_type: TYPE_FP32, dims: [ -1, 4, 2 ] },
+ { name: "text_scores", data_type: TYPE_FP32, dims: [ -1 ] }  
+]
+
+instance_group [ { count: 1, kind: KIND_CPU } ]
