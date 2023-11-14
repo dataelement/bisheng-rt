@@ -12,9 +12,9 @@ function run_test() {
 function run_container_dev() {
   LOCAL_MODEL_REPO="/home/public/llm"
   MOUNT="-v $LOCAL_MODEL_REPO:$LOCAL_MODEL_REPO -v $HOME:$HOME"
-  IMAGE="dataelement/bisheng-rt:0.0.3.alpha1"
+  IMAGE="dataelement/bisheng-rt:0.0.4.alpha1"
   docker run --gpus=all --net=host -itd --workdir /opt/bisheng-rt \
-      --shm-size=10G --name bisheng_rt_v003_dev ${MOUNT} $IMAGE bash
+      --shm-size=10G --name bisheng_rt_v004_dev ${MOUNT} $IMAGE bash
 }
 
 

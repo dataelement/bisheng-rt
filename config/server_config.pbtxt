@@ -13,9 +13,9 @@ basic_config {
   }
   model_repository: "./models/model_repository"
   model_control_mode: "explicit"
-  http_port: 7001
-  grpc_port: 7000
-  metrics_port: 7002
+  http_port: 9001
+  grpc_port: 9000
+  metrics_port: 9002
   log_verbose: 0
   log_file: "./log/bisheng-rt.log"
 }

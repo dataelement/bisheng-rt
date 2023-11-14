@@ -24,4 +24,10 @@ function update() {
 
 }
 
+function clean() {
+   echo "clean" 
+   apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip
+}
+
+# clean
 update

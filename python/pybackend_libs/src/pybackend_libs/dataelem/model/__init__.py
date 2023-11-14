@@ -25,7 +25,7 @@ def get_model(name: str):
         'Llama2Chat': llama2,
         'VisualGLM': visualglm,
         'XverseChat': xverse,
-        'InternLM': internlm,
+        'InternLMChat': internlm,
         'ME5Embedding': me5,
         'BGEZhEmbedding': bge,
         'GTEEmbedding': gte,
