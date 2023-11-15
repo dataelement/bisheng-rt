@@ -15,6 +15,7 @@ vllm_model = lazy('pybackend_libs.dataelem.model.vllm.vllm_model')
 layout_mrcnn = lazy('pybackend_libs.dataelem.model.layout.layout_mrcnn')
 table_mrcnn = lazy('pybackend_libs.dataelem.model.table.table_mrcnn')
 table_app = lazy('pybackend_libs.dataelem.model.table.table_app')
+yi_base = lazy('pybackend_libs.dataelem.model.llm.yi')
 
 
 def get_model(name: str):
@@ -34,6 +35,7 @@ def get_model(name: str):
         'TableRowColApp': table_app,
         'MrcnnTableDetect': table_mrcnn,
         'VLLMModel': vllm_model,
+        'YiBase': yi_base,
     }
     assert name in model_name_mapping, f'Unknown model name: {name}'
     return getattr(model_name_mapping[name], name)
