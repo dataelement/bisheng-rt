@@ -7,7 +7,7 @@ from .llm import (BaseLLM, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
 
 
-class Yi(BaseLLM):
+class YiBase(BaseLLM):
     def __init__(self, **kwargs):
         pretrain_path = kwargs.get('pretrain_path')
         precision = kwargs.get('precision', 'fp16')
