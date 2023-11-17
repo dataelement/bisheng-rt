@@ -1,0 +1,28 @@
+{
+ "test_models": ["elem_layout_collection_v1"],
+ "models": ["elem_layout_collection_v1", "elem_ocr_collection_v3"],
+ "load_params": [
+    {
+      "parameters": {
+        "type": "dataelem.private_model.App",
+        "pymodel_type": "dummy",
+        "model_type": "dataelem.app.template_app",
+        "model_params": "{}",
+        "gpu_memory": "10",
+        "instance_groups": "device=gpu;gpus=0",
+        "reload": "1"
+      }
+    },
+    {
+      "parameters": {
+        "type": "dataelem.private_model.App",
+        "pymodel_type": "dummy",
+        "model_type": "dataelem.app.ocr_app",
+        "model_params": "{}",
+        "gpu_memory": "10",
+        "instance_groups": "device=gpu;gpus=0",
+        "reload": "1"
+      }
+    }  
+ ] 
+}

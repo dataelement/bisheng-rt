@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - "v*"
+
+env:
+  DOCKERHUB_REPO: dataelement/
+  
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    #if: startsWith(github.event.ref, 'refs/tags')
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        
+      - name: Get version
+        id: get_version
+        run: |
+          echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+
+      - name: Set Environment Variable
+        run: echo "RELEASE_VERSION=${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_ENV
+
+      # Dowload pre-compiled bins, compiled in internal
+      - name: Download bisheng-rt bins
+        id: download_bisheng_rt_bins
+        run: |
+          cd ./docker/prod/
+          RT_VER=$(cat components_version.txt |grep rt= | awk -F'=' '{print $2}')
+          RT_ENT_VER=$(cat components_version.txt |grep rt_enterprise= | awk -F'=' '{print $2}')
+          PYBACKEND_LIBS_VER=$(cat components_version.txt |grep bisheng_pybackend_libs= | awk -F'=' '{print $2}')
+          echo "PYBACKEND_LIBS_VER=${PYBACKEND_LIBS_VER}" >> $GITHUB_ENV
+          wget --no-check-certificate ${{ secrets.FILE_NEXUS_REPO }}/bisheng-rt-${RT_VER}.tar.gz
+          tar zxf bisheng-rt-${RT_VER}.tar.gz
+          rm bisheng-rt-${RT_VER}.tar.gz
+          wget --no-check-certificate ${{ secrets.FILE_NEXUS_REPO }}/bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
+          tar zxf bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
+          rm bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
+
+      # login docker hub
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build bisheng-rt and push Docker hub
+      - name: Build bisheng-rt and push
+        id: docker_build_backend
+        uses: docker/build-push-action@v2
+        with:
+          context: "./docker/prod/"
+          push: true
+          build-args: |
+            BISHENG_PYBACKEND_LIBS_VER=${PYBACKEND_LIBS_VER}
+          tags: |
+            ${{ env.DOCKERHUB_REPO }}bisheng-rt:latest
+            ${{ env.DOCKERHUB_REPO }}bisheng-rt:${{ steps.get_version.outputs.VERSION }}
+     
+      - name: notify feishu
+        uses: sozo-design/curl@v1.0.2
+        with:
+          args: -X POST https://open.feishu.cn/open-apis/bot/v2/hook/2cfe0d8d-647c-4408-9f39-c59134035c4b -d '{"msg_type":"text","content":{"text":"release 编译成功"}}'

@@ -1,0 +1,52 @@
+
+name: release
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    branches:
+      - "r*"
+
+env:
+  RELEASE_VERSION: 0.0.0
+  
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    #if: startsWith(github.event.ref, 'refs/tags')
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+        
+      - name: Get version
+        id: get_version
+        run: |
+          echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
+
+      - name: Set Environment Variable
+        run: echo "RELEASE_VERSION=${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_ENV
+
+      # Build bisheng-pybackend-libs
+      - name: Set python version 3.8
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.8
+
+      - name: Build PyPi bisheng-pybackend-libs and push
+        id: pypi_build_bisheng_pybackend_libs
+        run: |
+          pip install Cython
+          pip install wheel
+          pip install twine
+          cd python/pybackend_libs
+          python setup.py bdist_wheel
+          twine upload dist/* -u ${{ secrets.PYPI_USER }} -p ${{ secrets.PYPI_PASSWORD }} --repository pypi
+
+      - name: notify feishu
+        uses: sozo-design/curl@v1.0.2
+        with:
+          args: -X POST https://open.feishu.cn/open-apis/bot/v2/hook/2cfe0d8d-647c-4408-9f39-c59134035c4b -d '{"msg_type":"text","content":{"text":"release 编译成功"}}'

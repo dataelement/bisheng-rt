@@ -1,9 +1,10 @@
 #!/bin/bash
 
+
 prepare_zh_env(){
-  # Docker中没有中文（中文编码问题）：
-  yum -y install kde-l10n-Chinese && yum -y reinstall glibc-common
-  # apt-get -y install language-pack-zh-hans
+  apt update
+  # yum -y install kde-l10n-Chinese && yum -y reinstall glibc-common
+  apt-get -y install language-pack-zh-hans
   localedef -c -f UTF-8 -i zh_CN zh_CN.utf8
   export LC_ALL=zh_CN.utf8
 }
@@ -13,6 +14,7 @@ prepare_cv_syslib() {
 }
 
 prepare_system_lib() {
+
     apt install -y nasm
     apt install -y zlib1g-dev
     apt install -y rapidjson-dev
@@ -20,13 +22,26 @@ prepare_system_lib() {
     apt install -y libboost1.71-dev
     apt install -y libre2-dev
     apt install -y libb64-dev
+    apt install -y libarchive-dev
 }    
 
 prepare_python_be() {
+    apt install -y python3.8 libpython3.8-dev python3-pip
     local repo="https://mirrors.aliyun.com/pypi/simple"
     pip3 install --upgrade wheel setuptools -i repo
     pip3 install --upgrade numpy -i $repo
 }
+
+
+prepre_dcgm() {
+  distribution=$(. /etc/os-release;echo $ID$VERSION_ID | sed -e 's/\.//g')
+  wget https://developer.download.nvidia.com/compute/cuda/repos/$distribution/x86_64/cuda-keyring_1.0-1_all.deb
+  dpkg -i cuda-keyring_1.0-1_all.deb
+  apt-get update
+  apt-get install -y datacenter-gpu-manager
+  rm cuda-keyring_1.0-1_all.deb
+}
+
 
 prepare_tf_libs() {
     ver="$1"
@@ -70,15 +85,18 @@ prepare_tf_libs() {
 }
 
 function preinstall() {
-  wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
-    gpg --dearmor - |  \
-    tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
+  # wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
+  #   gpg --dearmor - |  \
+  #   tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
 
-  apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A4B469963BF863CC
-  apt-add-repository 'deb https://apt.kitware.com/ubuntu/ focal main'
-  apt-get update
-  apt-get install -y --no-install-recommends --option Acquire::HTTP::Proxy=http://192.168.106.8:1081 \
-    cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1 
+  # apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A4B469963BF863CC
+  # apt-add-repository 'deb https://apt.kitware.com/ubuntu/ focal main'
+  # apt-get update
+  # apt-get install -y --no-install-recommends --option Acquire::HTTP::Proxy=http://192.168.106.8:1081 \
+  #   cmake-data=3.21.1-0kitware1ubuntu20.04.1 cmake=3.21.1-0kitware1ubuntu20.04.1 
+  wget http://192.168.106.8:8100/deps/cmake-3.23.1-linux-x86_64.tar.gz
+  tar zxf cmake-3.23.1-linux-x86_64.tar.gz --strip-components 1 -C /usr/local
+  rm cmake-3.23.1-linux-x86_64.tar.gz
 }
 
 prepare_dali_be() {
@@ -259,24 +277,25 @@ prepare_tf_libs_new() {
     
 }
 
-function patch() {
+function patch_pip() {
   # patch for install transformers
   ln -s /usr/local/bin/pip3.8 /usr/bin/
 }
 
-function upload_tf_pkg() {
-  TWINE_USER=deploy
-  TWINE_PASSWORD=kDNubrlaK6n6RtzN
-  PYPI_REPO="http://192.168.106.8:6081/repository/pypi-hosted/"
-  WHL_PKG="/home/public/liuqingjie/tensorflow-1.15.5+nv-cp38-cp38-linux_x86_64.whl"
-  twine upload ${WHL_PKG} -u ${TWINE_USER} -p ${TWINE_PASSWORD} --repository-url ${PYPI_REPO}
+
+function clean() {
+   echo "clean" 
+   apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip
 }
 
 
-function install_tf_pkg() {
-  pip3 install -U tensorflow==1.15.5+nv \
-    --extra-index  http://public:26rS9HRxDqaVy5T@192.168.106.8:6081/repository/pypi-hosted/simple --trusted-host 192.168.106.8
+function commit_dev_image() {
+    build_image="dataelement/bisheng-rt-base:0.0.1"
+    docker rmi ${build_image}
+    LOCAL_HOME=$HOME
+    docker commit -a "hanfeng@dataelem.com" -m "commit bisheng-rt base dev image" bisheng_rt_v005_dev ${build_image}
 }
+
 
 # prepare_python_be
 # prepare_tf_libs 1
@@ -295,7 +314,16 @@ function install_tf_pkg() {
 
 
 ## dependences for bisheng-rt
-# preinstall
+
+# prepare_zh_env
 # prepare_system_lib
+# prepare_cv_syslib
+# prepare_python_be
+# preinstall
+# prepre_dcgm
+# clean
+
+# commit_dev_image
+
 # upload_tf_pkg
-install_tf_pkg
+# install_tf_pkg

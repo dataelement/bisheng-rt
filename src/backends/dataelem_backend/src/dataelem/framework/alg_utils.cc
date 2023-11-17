@@ -423,7 +423,7 @@ ConstructFinalResponse(
 TRITONSERVER_Error*
 ConstructFinalResponse(
     TRITONBACKEND_Response** response, const std::string& resp,
-    const std::string& name, bool use_raw_output = true)
+    const std::string& name)
 {
   const char* output_name = name.c_str();
   TRITONSERVER_DataType output_datatype = TRITONSERVER_TYPE_BYTES;
@@ -432,11 +432,6 @@ ConstructFinalResponse(
   TRITONSERVER_MemoryType output_memory_type = TRITONSERVER_MEMORY_CPU;
   int64_t output_memory_id;
   const void* output_base = resp.data();
-
-  size_t length_offset = 4;
-  if (!use_raw_output) {
-    output_byte_size += length_offset;
-  }
 
   // std::cout << "ConstructFinalResponse:" << resp << "," << output_byte_size
   // << "\n";
@@ -451,13 +446,7 @@ ConstructFinalResponse(
       output, &output_buffer, output_byte_size, &output_memory_type,
       &output_memory_id));
 
-  if (use_raw_output) {
-    memcpy(output_buffer, output_base, output_byte_size);
-  } else {
-    size_t content_length = resp.length();
-    memcpy(output_buffer, &content_length, length_offset);
-    memcpy(output_buffer + length_offset, output_base, output_byte_size);
-  }
+  memcpy(output_buffer, output_base, output_byte_size);
   return nullptr;
 }
 

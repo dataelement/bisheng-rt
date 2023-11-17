@@ -181,7 +181,6 @@ add_executable(
   common.h
   shared_memory_manager.h
   triton_signal.h
-  license/client.cpp
 )
 
 # On windows a *.lib file can be generated for a exe. When creating

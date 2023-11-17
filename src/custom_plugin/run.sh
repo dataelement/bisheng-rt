@@ -3,7 +3,7 @@
 # git config --global http.proxy http://192.168.106.8:1081
 # git config --global https.proxy http://192.168.106.8:1081
 
-PROJ_DIR="/home/hanfeng/projects/idpserver"
+PROJ_DIR="/home/hanfeng/projects/bisheng-rt"
 THIRD_PARTY_DIR="${PROJ_DIR}/tritonbuild/tritonserver/build/third-party"
 ABSL_DIR="${THIRD_PARTY_DIR}/absl/lib/cmake/absl"
 
@@ -32,6 +32,7 @@ function build_daliop() {
 }
 
 function build_tflib() {
+  # tf plugin srcs is not open.
   name="tf"
   src_dir="${PROJ_DIR}/src/custom_plugin/${name}/"
   build_dir="${PROJ_DIR}/tritonbuild/custom_plugin/${name}/build"
@@ -50,7 +51,7 @@ function build_tflib() {
   # patch for the cuda path in third party
   if [ ! -d ${TF_PATH}/include/third_party/gpus/cuda ]; then
     mkdir -p ${TF_PATH}/include/third_party/gpus/cuda
-    ln -s /usr/local/cuda-11.7/targets/x86_64-linux/include \
+    ln -s /usr/local/cuda-11.8/targets/x86_64-linux/include \
       ${TF_PATH}/include/third_party/gpus/cuda/include
   fi
 
@@ -60,7 +61,7 @@ function build_tflib() {
     -DCMAKE_BUILD_TYPE=Release                 \
     -DBUILD_TF_CC=OFF                          \
     -DBUILD_TF=ON                              \
-    -DCUDA_VERSION=11.7                        \
+    -DCUDA_VERSION=11.8                        \
     -DTF_PATH=${TF_PATH}                       \
     -DPROTOBUF_INC_DIR=${PROTOBUF_INC_DIR} &&  \
     make -j$(nproc)
@@ -69,6 +70,7 @@ function build_tflib() {
 }
 
 function build_trtlib() {
+  # trt plugin srcs is not open.
   name="trt"
   src_dir="${PROJ_DIR}/src/custom_plugin/${name}/"
   build_dir="${PROJ_DIR}/tritonbuild/custom_plugin/${name}/build"
@@ -83,7 +85,7 @@ function build_trtlib() {
     -DTRT_LIB_DIR=/usr/lib/x86_64-linux-gnu        \
     -DTRT_INC_DIR=/usr/include/x86_64-linux-gnu    \
     -DTRT_BIN_DIR=${output_dir}/trt                \
-    -DCUDA_VERSION=11.7 -DCUDNN_VERSION=8.5        \
+    -DCUDA_VERSION=11.8 -DCUDNN_VERSION=8.7        \
     -DTHIRD_PARTY_PREFIX=${build_dir}/third_party  \
     -DCMAKE_INSTALL_PREFIX:PATH=${install_dir} &&  \
     make -j$(nproc) && make install
@@ -93,4 +95,4 @@ function build_trtlib() {
 
 # build_daliop
 # build_trtlib
-build_tflib
+# build_tflib

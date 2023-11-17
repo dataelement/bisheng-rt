@@ -1518,6 +1518,9 @@ def core_build(cmake_script, repo_dir, cmake_dir, build_dir, install_dir,
         cmake_script.cp(os.path.join(repo_install_dir, 'bin', 'rtserver'),
                         os.path.join(install_dir, 'bin'))
 
+        cmake_script.cp(os.path.join(repo_dir, 'docker', 'entrypoint.sh'),
+                        os.path.join(install_dir, 'bin'))
+
         cmake_script.mkdir(os.path.join(install_dir, 'config'))
         cmake_script.cp(os.path.join(repo_dir, 'config', 'server_config.pbtxt'),
                         os.path.join(install_dir, 'config'))
