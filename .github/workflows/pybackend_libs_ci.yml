@@ -44,7 +44,9 @@ jobs:
           pip install twine
           cd python/pybackend_libs
           python setup.py bdist_wheel
+          set +e
           twine upload dist/* -u ${{ secrets.PYPI_USER }} -p ${{ secrets.PYPI_PASSWORD }} --repository pypi
+          set -e
 
       - name: notify feishu
         uses: sozo-design/curl@v1.0.2
