@@ -7,6 +7,13 @@ function run_dev() {
 }
 
 
+function run_cuda118_dev() {
+    MOUNT="-v /home/hanfeng:/home/hanfeng -v /home/public:/home/public"
+    IMAGE="nvcr.io/nvidia/tritonserver:22.12-py3-min"
+    docker run --gpus=all --net=host -itd --shm-size=10G --name bisheng_rt_v005_dev ${MOUNT} $IMAGE bash
+}
+
+
 function up_repo() {
   projdir="$(pwd)"
   output_dir="${projdir}/output/install"
@@ -94,7 +101,9 @@ function upload_image() {
 }
 
 
-temp_build_image_v004_alpha4
+run_cuda118_dev
+
+# temp_build_image_v004_alpha4
 # temp_build_image_v004_alpha3
 # temp_build_image_v004_alpha2
 # temp_build_image_v004_alpha1

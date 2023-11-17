@@ -1,4 +1,4 @@
-# Copyright (c) 2020 pybackend libs Authors. All Rights Reserved.
+# Copyright (c) 2023 pybackend libs Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,14 +17,18 @@ import os
 import setuptools
 
 
+def _load_version() -> str:
+    ROOT_PATH = os.path.dirname(__file__)
+    version_path = os.path.join(ROOT_PATH, 'version.txt')
+    version = open(version_path).readlines()[0].strip()
+    return version
+
+
 def read_requirements_file(filepath):
     with open(filepath) as fin:
-        requirements = fin.read()
-    return requirements
-
-
-extras = {}
-REQUIRED_PACKAGES = read_requirements_file('requirements.txt')
+        contents = fin.readlines()
+    pkgs = [v for v in contents if not v.startswith('-') and v.strip()]
+    return pkgs
 
 
 def read(*names, **kwargs):
@@ -55,29 +59,29 @@ def get_package_data_files(package, data, package_dir=None):
     return all_files
 
 
+extras = {}
+REQUIRED_PACKAGES = read_requirements_file('requirements.txt')
+PACKAGES = setuptools.find_packages(
+    where='src',
+    exclude=('examples*', 'tests*', 'applications*', 'model_zoo*'))
+
 setuptools.setup(
-    name='pybackend_libs',
-    version='0.0.1',
+    name='bisheng-pybackend-libs',
+    version=_load_version(),
     author='DataElem',
     author_email='contact@dataelem.com',
-    description='libraries for pybackend',
+    description='libraries for bisheng rt pybackend',
     long_description=read('README.md'),
     long_description_content_type='text/markdown',
     url='https://github.com/dataelement/bisheng-rt/python/pybackend_libs',
-    packages=setuptools.find_packages(
-        where='./src',
-        exclude=('examples*', 'tests*', 'applications*', 'model_zoo*'),
-    ),
+    packages=PACKAGES,
+    package_dir={'': 'src'},
     package_data={},
     setup_requires=[],
     install_requires=REQUIRED_PACKAGES,
     entry_points={},
-    extras_require=extras,
-    python_requires='>=3.6',
+    python_requires='>=3.8',
     classifiers=[
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'License :: OSI Approved :: Apache Software License',

@@ -13,6 +13,9 @@ basic_config {
   }
   model_repository: "./models/model_repository"
   model_control_mode: "explicit"
+  backend_config: "tensorflow,version=2"
+  backend_config: "tensorflow,plugins=./plugins/tf/libtf_fastertransformer_op.so"
+  backend_config: "tensorrt,plugins=./plugins/trt/libnvinfer_plugin_ocr.so"
   http_port: 9001
   grpc_port: 9000
   metrics_port: 9002

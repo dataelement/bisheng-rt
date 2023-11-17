@@ -13,13 +13,13 @@ ABSL_DIR="${THIRD_PARTY_DIR}/absl/lib/cmake/absl"
 function build_tf_backend() {
   BACKEND="$1"
   ver=${BACKEND//tensorflow/libtf}
-  LIBTF_DIR=${PROJ_DIR}/tritonbuild/third_party/${ver}_v22.08
+  LIBTF_DIR=${PROJ_DIR}/tritonbuild/third_party/${ver}_v22.12
 
   python3 ./build.py \
     --backend=${BACKEND} \
     --no-container-build --no-core-build \
     --enable-gpu --enable-stats \
-    --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
+    --version 2.27.0 --container-version 22.12 --upstream-container-version 22.12 \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_TENSORFLOW_LIB_PATHS=${LIBTF_DIR}/lib \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_TENSORFLOW_INCLUDE_PATHS=${LIBTF_DIR}/include \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_SRC_DIR=${PROJ_DIR}/src \
@@ -31,13 +31,13 @@ function build_tf_backend() {
 }
 
 function build_pt_backend() {
-  LIBPT_DIR=${PROJ_DIR}/tritonbuild/third_party/libtorch_v22.08
+  LIBPT_DIR=${PROJ_DIR}/tritonbuild/third_party/libtorch_v22.12
   BACKEND=pytorch
   python3 ./build.py -v \
     --backend=${BACKEND} \
     --no-container-build --no-core-build \
     --enable-gpu --enable-stats \
-    --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
+    --version 2.27.0 --container-version 22.12 --upstream-container-version 22.12 \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_SRC_DIR=${PROJ_DIR}/src \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_PYTORCH_LIB_PATHS=${LIBPT_DIR}/lib \
     --extra-backend-cmake-arg="${BACKEND}:TRITON_PYTORCH_INCLUDE_PATHS=${LIBPT_DIR}/include;${LIBPT_DIR}/include/torch" \
@@ -53,7 +53,7 @@ function build_python_backend() {
     --backend=${BACKEND} \
     --no-container-build --no-core-build \
     --enable-gpu --enable-stats \
-    --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
+    --version 2.27.0 --container-version 22.12 --upstream-container-version 22.12 \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_SRC_DIR=${PROJ_DIR}/src \
     --extra-backend-cmake-arg=${BACKEND}:absl_DIR:PATH=${ABSL_DIR} \
     --cmake-dir ${PROJ_DIR} \
@@ -62,13 +62,13 @@ function build_python_backend() {
 }
 
 function build_onnx_backend() {
-  LIBPT_DIR=${PROJ_DIR}/tritonbuild/third_party/libonnxruntime-v22.08
+  LIBPT_DIR=${PROJ_DIR}/tritonbuild/third_party/libonnxruntime-v22.12
   BACKEND=onnxruntime
   python3 ./build.py -v \
     --backend=${BACKEND} \
     --no-container-build --no-core-build \
     --enable-gpu --enable-stats \
-    --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
+    --version 2.27.0 --container-version 22.12 --upstream-container-version 22.12 \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_ENABLE_ONNXRUNTIME_OPENVINO=OFF \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_SRC_DIR=${PROJ_DIR}/src \
     --extra-backend-cmake-arg=${BACKEND}:absl_DIR:PATH=${ABSL_DIR} \
@@ -77,6 +77,8 @@ function build_onnx_backend() {
     --cmake-dir ${PROJ_DIR} \
     --build-dir ${PROJ_DIR}/tritonbuild/backends \
     --install-dir ${PROJ_DIR}/tritonbuild/install
+
+  cp -P ${LIBPT_DIR}/lib/* ${PROJ_DIR}/tritonbuild/install/backends/${BACKEND}/
 }
 
 function build_paddle_backend() {
@@ -85,7 +87,7 @@ function build_paddle_backend() {
   python3 ./build.py -v \
     --backend=${BACKEND} \
     --no-container-build --no-core-build \
-    --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
+    --version 2.27.0 --container-version 22.12 --upstream-container-version 22.12 \
     --enable-gpu --enable-stats \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_SRC_DIR=${PROJ_DIR}/src \
     --extra-backend-cmake-arg=${BACKEND}:absl_DIR:PATH=${ABSL_DIR} \
@@ -101,7 +103,7 @@ function build_tensorrt_backend() {
   python3 ./build.py -v \
     --backend=${BACKEND} \
     --no-container-build --no-core-build \
-    --version 2.27.0 --container-version 22.08 --upstream-container-version 22.08 \
+    --version 2.27.0 --container-version 22.12 --upstream-container-version 22.12 \
     --enable-gpu --enable-stats --enable-nvtx \
     --extra-backend-cmake-arg=${BACKEND}:TRITON_SRC_DIR=${PROJ_DIR}/src \
     --extra-backend-cmake-arg=${BACKEND}:absl_DIR:PATH=${ABSL_DIR} \
@@ -515,6 +517,9 @@ function build_test() {
   popd
 }
 
+function extra_deps() {
+  apt update && apt install -y libarchive-dev patchelf libgl1
+}
 
 # build_tf_backend tensorflow1
 # build_tf_backend tensorflow2
@@ -545,6 +550,10 @@ function build_test() {
 # build_test
 
 ## Control for bisheng-rt
-build_server
+# build_server
 # build_dataelem_backend
 # build_python_backend
+# build_tf_backend tensorflow2
+# build_pt_backend
+build_onnx_backend
+# build_tensorrt_backend

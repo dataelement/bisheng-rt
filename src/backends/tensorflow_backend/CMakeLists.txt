@@ -216,7 +216,7 @@ if (NOT ${TRITON_TENSORFLOW_DOCKER_BUILD})
   )
 endif() # !TRITON_TENSORFLOW_DOCKER_BUILD
 
-target_compile_features(triton-tensorflow-backend PRIVATE cxx_std_11)
+target_compile_features(triton-tensorflow-backend PRIVATE cxx_std_17)
 target_compile_options(
   triton-tensorflow-backend PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:AppleClang>,$<CXX_COMPILER_ID:GNU>>:

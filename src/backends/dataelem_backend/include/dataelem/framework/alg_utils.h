@@ -48,7 +48,7 @@ TRITONSERVER_Error* ConstructFinalResponse(
 
 TRITONSERVER_Error* ConstructFinalResponse(
     TRITONBACKEND_Response** response, const std::string& resp,
-    const std::string& name, bool use_raw_output);
+    const std::string& name);
 
 //
 // Graph Request/Response helper functions
