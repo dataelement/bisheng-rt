@@ -38,10 +38,10 @@ jobs:
           RT_ENT_VER=$(cat components_version.txt |grep rt_enterprise= | awk -F'=' '{print $2}')
           PYBACKEND_LIBS_VER=$(cat components_version.txt |grep bisheng_pybackend_libs= | awk -F'=' '{print $2}')
           echo "PYBACKEND_LIBS_VER=${PYBACKEND_LIBS_VER}" >> $GITHUB_ENV
-          wget --no-check-certificate ${{ secrets.FILE_NEXUS_REPO }}/bisheng-rt-${RT_VER}.tar.gz
+          curl -k --progress-bar --ssl-no-revoke -o bisheng-rt-${RT_VER}.tar.gz ${{ secrets.FILE_NEXUS_REPO }}/bisheng-rt-${RT_VER}.tar.gz 
           tar zxf bisheng-rt-${RT_VER}.tar.gz
           rm bisheng-rt-${RT_VER}.tar.gz
-          wget --no-check-certificate ${{ secrets.FILE_NEXUS_REPO }}/bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
+          curl -k --progress-bar --ssl-no-revoke -o bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz ${{ secrets.FILE_NEXUS_REPO }}/bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
           tar zxf bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
           rm bisheng-rt-enterprise-${RT_ENT_ENVER}.tar.gz
 
