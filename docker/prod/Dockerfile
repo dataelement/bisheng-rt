@@ -21,7 +21,7 @@ WORKDIR /opt/bisheng-rt
 # private lanms version
 RUN pip3 install lanms==1.0.2 -i ${EXTR_PIP_REPO}
 
-RUN pip3 install bisheng-pybackend-libs==${BISHENG_PYBACKEND_LIBS_VER} -i ${PIP_REPO}
+RUN pip3 install bisheng-pybackend-libs==${BISHENG_PYBACKEND_LIBS_VER}
 
 RUN apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip
 
