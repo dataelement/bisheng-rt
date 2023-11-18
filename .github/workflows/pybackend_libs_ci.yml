@@ -41,4 +41,4 @@ jobs:
           tag=${{ github.ref_name }}
           echo ${tag:1} > ./version.txt
           python setup.py bdist_wheel
-          twine upload dist/* -u ${{ secrets.TWINE_USER }} -p ${{ secrets.TWINE_PASSWORD }} --repository-url ${{ env.PY_NEXUS }}
+          twine upload dist/* -u ${{ secrets.NEXUS_USER }} -p ${{ secrets.NEXUS_PASSWORD }} --repository-url ${{ env.PY_NEXUS }}
