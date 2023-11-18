@@ -8,7 +8,6 @@ on:
       - "v*"
 
 env:
-  RELEASE_VERSION: 0.0.0
   PY_NEXUS: http://110.16.193.170:50083/repository/pypi-hosted/
   DOCKER_NEXUS: 110.16.193.170:50080
   # PY_NEXUS: https://io.dataelem.com/repository/pypi-hosted/
@@ -26,14 +25,6 @@ jobs:
       - name: checkout
         uses: actions/checkout@v2
         
-      - name: Get version
-        id: get_version
-        run: |
-          echo ::set-output name=VERSION::${GITHUB_REF/refs\/tags\//}
-
-      - name: Set Environment Variable
-        run: echo "RELEASE_VERSION=${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_ENV
-
       # Build bisheng-pybackend-libs
       - name: Set python version 3.8
         uses: actions/setup-python@v1
@@ -50,5 +41,4 @@ jobs:
           tag=${{ github.ref_name }}
           echo ${tag:1} > ./version.txt
           python setup.py bdist_wheel
-          repo=${{ env.PY_NEXUS }}
-          twine upload --verbose -u ${{ secrets.NEXUS_USER }}  -p ${{ secrets.NEXUS_PASSWORD }} --repository-url $repo  dist/*.whl    
+          twine upload dist/* -u ${{ secrets.TWINE_USER }} -p ${{ secrets.TWINE_PASSWORD }} --repository-url ${{ env.PY_NEXUS }}
