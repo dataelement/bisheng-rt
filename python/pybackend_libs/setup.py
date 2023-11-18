@@ -68,7 +68,7 @@ PACKAGES = setuptools.find_packages(
 setuptools.setup(
     name='bisheng-pybackend-libs',
     version=_load_version(),
-    author='DataElem',
+    author='DataElem Inc.',
     author_email='contact@dataelem.com',
     description='libraries for bisheng rt pybackend',
     long_description=read('README.md'),
@@ -76,7 +76,7 @@ setuptools.setup(
     url='https://github.com/dataelement/bisheng-rt/python/pybackend_libs',
     packages=PACKAGES,
     package_dir={'': 'src'},
-    package_data={},
+    package_data={'': ['*.ttc']},
     setup_requires=[],
     install_requires=REQUIRED_PACKAGES,
     entry_points={},
