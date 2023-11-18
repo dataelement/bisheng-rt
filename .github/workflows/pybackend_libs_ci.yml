@@ -5,11 +5,15 @@ on:
   push:
     # Sequence of patterns matched against refs/tags
     branches:
-      - "r*"
+      - "v*"
 
 env:
   RELEASE_VERSION: 0.0.0
-  
+  PY_NEXUS: http://110.16.193.170:50083/repository/pypi-hosted/
+  DOCKER_NEXUS: 110.16.193.170:50080
+  # PY_NEXUS: https://io.dataelem.com/repository/pypi-hosted/
+  # DOCKER_NEXUS: cr.dataelem.com
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -43,12 +47,8 @@ jobs:
           pip install wheel
           pip install twine
           cd python/pybackend_libs
+          tag=${{ github.ref_name }}
+          echo ${tag:1} > ./version.txt
           python setup.py bdist_wheel
-          set +e
-          twine upload dist/* -u ${{ secrets.PYPI_USER }} -p ${{ secrets.PYPI_PASSWORD }} --repository pypi
-          set -e
-
-      - name: notify feishu
-        uses: sozo-design/curl@v1.0.2
-        with:
-          args: -X POST https://open.feishu.cn/open-apis/bot/v2/hook/2cfe0d8d-647c-4408-9f39-c59134035c4b -d '{"msg_type":"text","content":{"text":"release 编译成功"}}'
+          repo=${{ env.PY_NEXUS }}
+          twine upload --verbose -u ${{ secrets.NEXUS_USER }}  -p ${{ secrets.NEXUS_PASSWORD }} --repository-url $repo  dist/*.whl    
