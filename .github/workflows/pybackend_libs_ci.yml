@@ -5,12 +5,12 @@ on:
   push:
     # Sequence of patterns matched against refs/tags
     tags:
-      - "v*"
+      - "r*"
 
 env:
   PY_NEXUS: http://110.16.193.170:50083/repository/pypi-hosted/
   DOCKER_NEXUS: 110.16.193.170:50080
-  # PY_NEXUS: https://io.dataelem.com/repository/pypi-hosted/
+  # PY_NEXUS: https://nx.dataelem.com/repository/pypi-hosted/
   # DOCKER_NEXUS: cr.dataelem.com
 
 concurrency:
@@ -42,3 +42,6 @@ jobs:
           echo ${tag:1} > ./version.txt
           python setup.py bdist_wheel
           twine upload dist/* -u ${{ secrets.NEXUS_USER }} -p ${{ secrets.NEXUS_PASSWORD }} --repository-url ${{ env.PY_NEXUS }}
+          set +e
+          twine upload dist/* -u ${{ secrets.PYPI_USER }} -p ${{ secrets.PYPI_PASSWORD }} --repository pypi
+          set -e
