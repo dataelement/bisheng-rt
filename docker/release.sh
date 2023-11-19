@@ -13,7 +13,7 @@ function package() {
   fi
 
   install_dir="${projdir}/tritonbuild/install"
-  pub_file="bisheng-rt-$ver.tar.gz"
+  pub_file="bisheng-rt-${ver}.tar.gz"
 
   pushd ${projdir}/tritonbuild
   tar zcf ${releasedir}/${pub_file} ./install
@@ -23,4 +23,4 @@ function package() {
 }
 
 
-package 0.0.5
+package $1
