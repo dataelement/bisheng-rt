@@ -2548,6 +2548,43 @@ ModelRepositoryManager::InitializeModelInfo(
   //   linfo->model_config_.set_default_model_filename(default_model_fname_pri);
   // }
 
+  auto default_model_fname = linfo->model_config_.default_model_filename();
+
+// update for the compute capability version
+#ifdef TRITON_ENABLE_GPU
+  std::string cc;
+  RETURN_IF_ERROR(GetGPUCompatibility(cc));
+  std::string model_fname1 = default_model_fname + ".cc" + cc;
+  if (version_dir_content.find(model_fname1) != version_dir_content.end()) {
+    linfo->model_config_.set_default_model_filename(model_fname1);
+  }
+#endif  // TRITON_ENABLE_GPU
+
+  // check for the closed model, raise nice error
+  auto model_filenmae = linfo->model_config_.default_model_filename();
+  if (version_dir_content.find(model_filenmae) == version_dir_content.end()) {
+    auto pri_model_filename = model_filenmae + ".pri";
+    if (version_dir_content.find(pri_model_filename) !=
+        version_dir_content.end()) {
+      return Status(
+          Status::Code::UNSUPPORTED,
+          std::string("model ") + model +
+              " is a close model can only be loaded in enterprise mode");
+    }
+#ifdef TRITON_ENABLE_GPU
+    std::string cc;
+    RETURN_IF_ERROR(GetGPUCompatibility(cc));
+    std::string pri_model_filename = model_filenmae + ".cc" + cc + ".pri";
+    if (version_dir_content.find(pri_model_filename) !=
+        version_dir_content.end()) {
+      return Status(
+          Status::Code::UNSUPPORTED,
+          std::string("model ") + model +
+              " is a close model can only be loaded in enterprise mode");
+    }
+#endif  // TRITON_ENABLE_GPU
+  }
+
   // If the model is mapped, update its config name based on the
   // mapping.
   if (model_mappings_.find(name) != model_mappings_.end()) {

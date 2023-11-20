@@ -24,7 +24,18 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include <NvInferPlugin.h>
+#include <cuda_runtime_api.h>
+
+#include <atomic>
+#include <chrono>
 #include <future>
+#include <map>
+#include <memory>
+#include <set>
+#include <thread>
+#include <unordered_map>
+
 #include "loader.h"
 #include "logging.h"
 #include "semaphore.h"
@@ -36,16 +47,6 @@
 #include "triton/backend/backend_input_collector.h"
 #include "triton/backend/backend_output_responder.h"
 #include "triton/common/nvtx.h"
-
-#include <NvInferPlugin.h>
-#include <cuda_runtime_api.h>
-#include <atomic>
-#include <chrono>
-#include <map>
-#include <memory>
-#include <set>
-#include <thread>
-#include <unordered_map>
 
 //
 // TensorRT Backend that implements the TRITONBACKEND API.
@@ -1136,117 +1137,25 @@ class ModelInstanceState : public TensorRTModelInstance {
       TRITONBACKEND_Request** requests, const uint32_t request_count,
       const size_t context_idx);
 
-  std::string ModelPath(){return model_path_; };
-  bool& IsEngineCreated() {return is_engine_created_; }
-
-  TRITONSERVER_Error* InitStreamsAndEvents();
-  TRITONSERVER_Error* InitOptimizationProfiles();
-  TRITONSERVER_Error* ValidateIO();
-  TRITONSERVER_Error* InitIOBindingBuffers();
-
-  int CudaStreamPriority() { return cuda_stream_priority_; }
-  void GetConfiguredProfiles(std::string* profiles_desc);
-  // struct TensorRTContext;
-  struct TensorRTContext {
-    TensorRTContext(
-        const std::string& profile_name, const int profile_idx,
-        const int binding_cnts, const int event_set_cnts)
-        : profile_name_(profile_name), profile_idx_(profile_idx),
-          context_(nullptr), cuda_graph_execs_(event_set_cnts),
-          min_dims_(binding_cnts), max_dims_(binding_cnts),
-          opt_dims_(binding_cnts), min_shapes_(binding_cnts),
-          max_shapes_(binding_cnts), opt_shapes_(binding_cnts),
-          is_dynamic_per_binding_(binding_cnts)
-    {
-    }
-    std::string profile_name_;
-    int profile_idx_;
-    std::shared_ptr<nvinfer1::IExecutionContext> context_;
-
-    // Struct that holds cudaGraphExec_t and the dimensions of the
-    // inputs used to capture the graph
-    struct CudaGraph {
-      CudaGraph() : cuda_graph_exec_(nullptr) {}
-      std::vector<int64_t> lower_bound_key_;
-      // Store in the order of the bindng index
-      std::vector<std::vector<int64_t>> input_dims_;
-      cudaGraphExec_t cuda_graph_exec_;
-    };
-
-    // The key is packed input dimensions prepended by batch size, so
-    // that uniqueness is guaranteed and the CUDA graphs are sorted to
-    // provide convinence to find the closest CUDA graph in the
-    // future.
-    std::vector<std::map<std::vector<int64_t>, CudaGraph>> cuda_graph_execs_;
-
-    // Min Dimensions per bindings
-    std::vector<nvinfer1::Dims> min_dims_;
-
-    // Max Dimensions per bindings
-    std::vector<nvinfer1::Dims> max_dims_;
-
-    // Optimized Dimensions per bindings
-    std::vector<nvinfer1::Dims> opt_dims_;
-
-    // Min shape values per bindings
-    std::vector<const int32_t*> min_shapes_;
-
-    // Max shape values per bindings
-    std::vector<const int32_t*> max_shapes_;
-
-    // Optimized shape values per bindings
-    std::vector<const int32_t*> opt_shapes_;
-
-    // The number of shape values
-    size_t nb_shape_values_;
-
-    // Whether or not the binding contains a dynamic shape
-    std::vector<bool> is_dynamic_per_binding_;
-  };
-#ifdef TRITON_ENABLE_CUDA_GRAPH
-  TRITONSERVER_Error* InitializeCudaGraph();
-
-  struct GraphSpec {
-    GraphSpec() : batch_size_(0), lower_bound_batch_size_(0), captured_(false)
-    {
-    }
-    int64_t batch_size_;
-    std::map<std::string, std::vector<int64_t>> shapes_;
-    int64_t lower_bound_batch_size_;
-    std::map<std::string, std::vector<int64_t>> lower_bound_shapes_;
-    bool captured_;
-  };
-  TRITONSERVER_Error* InitializeGraphSpecs(
-      std::vector<GraphSpec>* graph_specs, bool* allow_inexact_match);
-  TRITONSERVER_Error* ValidateGraphSpec(const GraphSpec& graph_spec);
-  bool BuildCudaGraph(
-      TensorRTContext* trt_context, const GraphSpec& graph_spec);
-  bool BuildCudaGraphV2(
-      TensorRTContext* trt_context, const GraphSpec& graph_spec);
-  TRITONSERVER_Error* SetCudaGraphShape(
-      TensorRTContext* trt_context, const GraphSpec& graph_spec,
-      std::vector<int64_t>* cuda_graph_key,
-      TensorRTContext::CudaGraph* cuda_graph);
-#endif  // TRITON_ENABLE_CUDA_GRAPH
-
  private:
+  struct TensorRTContext;
 
   ModelInstanceState(
       ModelState* model_state,
       TRITONBACKEND_ModelInstance* triton_model_instance);
 
   void RegisterSemaphore();
-  // TRITONSERVER_Error* InitStreamsAndEvents();
+  TRITONSERVER_Error* InitStreamsAndEvents();
   TRITONSERVER_Error* InitEventSet(bool busy_wait_events);
   TRITONSERVER_Error* DestroyEventSet();
-  // TRITONSERVER_Error* InitOptimizationProfiles();
+  TRITONSERVER_Error* InitOptimizationProfiles();
 
-  // TRITONSERVER_Error* ValidateIO();
+  TRITONSERVER_Error* ValidateIO();
   TRITONSERVER_Error* ValidateIOHelper(
       common::TritonJson::Value& ios,
       const std::set<std::string>& allowed_shape_tensors, const bool is_input);
 
-  // TRITONSERVER_Error* InitIOBindingBuffers();
+  TRITONSERVER_Error* InitIOBindingBuffers();
   TRITONSERVER_Error* InitializeConfigShapeInputBindings(
       common::TritonJson::Value& config_inputs);
   TRITONSERVER_Error* InitializeConfigExecuteInputBindings(
@@ -1303,14 +1212,99 @@ class ModelInstanceState : public TensorRTModelInstance {
       const int64_t batch_size, cudaStream_t stream);
   void ProcessResponse();
 
+  void GetConfiguredProfiles(std::string* profiles_desc);
+  int CudaStreamPriority() { return cuda_stream_priority_; }
+
   // A struct to hold TensorRT execution context and its meta data, a
   // backend context can have multiple of this struct if multiple
   // optimization profiles is specified.
+  struct TensorRTContext {
+    TensorRTContext(
+        const std::string& profile_name, const int profile_idx,
+        const int binding_cnts, const int event_set_cnts)
+        : profile_name_(profile_name), profile_idx_(profile_idx),
+          context_(nullptr), cuda_graph_execs_(event_set_cnts),
+          min_dims_(binding_cnts), max_dims_(binding_cnts),
+          opt_dims_(binding_cnts), min_shapes_(binding_cnts),
+          max_shapes_(binding_cnts), opt_shapes_(binding_cnts),
+          is_dynamic_per_binding_(binding_cnts)
+    {
+    }
+    std::string profile_name_;
+    int profile_idx_;
+    std::shared_ptr<nvinfer1::IExecutionContext> context_;
+
+    // Struct that holds cudaGraphExec_t and the dimensions of the
+    // inputs used to capture the graph
+    struct CudaGraph {
+      CudaGraph() : cuda_graph_exec_(nullptr) {}
+      std::vector<int64_t> lower_bound_key_;
+      // Store in the order of the bindng index
+      std::vector<std::vector<int64_t>> input_dims_;
+      cudaGraphExec_t cuda_graph_exec_;
+    };
+
+    // The key is packed input dimensions prepended by batch size, so
+    // that uniqueness is guaranteed and the CUDA graphs are sorted to
+    // provide convinence to find the closest CUDA graph in the
+    // future.
+    std::vector<std::map<std::vector<int64_t>, CudaGraph>> cuda_graph_execs_;
+
+    // Min Dimensions per bindings
+    std::vector<nvinfer1::Dims> min_dims_;
+
+    // Max Dimensions per bindings
+    std::vector<nvinfer1::Dims> max_dims_;
+
+    // Optimized Dimensions per bindings
+    std::vector<nvinfer1::Dims> opt_dims_;
+
+    // Min shape values per bindings
+    std::vector<const int32_t*> min_shapes_;
+
+    // Max shape values per bindings
+    std::vector<const int32_t*> max_shapes_;
+
+    // Optimized shape values per bindings
+    std::vector<const int32_t*> opt_shapes_;
+
+    // The number of shape values
+    size_t nb_shape_values_;
+
+    // Whether or not the binding contains a dynamic shape
+    std::vector<bool> is_dynamic_per_binding_;
+  };
 
   void FindClosestCudaGraph(
       const TensorRTContext& trt_context,
       const std::vector<int64_t>& cuda_graph_key,
       const TensorRTContext::CudaGraph** cuda_graph, bool* found_exact);
+
+#ifdef TRITON_ENABLE_CUDA_GRAPH
+  TRITONSERVER_Error* InitializeCudaGraph();
+
+  struct GraphSpec {
+    GraphSpec() : batch_size_(0), lower_bound_batch_size_(0), captured_(false)
+    {
+    }
+    int64_t batch_size_;
+    std::map<std::string, std::vector<int64_t>> shapes_;
+    int64_t lower_bound_batch_size_;
+    std::map<std::string, std::vector<int64_t>> lower_bound_shapes_;
+    bool captured_;
+  };
+  TRITONSERVER_Error* InitializeGraphSpecs(
+      std::vector<GraphSpec>* graph_specs, bool* allow_inexact_match);
+  TRITONSERVER_Error* ValidateGraphSpec(const GraphSpec& graph_spec);
+  bool BuildCudaGraph(
+      TensorRTContext* trt_context, const GraphSpec& graph_spec);
+  bool BuildCudaGraphV2(
+      TensorRTContext* trt_context, const GraphSpec& graph_spec);
+  TRITONSERVER_Error* SetCudaGraphShape(
+      TensorRTContext* trt_context, const GraphSpec& graph_spec,
+      std::vector<int64_t>* cuda_graph_key,
+      TensorRTContext::CudaGraph* cuda_graph);
+#endif  // TRITON_ENABLE_CUDA_GRAPH
 
   // The engine used for the instance. If the model uses dynamic
   // shape, then the CUDA engine is owned by the instance. Otherwise,
@@ -1496,9 +1490,6 @@ class ModelInstanceState : public TensorRTModelInstance {
   std::unique_ptr<std::promise<void>> barrier_;
 
   ModelState* model_state_;
-
-  bool is_engine_created_;
-  std::string model_path_;
 };
 
 TRITONSERVER_Error*
@@ -1523,9 +1514,9 @@ ModelInstanceState::Create(
     cc_model_filename = "model.plan";
   }
 
-  auto model_path =
-      JoinPath({model_state->RepositoryPath(),
-                std::to_string(model_state->Version()), cc_model_filename});
+  auto model_path = JoinPath(
+      {model_state->RepositoryPath(), std::to_string(model_state->Version()),
+       cc_model_filename});
 
   {
     bool exists;
@@ -1536,49 +1527,44 @@ ModelInstanceState::Create(
             "' for model instance '" + (*state)->Name() + "'");
   }
 
-  (*state)->model_path_ = model_path;
-
   (*state)->RegisterSemaphore();
-
-  // RETURN_IF_ERROR((*state)->InitStreamsAndEvents());
-  // RETURN_IF_ERROR(model_state->CreateEngine(
-  //     (*state)->DeviceId(), (*state)->DLACoreId(), model_path,
-  //     (*state)->EnginePtr()));
-  // RETURN_IF_ERROR((*state)->InitOptimizationProfiles());
-  // RETURN_IF_ERROR((*state)->ValidateIO());
-  // RETURN_IF_ERROR((*state)->InitIOBindingBuffers());
-
-  (*state)->is_engine_created_ = false;
+  RETURN_IF_ERROR((*state)->InitStreamsAndEvents());
+  RETURN_IF_ERROR(model_state->CreateEngine(
+      (*state)->DeviceId(), (*state)->DLACoreId(), model_path,
+      (*state)->EnginePtr()));
+  RETURN_IF_ERROR((*state)->InitOptimizationProfiles());
+  RETURN_IF_ERROR((*state)->ValidateIO());
+  RETURN_IF_ERROR((*state)->InitIOBindingBuffers());
 
   (*state)->completion_thread_ =
       std::thread(&ModelInstanceState::ProcessResponse, *state);
 
   // CUDA 10.1 starts to support CUDA graphs.
   // If enabled, build CUDA graphs with a set of graph specs.
-// #ifdef TRITON_ENABLE_CUDA_GRAPH
-//   if (model_state->UseCudaGraphs()) {
-//     RETURN_IF_ERROR((*state)->InitializeCudaGraph());
-//   }
-// #endif
+#ifdef TRITON_ENABLE_CUDA_GRAPH
+  if (model_state->UseCudaGraphs()) {
+    RETURN_IF_ERROR((*state)->InitializeCudaGraph());
+  }
+#endif
 
-//   if (UseTensorRTv2API((*state)->Engine())) {
-//     std::string profiles_desc;
-//     (*state)->GetConfiguredProfiles(&profiles_desc);
-//     LOG_MESSAGE(
-//         TRITONSERVER_LOG_INFO,
-//         (std::string("Created instance ") + (*state)->Name() + " on GPU " +
-//          std::to_string((*state)->DeviceId()) + " with stream priority " +
-//          std::to_string((*state)->CudaStreamPriority()) +
-//          " and optimization profile" + profiles_desc)
-//             .c_str());
-//   } else {
-//     LOG_MESSAGE(
-//         TRITONSERVER_LOG_INFO,
-//         (std::string("Created instance ") + (*state)->Name() + " on GPU " +
-//          std::to_string((*state)->DeviceId()) + " with stream priority " +
-//          std::to_string((*state)->CudaStreamPriority()))
-//             .c_str());
-//   }
+  if (UseTensorRTv2API((*state)->Engine())) {
+    std::string profiles_desc;
+    (*state)->GetConfiguredProfiles(&profiles_desc);
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO,
+        (std::string("Created instance ") + (*state)->Name() + " on GPU " +
+         std::to_string((*state)->DeviceId()) + " with stream priority " +
+         std::to_string((*state)->CudaStreamPriority()) +
+         " and optimization profile" + profiles_desc)
+            .c_str());
+  } else {
+    LOG_MESSAGE(
+        TRITONSERVER_LOG_INFO,
+        (std::string("Created instance ") + (*state)->Name() + " on GPU " +
+         std::to_string((*state)->DeviceId()) + " with stream priority " +
+         std::to_string((*state)->CudaStreamPriority()))
+            .c_str());
+  }
 
   return nullptr;  // success
 }
@@ -1655,94 +1641,91 @@ ModelInstanceState::ModelInstanceState(
 ModelInstanceState::~ModelInstanceState()
 {
   cudaSetDevice(DeviceId());
-  if(is_engine_created_){
-    is_engine_created_ = false;
-    for (auto& io_binding_infos : io_binding_infos_) {
-      for (auto& io_binding_info : io_binding_infos) {
-        if (io_binding_info.buffer_ != nullptr) {
-          cudaError_t err = cudaSuccess;
-          if (io_binding_info.memory_type_ == TRITONSERVER_MEMORY_GPU) {
-            err = cudaFree(io_binding_info.buffer_);
-          } else {
-            err = cudaFreeHost(io_binding_info.buffer_);
-          }
-          if (err != cudaSuccess) {
-            LOG_MESSAGE(
-                TRITONSERVER_LOG_ERROR,
-                (std::string("Failed to free allocated memory for '") + Name() +
-                "': " + cudaGetErrorString(err))
-                    .c_str());
-          }
+  for (auto& io_binding_infos : io_binding_infos_) {
+    for (auto& io_binding_info : io_binding_infos) {
+      if (io_binding_info.buffer_ != nullptr) {
+        cudaError_t err = cudaSuccess;
+        if (io_binding_info.memory_type_ == TRITONSERVER_MEMORY_GPU) {
+          err = cudaFree(io_binding_info.buffer_);
+        } else {
+          err = cudaFreeHost(io_binding_info.buffer_);
+        }
+        if (err != cudaSuccess) {
+          LOG_MESSAGE(
+              TRITONSERVER_LOG_ERROR,
+              (std::string("Failed to free allocated memory for '") + Name() +
+               "': " + cudaGetErrorString(err))
+                  .c_str());
         }
       }
     }
-
-    for (auto& trt_context : trt_contexts_) {
-      for (const auto& cuda_graph_execs : trt_context.second.cuda_graph_execs_) {
-        for (const auto& pr : cuda_graph_execs) {
-          cudaError_t err = cudaGraphExecDestroy(pr.second.cuda_graph_exec_);
-          if (err != cudaSuccess) {
-            LOG_MESSAGE(
-                TRITONSERVER_LOG_ERROR,
-                (std::string("Failed to destroy cuda graph exec: ") +
-                +cudaGetErrorString(err))
-                    .c_str());
-          }
-        }
-      }
-      trt_context.second.cuda_graph_execs_.clear();
-    }
-
-    if (stream_ != nullptr) {
-      cudaError_t err = cudaStreamDestroy(stream_);
-      if (err != cudaSuccess) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            (std::string("Failed to destroy cuda stream: ") +
-            +cudaGetErrorString(err))
-                .c_str());
-      }
-      stream_ = nullptr;
-    }
-
-    if (signal_stream_ != nullptr) {
-      cudaError_t err = cudaStreamDestroy(signal_stream_);
-      if (err != cudaSuccess) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            (std::string("Failed to destroy cuda signal stream: ") +
-            +cudaGetErrorString(err))
-                .c_str());
-      }
-      signal_stream_ = nullptr;
-    }
-
-    if (input_copy_stream_ != nullptr) {
-      cudaError_t err = cudaStreamDestroy(input_copy_stream_);
-      if (err != cudaSuccess) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            (std::string("Failed to destroy cuda input copy stream: ") +
-            +cudaGetErrorString(err))
-                .c_str());
-      }
-      input_copy_stream_ = nullptr;
-    }
-
-    if (output_copy_stream_ != nullptr) {
-      cudaError_t err = cudaStreamDestroy(output_copy_stream_);
-      if (err != cudaSuccess) {
-        LOG_MESSAGE(
-            TRITONSERVER_LOG_ERROR,
-            (std::string("Failed to destroy cuda output copy stream: ") +
-            +cudaGetErrorString(err))
-                .c_str());
-      }
-      output_copy_stream_ = nullptr;
-    }
-
-    DestroyEventSet();
   }
+
+  for (auto& trt_context : trt_contexts_) {
+    for (const auto& cuda_graph_execs : trt_context.second.cuda_graph_execs_) {
+      for (const auto& pr : cuda_graph_execs) {
+        cudaError_t err = cudaGraphExecDestroy(pr.second.cuda_graph_exec_);
+        if (err != cudaSuccess) {
+          LOG_MESSAGE(
+              TRITONSERVER_LOG_ERROR,
+              (std::string("Failed to destroy cuda graph exec: ") +
+               +cudaGetErrorString(err))
+                  .c_str());
+        }
+      }
+    }
+    trt_context.second.cuda_graph_execs_.clear();
+  }
+
+  if (stream_ != nullptr) {
+    cudaError_t err = cudaStreamDestroy(stream_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("Failed to destroy cuda stream: ") +
+           +cudaGetErrorString(err))
+              .c_str());
+    }
+    stream_ = nullptr;
+  }
+
+  if (signal_stream_ != nullptr) {
+    cudaError_t err = cudaStreamDestroy(signal_stream_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("Failed to destroy cuda signal stream: ") +
+           +cudaGetErrorString(err))
+              .c_str());
+    }
+    signal_stream_ = nullptr;
+  }
+
+  if (input_copy_stream_ != nullptr) {
+    cudaError_t err = cudaStreamDestroy(input_copy_stream_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("Failed to destroy cuda input copy stream: ") +
+           +cudaGetErrorString(err))
+              .c_str());
+    }
+    input_copy_stream_ = nullptr;
+  }
+
+  if (output_copy_stream_ != nullptr) {
+    cudaError_t err = cudaStreamDestroy(output_copy_stream_);
+    if (err != cudaSuccess) {
+      LOG_MESSAGE(
+          TRITONSERVER_LOG_ERROR,
+          (std::string("Failed to destroy cuda output copy stream: ") +
+           +cudaGetErrorString(err))
+              .c_str());
+    }
+    output_copy_stream_ = nullptr;
+  }
+
+  DestroyEventSet();
 
   // Notify the completion thread to exit
   completion_queue_.Put(std::move(std::unique_ptr<Payload>()));
@@ -3600,9 +3583,9 @@ ModelInstanceState::InitializeSequenceControlInputBindings(
   common::TritonJson::Value sequence_batching;
   if (model_state_->ModelConfig().Find(
           "sequence_batching", &sequence_batching)) {
-    std::vector<std::string> boolean_kinds{"CONTROL_SEQUENCE_START",
-                                           "CONTROL_SEQUENCE_END",
-                                           "CONTROL_SEQUENCE_READY"};
+    std::vector<std::string> boolean_kinds{
+        "CONTROL_SEQUENCE_START", "CONTROL_SEQUENCE_END",
+        "CONTROL_SEQUENCE_READY"};
 
     for (const auto& control_kind : boolean_kinds) {
       const bool required = false;
@@ -5743,43 +5726,6 @@ TRITONBACKEND_ModelInstanceExecute(
        instance_state->Name() + ", executing " + std::to_string(request_count) +
        " requests")
           .c_str());
-
-  if(!instance_state->IsEngineCreated()){
-    RETURN_IF_ERROR(instance_state->InitStreamsAndEvents());
-    RETURN_IF_ERROR(model_state->CreateEngine(
-        instance_state->DeviceId(), instance_state->DLACoreId(), instance_state->ModelPath(),
-        instance_state->EnginePtr()));
-    RETURN_IF_ERROR(instance_state->InitOptimizationProfiles());
-    RETURN_IF_ERROR(instance_state->ValidateIO());
-    RETURN_IF_ERROR(instance_state->InitIOBindingBuffers());
-
-#ifdef TRITON_ENABLE_CUDA_GRAPH
-    if (model_state->UseCudaGraphs()) {
-      RETURN_IF_ERROR(instance_state->InitializeCudaGraph());
-    }
-#endif
-
-    if (UseTensorRTv2API(instance_state->Engine())) {
-      std::string profiles_desc;
-      instance_state->GetConfiguredProfiles(&profiles_desc);
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          (std::string("Created instance ") + instance_state->Name() + " on GPU " +
-          std::to_string(instance_state->DeviceId()) + " with stream priority " +
-          std::to_string(instance_state->CudaStreamPriority()) +
-          " and optimization profile" + profiles_desc)
-              .c_str());
-    } else {
-      LOG_MESSAGE(
-          TRITONSERVER_LOG_INFO,
-          (std::string("Created instance ") + instance_state->Name() + " on GPU " +
-          std::to_string(instance_state->DeviceId()) + " with stream priority " +
-          std::to_string(instance_state->CudaStreamPriority()))
-              .c_str());
-    }
-
-    instance_state->IsEngineCreated() = true;
-  }
 
   // At this point we accept ownership of 'requests', which means that
   // even if something goes wrong we must still return success from
