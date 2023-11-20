@@ -2568,18 +2568,18 @@ ModelRepositoryManager::InitializeModelInfo(
         version_dir_content.end()) {
       return Status(
           Status::Code::UNSUPPORTED,
-          std::string("model ") + model +
+          std::string("model ") + name +
               " is a close model can only be loaded in enterprise mode");
     }
 #ifdef TRITON_ENABLE_GPU
     std::string cc;
     RETURN_IF_ERROR(GetGPUCompatibility(cc));
-    std::string pri_model_filename = model_filenmae + ".cc" + cc + ".pri";
-    if (version_dir_content.find(pri_model_filename) !=
+    std::string pri_cc_model_filename = model_filenmae + ".cc" + cc + ".pri";
+    if (version_dir_content.find(pri_cc_model_filename) !=
         version_dir_content.end()) {
       return Status(
           Status::Code::UNSUPPORTED,
-          std::string("model ") + model +
+          std::string("model ") + name +
               " is a close model can only be loaded in enterprise mode");
     }
 #endif  // TRITON_ENABLE_GPU
