@@ -564,6 +564,15 @@ ModelState::AutoCompleteConfig()
 TRITONSERVER_Error*
 ModelState::AutoCompleteConfigHelper(const std::string& model_path)
 {
+  // check model path exists
+  bool model_exists = false;
+  RETURN_IF_ERROR(FileExists(model_path, &model_exists));
+  if (!model_exists) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL,
+        (std::string("model path '") + model_path + "' not exists").c_str());
+  }
+
   std::shared_ptr<nvinfer1::IRuntime> runtime;
   std::shared_ptr<nvinfer1::ICudaEngine> engine;
   if (LoadPlan(model_path, -1 /* dla_core_id */, &runtime, &engine) !=
@@ -574,7 +583,7 @@ ModelState::AutoCompleteConfigHelper(const std::string& model_path)
     if (runtime.get() != nullptr) {
       runtime.reset();
     }
-    TRITONSERVER_ErrorNew(
+    return TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL,
         (std::string(
              "unable to load plan file to auto complete config: " + model_path)
@@ -5571,17 +5580,24 @@ TRITONBACKEND_Finalize(TRITONBACKEND_Backend* backend)
 {
   void* vstate;
   RETURN_IF_ERROR(TRITONBACKEND_BackendState(backend, &vstate));
+  if (vstate == nullptr) {
+    return nullptr;
+  }
 
   auto config = reinterpret_cast<BackendConfiguration*>(vstate);
-  // Close opened library handles.
-  for (auto& handle : config->library_handles_) {
-    auto err = CloseLibraryHandle(&handle);
-    if (err != nullptr) {
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
-      TRITONSERVER_ErrorDelete(err);
-      err = nullptr;
-    }
+  if (config == nullptr) {
+    return nullptr;
   }
+
+  // // Close opened library handles.
+  // for (auto& handle : config->library_handles_) {
+  //   auto err = CloseLibraryHandle(&handle);
+  //   if (err != nullptr) {
+  //     LOG_MESSAGE(TRITONSERVER_LOG_ERROR, TRITONSERVER_ErrorMessage(err));
+  //     TRITONSERVER_ErrorDelete(err);
+  //     err = nullptr;
+  //   }
+  // }
 
   delete config;
   return nullptr;  // success
