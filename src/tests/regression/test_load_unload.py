@@ -37,7 +37,7 @@ def call_llm(model, ep):
 
 def test_load_unload():
     RT_EP = os.environ.get('RT_EP', '192.168.106.12:9001')
-    ep_prefix = f'http://{RT_EP}/v2'
+    ep_prefix = f'http://{RT_EP}'
     repo_ep = f'http://{RT_EP}/v2/repository'
 
     test_config = 'config/load_unload.json'
@@ -55,7 +55,7 @@ def test_load_unload():
     for name in model_names:
         load_ep = f'{repo_ep}/models/{name}/load'
         unload_ep = f'{repo_ep}/models/{name}/unload'
-        ready_ep = f'{ep_prefix}/models/{name}/ready'
+        ready_ep = f'{ep_prefix}/v2/models/{name}/ready'
         load_params = load_params_map.get(name)
         infer_ep = f'{ep_prefix}/v2.1/models/{name}/infer'
 
