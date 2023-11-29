@@ -26,6 +26,7 @@ def auto_configure_device_map(model, max_memory,
         'transformer.rotary_pos_emb': device_first,
         'transformer.encoder.final_layernorm': device_last,
         'transformer.output_layer': device_last,
+        'transformer.prefix_encoder.embedding': device_first,
     }
 
     used = 2
