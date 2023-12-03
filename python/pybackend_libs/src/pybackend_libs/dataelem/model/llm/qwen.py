@@ -74,8 +74,9 @@ class QwenChat(BaseLLM):
         device_map_func = partial(auto_configure_device_map2,
                                   num_trans_layers=num_layers,
                                   devices=devices)
-        use_safetensors = bool(kwargs.get('use_safetensors', '0'))
-        use_dispatch = bool(kwargs.get('use_dispatch', '0'))
+        use_safetensors = kwargs .get('use_safetensors', '1') == '1'
+        use_dispatch = kwargs.get('use_dispatch', '0') == '1'
+
         load_params.update(use_dispatch=use_dispatch)
 
         self._load(pretrain_path,

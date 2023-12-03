@@ -37,3 +37,5 @@ pillow==9.0.1
 opencv-python==4.5.5.64
 scikit-image==0.21.0
 
+auto-gptq==0.5.1
+optimum==1.14.1
