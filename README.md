@@ -34,7 +34,7 @@ todo: update later
 ## Documentation
 
 For guidance on installation, development, deployment, and administration, 
-check out [bisheng-rt Dev Docs](https://m7a7tqsztt.feishu.cn/wiki/CTXNwpqGKiMs5FkKlPJcylfonuD). 
+check out [bisheng-rt Dev Docs](https://dataelem.feishu.cn/wiki/HpIewJMBIiIPmMkg6T1czihrnWZ). 
 
 ## Issues
 
