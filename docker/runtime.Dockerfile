@@ -1,44 +1,40 @@
-FROM tritonserver:22.08
-MAINTAINER "hanfeng, dataelem.com"
+FROM dataelement/bisheng-rt-base:0.0.1
+MAINTAINER "author, dataelem.com"
 
 ARG PIP_REPO=https://mirrors.tencent.com/pypi/simple
+ARG NEXUS_REPO="https://public2:qTongs8YdIwXSRPX@nexus.dataelem.com/repository/product/bisheng"
+ARG EXTRA_PIP_REPO="https://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
 
-# 安装系统库依赖
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt update && apt install -y nasm zlib1g-dev libssl-dev libre2-dev libb64-dev locales libsm6 libxext6 libxrender-dev libgl1
+RUN apt update && apt install libarchive-dev patchelf libgl1 libjsoncpp-dev -y
 
 # Configure language
 RUN locale-gen en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8 \
-    LANG=en_US.UTF-8 \
-    LANGUAGE=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US.UTF-8
 
 # Configure timezone
 ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-# 安装bisheng-rt
-RUN mkdir -p /opt/bisheng-rt/
-COPY ./install/ /opt/bisheng-rt/
-COPY ./deps /opt/bisheng-rt/deps
-WORKDIR /opt/bisheng-rt
-
-# 安装bisheng-rt依赖
 RUN ln -s /usr/local/bin/pip3 /usr/bin/pip3.8
-RUN pip install -r deps/requirements.txt -i $PIP_REPO
 
-RUN cd deps/flash-attention && \
-  pip install . -i $PIP_REPO && \
-  pip install csrc/layer_norm -i $PIP_REPO && \
-  pip install csrc/rotary -i $PIP_REPO
+RUN pip install torch==2.0.1 --index-url https://download.pytorch.org/whl/cu118
+RUN pip install torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
+RUN pip install tensorflow-1.15.5+nv-cp38-cp38-linux_x86_64.whl -i ${EXTR_PIP_REPO} --extra-index-url ${PIP_REPO}
 
-RUN pip3 install -U tensorflow==1.15.5+nv \
-    --extra-index http://public:26rS9HRxDqaVy5T@192.168.106.8:6081/repository/pypi-hosted/simple --trusted-host 192.168.106.8 \
-    -i $PIP_REPO
+# install flash-attn, very slowly, be patiently, about 20-30mins
+RUN wget ${NEXUS_REPO}/flash-attention-2.3.3.tar.gz && tar zxf flash-attention-2.3.3.tar.gz && \
+    pushd flash-attention-2.3.3 && \
+    pip install packaging && \
+    MAX_JOBS=10 pip install . -i $PIP_REPO && \
+    MAX_JOBS=10 pip install csrc/layer_norm -i $PIP_REPO && \
+    popd && \
+    rm -f flash-attention-2.3.3.tar.gz && \
+    rm -fr flash-attention-2.3.3
+
+RUN pip install lanms==1.0.2 -i ${EXTRA_PIP_REPO}
+RUN pip install -r python/pybackend_libs/requirements.txt -i $PIP_REPO
 
 # Clean caches
+RUN echo "clean" 
 RUN apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip && rm -fr /opt/bisheng-rt/deps
-
-EXPOSE 7001
-
-CMD [ "./bin/rtserver" "-f" ]
