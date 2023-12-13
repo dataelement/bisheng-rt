@@ -33,7 +33,9 @@ RUN wget ${NEXUS_REPO}/flash-attention-2.3.3.tar.gz && tar zxf flash-attention-2
     rm -fr flash-attention-2.3.3
 
 RUN pip install lanms==1.0.2 -i ${EXTRA_PIP_REPO}
-RUN pip install -r python/pybackend_libs/requirements.txt -i $PIP_REPO
+
+# install deps for bisheng-pybackend-libs
+RUN pip3 install bisheng-pybackend-libs==0.0.1.post1
 
 # Clean caches
 RUN echo "clean" 
