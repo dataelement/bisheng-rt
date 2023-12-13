@@ -1,7 +1,9 @@
 FROM nvcr.io/nvidia/tritonserver:22.12-py3-min
 
+ARG PIP_REPO="https://mirrors.aliyun.com/pypi/simple"
 ARG NEXUS_REPO="https://public2:qTongs8YdIwXSRPX@nexus.dataelem.com/repository/product/bisheng"
 
+# install language
 RUN apt update && apt-get -y install language-pack-zh-hans
 RUN localedef -c -f UTF-8 -i zh_CN zh_CN.utf8
 RUN locale-gen en_US.UTF-8
@@ -15,9 +17,9 @@ RUN apt install -y libsm6 libxext6 libxrender-dev libgl1
 
 # install python env
 RUN apt install -y python3.8 libpython3.8-dev python3-pip
-RUN local repo="https://mirrors.aliyun.com/pypi/simple"
-RUN pip3 install --upgrade wheel setuptools -i repo
-RUN pip3 install --upgrade numpy -i $repo
+
+RUN pip3 install --upgrade wheel setuptools -i ${PIP_REPO}
+RUN pip3 install --upgrade numpy -i ${PIP_REPO}
 
 # install dcgm
 RUN distribution=$(. /etc/os-release;echo $ID$VERSION_ID | sed -e 's/\.//g')
@@ -32,6 +34,6 @@ RUN wget ${NEXUS_REPO}/cmake-3.23.1-linux-x86_64.tar.gz
 RUN tar zxf cmake-3.23.1-linux-x86_64.tar.gz --strip-components 1 -C /usr/local
 RUN rm cmake-3.23.1-linux-x86_64.tar.gz
 
-# Clean caches
+# clean caches
 RUN echo "clean" 
 RUN apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip && rm -fr /opt/bisheng-rt/deps
