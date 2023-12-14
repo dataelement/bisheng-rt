@@ -25,11 +25,12 @@ See [free trial](https://m7a7tqsztt.feishu.cn/wiki/HpIewJMBIiIPmMkg6T1czihrnWZ).
 
 ### Install bisheng-rt
 
-todo: update later
+- [Bisheng Install Manual](https://dataelem.feishu.cn/wiki/BSCcwKd4Yiot3IkOEC8cxGW7nPc)
+- [Compiling bisheng-rt](https://dataelem.feishu.cn/wiki/Md6qwpEQTiHmuek22EXcm3MrnFh)
 
 ### Using from pre-builded image
 
-todo: update later
+[Images Release Notes](https://dataelem.feishu.cn/wiki/HpIewJMBIiIPmMkg6T1czihrnWZ)
 
 ## Documentation
 
