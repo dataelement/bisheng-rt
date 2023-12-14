@@ -101,12 +101,17 @@ class BaseLLM(object):
 
 
 class ChatMessage(BaseModel):
-    role: Literal['user', 'assistant', 'system']
+    role: Literal['user', 'assistant', 'system', 'observation']
     content: str
+    tools: Optional[List[dict]] = None
+    metadata: Optional[str] = None
 
 
 class DeltaMessage(BaseModel):
-    role: Optional[Literal['user', 'assistant', 'system']] = None
+    role: Optional[Literal['user',
+                           'assistant',
+                           'system',
+                           'observation']] = None
     content: Optional[str] = None
 
 

@@ -5,6 +5,7 @@ gte = lazy('pybackend_libs.dataelem.model.embedding.gte')
 me5 = lazy('pybackend_libs.dataelem.model.embedding.me5')
 baichuan = lazy('pybackend_libs.dataelem.model.llm.baichuan')
 chatglm2 = lazy('pybackend_libs.dataelem.model.llm.chatglm2')
+chatglm3 = lazy('pybackend_libs.dataelem.model.llm.chatglm3')
 code_geex2 = lazy('pybackend_libs.dataelem.model.llm.code_geex2')
 internlm = lazy('pybackend_libs.dataelem.model.llm.internlm')
 llama2 = lazy('pybackend_libs.dataelem.model.llm.llama2')
@@ -21,6 +22,7 @@ yi_base = lazy('pybackend_libs.dataelem.model.llm.yi')
 def get_model(name: str):
     model_name_mapping = {
         'ChatGLM2': chatglm2,
+        'ChatGLM3': chatglm3,
         'BaichuanChat': baichuan,
         'QwenChat': qwen,
         'Llama2Chat': llama2,
