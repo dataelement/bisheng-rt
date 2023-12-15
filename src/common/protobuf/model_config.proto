@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -118,7 +118,7 @@ message ModelRateLimiter
   //@@
   //@@     The resources required to execute the request on a model instance.
   //@@     Resources are just names with a corresponding count. The execution
-  //@@     of the instance will be blocked until the specificied resources are
+  //@@     of the instance will be blocked until the specified resources are
   //@@     available. By default an instance uses no rate-limiter resources.
   //@@
   repeated Resource resources = 1;
@@ -252,7 +252,7 @@ message ModelInstanceGroup
   //@@
   //@@     GPU(s) where instances should be available. For each GPU listed,
   //@@     'count' instances of the model will be available. Setting 'gpus'
-  //@@     to empty (or not specifying at all) is eqivalent to listing all
+  //@@     to empty (or not specifying at all) is equivalent to listing all
   //@@     available GPUs.
   //@@
   repeated int32 gpus = 3;
@@ -439,7 +439,7 @@ message ModelOutput
   //@@  .. cpp:var:: ModelTensorReshape reshape
   //@@
   //@@     The shape produced for this output by the backend. The output will
-  //@@     be reshaped from this to the shape specifed in 'dims' before being
+  //@@     be reshaped from this to the shape specified in 'dims' before being
   //@@     returned in the inference response. The reshape must have the same
   //@@     number of elements as the output shape specified by 'dims'. Optional.
   //@@
@@ -887,7 +887,7 @@ message ModelOptimizationPolicy
 
       //@@    .. cpp:var:: map<string, string> parameters
       //@@
-      //@@       Additional paremeters used to configure the accelerator.
+      //@@       Additional parameters used to configure the accelerator.
       //@@
       map<string, string> parameters = 2;
     }
@@ -1011,7 +1011,7 @@ message ModelOptimizationPolicy
   //@@     device has direct access to the source buffer and the destination
   //@@     buffer. In such case, the gather kernel will be used only if the
   //@@     number of buffers to be gathered is greater or equal to
-  //@@     the specifed value. If 0, the gather kernel will be disabled.
+  //@@     the specified value. If 0, the gather kernel will be disabled.
   //@@     Default value is 0.
   //@@     Currently only recognized by TensorRT backend.
   //@@
@@ -1134,7 +1134,7 @@ message ModelDynamicBatching
   //@@
   bool preserve_ordering = 3;
 
-  //@@  .. cpp:var:: uint32 priority_levels
+  //@@  .. cpp:var:: uint64 priority_levels
   //@@
   //@@     The number of priority levels to be enabled for the model,
   //@@     the priority level starts from 1 and 1 is the highest priority.
@@ -1143,14 +1143,14 @@ message ModelDynamicBatching
   //@@     priority 3, etc. Requests with the same priority level will be
   //@@     handled in the order that they are received.
   //@@
-  uint32 priority_levels = 4;
+  uint64 priority_levels = 4;
 
-  //@@  .. cpp:var:: uint32 default_priority_level
+  //@@  .. cpp:var:: uint64 default_priority_level
   //@@
   //@@     The priority level used for requests that don't specify their
   //@@     priority. The value must be in the range [ 1, 'priority_levels' ].
   //@@
-  uint32 default_priority_level = 5;
+  uint64 default_priority_level = 5;
 
   //@@  .. cpp:var:: ModelQueuePolicy default_queue_policy
   //@@
@@ -1161,13 +1161,13 @@ message ModelDynamicBatching
   //@@
   ModelQueuePolicy default_queue_policy = 6;
 
-  //@@  .. cpp:var:: map<uint32, ModelQueuePolicy> priority_queue_policy
+  //@@  .. cpp:var:: map<uint64, ModelQueuePolicy> priority_queue_policy
   //@@
   //@@     Specify the queue policy for the priority level. The default queue
   //@@     policy will be used if a priority level doesn't specify a queue
   //@@     policy.
   //@@
-  map<uint32, ModelQueuePolicy> priority_queue_policy = 7;
+  map<uint64, ModelQueuePolicy> priority_queue_policy = 7;
 }
 
 //@@
@@ -1312,7 +1312,7 @@ message ModelSequenceBatching
     //@@      .. cpp:var:: int64 dims (repeated)
     //@@
     //@@         The shape of the state tensor, not including the batch
-    // dimension.
+    //@@         dimension.
     //@@
     repeated int64 dims = 2;
 
@@ -1434,7 +1434,7 @@ message ModelSequenceBatching
     //@@    .. cpp:var:: int32 max_candidate_sequences
     //@@
     //@@       Maximum number of candidate sequences that the batcher
-    //@@       maintains. Excess seqences are kept in an ordered backlog
+    //@@       maintains. Excess sequences are kept in an ordered backlog
     //@@       and become candidates when existing candidate sequences
     //@@       complete.
     //@@
@@ -1457,6 +1457,33 @@ message ModelSequenceBatching
     //@@       wait for additional requests for batching. Default is 0.
     //@@
     uint64 max_queue_delay_microseconds = 3;
+
+    //@@    .. cpp:var:: bool preserve_ordering
+    //@@
+    //@@       Should the dynamic batcher preserve the ordering of responses to
+    //@@       match the order of requests received by the scheduler. Default is
+    //@@       false. If true, the responses will be returned in the same order
+    // as
+    //@@       the order of requests sent to the scheduler. If false, the
+    // responses
+    //@@       may be returned in arbitrary order. This option is specifically
+    //@@       needed when a sequence of related inference requests (i.e.
+    // inference
+    //@@       requests with the same correlation ID) are sent to the dynamic
+    //@@       batcher to ensure that the sequence responses are in the correct
+    //@@       order.
+    //@@
+    //@@       When using decoupled models, setting this to true may block the
+    //@@       responses from independent sequences from being returned to the
+    //@@       client until the previous request completes, hurting overall
+    //@@       performance. If using GRPC streaming protocol, the stream
+    // ordering
+    //@@       guarantee may be sufficient alone to ensure the responses for
+    // each
+    //@@       sequence are returned in sequence-order without blocking based on
+    //@@       independent requests, depending on the use case.
+    //@@
+    bool preserve_ordering = 4;
   }
 
   //@@  .. cpp:var:: oneof strategy_choice
@@ -1561,7 +1588,14 @@ message ModelEnsembling
     //@@
     map<string, string> output_map = 4;
 
-    map<string, string> parameters = 5;
+    //@@  .. cpp:var:: string model_namespace
+    //@@
+    //@@     [RESERVED] currently this field is reserved for internal use, users
+    //@@     must not set any value to this field to avoid unexpected behavior.
+    //@@
+    string model_namespace = 5;
+
+    map<string, string> parameters = 6;
   }
 
   //@@  .. cpp:var:: Step step (repeated)
@@ -1642,7 +1676,10 @@ message ModelWarmup
       //@@
       //@@       The file whose content will be used as raw input data in
       //@@       row-major order. The file must be provided in a sub-directory
-      //@@       'warmup' under the model directory.
+      //@@       'warmup' under the model directory. The file contents should be
+      //@@       in binary format. For TYPE_STRING data-type, an element is
+      //@@       represented by a 4-byte unsigned integer giving the length
+      //@@       followed by the actual bytes.
       //@@
       string input_data_file = 5;
     }
@@ -1752,7 +1789,7 @@ message ModelRepositoryAgents
   //@@  .. cpp:var:: Agent agents (repeated)
   //@@
   //@@     The ordered list of agents for the model. These agents will be
-  //@@     invoked in order to respond to repository actions occuring for the
+  //@@     invoked in order to respond to repository actions occurring for the
   //@@     model.
   //@@
   repeated Agent agents = 1;
@@ -1792,10 +1829,9 @@ message ModelConfig
 
   //@@  .. cpp:var:: string platform
   //@@
-  //@@     The framework for the model. Possible values are
-  //@@     "tensorrt_plan", "tensorflow_graphdef",
-  //@@     "tensorflow_savedmodel", "onnxruntime_onnx",
-  //@@     "pytorch_libtorch".
+  //@@     Additional backend-specific configuration for the model.
+  //@@     Please refer to the backend documentation on whether this field
+  //@@     should be specified.
   //@@
   string platform = 2;
 

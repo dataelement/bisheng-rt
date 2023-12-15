@@ -264,6 +264,24 @@ class TritonJson {
       return TRITONJSON_STATUSSUCCESS;
     }
 
+    // Set/overwrite an unsigned integer in a value. This changes the
+    // type of the value to unsigned int.
+    TRITONJSON_STATUSTYPE SetUInt(const uint64_t value)
+    {
+      rapidjson::Value& v = AsMutableValue();
+      v.SetUint64(value);
+      return TRITONJSON_STATUSSUCCESS;
+    }
+
+    // Set/overwrite a double in a value. This changes the
+    // type of the value to double.
+    TRITONJSON_STATUSTYPE SetDouble(const double value)
+    {
+      rapidjson::Value& v = AsMutableValue();
+      v.SetDouble(value);
+      return TRITONJSON_STATUSSUCCESS;
+    }
+
     // Set/overwrite a string in a value. This changes the
     // type of the value to string
     TRITONJSON_STATUSTYPE SetString(const std::string& value)
@@ -938,6 +956,42 @@ class TritonJson {
       }
       *value = v.GetDouble();
       return TRITONJSON_STATUSSUCCESS;
+    }
+
+    bool IsString()
+    {
+      const rapidjson::Value& object = AsValue();
+      return object.IsString();
+    }
+
+    bool IsArray()
+    {
+      const rapidjson::Value& object = AsValue();
+      return object.IsArray();
+    }
+
+    bool IsObject()
+    {
+      const rapidjson::Value& object = AsValue();
+      return object.IsObject();
+    }
+
+    bool IsInt()
+    {
+      const rapidjson::Value& object = AsValue();
+      return object.IsInt64();
+    }
+
+    bool IsBool()
+    {
+      const rapidjson::Value& object = AsValue();
+      return object.IsBool();
+    }
+
+    bool IsNumber()
+    {
+      const rapidjson::Value& object = AsValue();
+      return object.IsNumber();
     }
 
     // Get array element at a given index within this array.
