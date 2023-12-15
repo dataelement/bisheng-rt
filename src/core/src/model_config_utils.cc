@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #include "model_config_utils.h"
 
 #include <google/protobuf/util/json_util.h>
+#include <google/protobuf/util/message_differencer.h>
 
 #include <deque>
 #include <mutex>
@@ -34,7 +35,7 @@
 
 #include "constants.h"
 #include "cuda_utils.h"
-#include "filesystem.h"
+#include "filesystem/api.h"
 #include "triton/common/logging.h"
 
 #define TRITONJSON_STATUSTYPE triton::core::Status
@@ -54,9 +55,14 @@ namespace {
 #ifdef TRITON_ENABLE_ENSEMBLE
 
 struct EnsembleTensor {
-  EnsembleTensor(bool isOutput) : ready(false), isOutput(isOutput) {}
-  bool ready;
-  bool isOutput;
+  EnsembleTensor(const std::string& name, bool isOutput)
+      : name{name}, isOutput(isOutput)
+  {
+  }
+  const std::string name;
+
+  bool isOutput{false};
+  bool ready{false};
   std::vector<EnsembleTensor*> prev_nodes;
   std::vector<EnsembleTensor*> next_nodes;
 };
@@ -111,10 +117,11 @@ BuildEnsembleGraph(
           it->second.isOutput = true;
         }
       } else {
-        it = keyed_ensemble_graph
-                 .emplace(
-                     std::make_pair(output_map.second, EnsembleTensor(true)))
-                 .first;
+        it =
+            keyed_ensemble_graph
+                .emplace(std::make_pair(
+                    output_map.second, EnsembleTensor(output_map.second, true)))
+                .first;
       }
       tensor_as_output.push_back(&(it->second));
     }
@@ -134,8 +141,8 @@ BuildEnsembleGraph(
       auto it = keyed_ensemble_graph.find(input_map.second);
       if (it == keyed_ensemble_graph.end()) {
         it = keyed_ensemble_graph
-                 .emplace(
-                     std::make_pair(input_map.second, EnsembleTensor(false)))
+                 .emplace(std::make_pair(
+                     input_map.second, EnsembleTensor(input_map.second, false)))
                  .first;
       }
       for (auto output : tensor_as_output) {
@@ -232,10 +239,35 @@ ValidateEnsembleSchedulingConfig(const inference::ModelConfig& config)
                                          "' is not used");
     }
     if (!it->second.ready) {
-      return Status(
-          Status::Code::INVALID_ARG, "output '" + output.name() +
-                                         "' for ensemble '" + config.name() +
-                                         "' is not written");
+      std::string error_message = "output '" + output.name() +
+                                  "' for ensemble '" + config.name() +
+                                  "' is not written";
+
+      // recurrsively check 'prev_nodes' for the source of not-ready state
+      std::vector<EnsembleTensor*>* prev_nodes = &it->second.prev_nodes;
+      auto last_not_ready_node = &it->second;
+      // there can be circular dependency so remember seen names to break it
+      std::set<std::string> seen_names;
+      while ((prev_nodes != nullptr) && (!prev_nodes->empty())) {
+        const auto& nodes = *prev_nodes;
+        // make sure while loop will terminate if no not-ready source is seen
+        prev_nodes = nullptr;
+        for (const auto& node : nodes) {
+          if ((!node->ready) &&
+              (seen_names.find(node->name) == seen_names.end())) {
+            seen_names.emplace(node->name);
+            last_not_ready_node = node;
+            prev_nodes = &node->prev_nodes;
+            break;
+          }
+        }
+      }
+      // there is not-ready source
+      if (last_not_ready_node->name != it->second.name) {
+        error_message += ": at least one of its depending tensors, '" +
+                         last_not_ready_node->name + "', is not connected";
+      }
+      return Status(Status::Code::INVALID_ARG, error_message);
     } else {
       outputs.insert(it->first);
     }
@@ -744,8 +776,6 @@ NormalizeInstanceGroup(
     group->set_name(config->name());
 
     for (const auto& pg : preferred_groups) {
-      group->set_kind(pg.kind());
-      group->set_count(pg.count());
       // handle preferred GPU setting differently based on kind
       if (pg.kind() == inference::ModelInstanceGroup::KIND_GPU) {
         // Don't use preferred group with KIND_GPU if there is no GPU.
@@ -761,16 +791,17 @@ NormalizeInstanceGroup(
             }
           }
         }
-        break;
       } else if (pg.kind() == inference::ModelInstanceGroup::KIND_AUTO) {
         // if AUTO, then set preferred GPU as is, to align with KIND_AUTO
         // deduction specified below
         for (const int32_t gid : pg.gpus()) {
           group->add_gpus(gid);
         }
-        break;
       }
-      // Other kind should not set GPUs
+      group->set_kind(pg.kind());
+      group->set_count(pg.count());
+
+      // Found a valid preferred group.
       break;
     }
   }
@@ -848,6 +879,61 @@ NormalizeInstanceGroup(
 }
 
 Status
+LocalizePythonBackendExecutionEnvironmentPath(
+    const std::string& model_path, inference::ModelConfig* config,
+    std::shared_ptr<LocalizedPath>* localized_model_dir)
+{
+  if (config->backend() == "python") {
+    if (config->parameters().contains("EXECUTION_ENV_PATH")) {
+      // Read EXECUTION_ENV_PATH
+      std::string exec_env_path =
+          config->parameters().at("EXECUTION_ENV_PATH").string_value();
+      // Replace model directory variable with model_path
+      std::string model_dir_var = "$$TRITON_MODEL_DIRECTORY";
+      if (exec_env_path.substr(0, model_dir_var.size()) == model_dir_var) {
+        exec_env_path.replace(0, model_dir_var.size(), model_path);
+      }
+      // Collapse any .. in the path
+      std::string abs_exec_env_path;
+      std::size_t prev_pos = exec_env_path.size();
+      std::size_t pos = exec_env_path.find_last_of('/', prev_pos - 1);
+      int skip = 0;
+      while (pos != std::string::npos && prev_pos > 0) {
+        if (!skip) {
+          abs_exec_env_path =
+              exec_env_path.substr(pos, prev_pos - pos) + abs_exec_env_path;
+        }
+        skip = skip > 0 ? skip - 1 : skip;
+        if (pos >= 3 && exec_env_path.substr(pos - 3, 3) == "/..") {
+          skip += 2;
+        }
+        prev_pos = pos;
+        pos = exec_env_path.find_last_of('/', prev_pos - 1);
+      }
+      abs_exec_env_path = exec_env_path.substr(0, prev_pos) + abs_exec_env_path;
+      // Localize iff abs_exec_env_path is outside the model directory
+      std::string model_path_slash =
+          model_path.back() == '/' ? model_path : model_path + "/";
+      if (abs_exec_env_path.substr(0, model_path_slash.size()) !=
+          model_path_slash) {
+        // Localize the file
+        std::shared_ptr<LocalizedPath> localized_exec_env_path;
+        RETURN_IF_ERROR(
+            LocalizePath(abs_exec_env_path, &localized_exec_env_path));
+        // Persist the localized temporary path
+        (*localized_model_dir)
+            ->other_localized_path.push_back(localized_exec_env_path);
+        // Rewrite EXECUTION_ENV_PATH
+        config->mutable_parameters()
+            ->at("EXECUTION_ENV_PATH")
+            .set_string_value(localized_exec_env_path->Path());
+      }
+    }
+  }
+  return Status::Success;
+}
+
+Status
 SetDefaultInstanceCount(
     inference::ModelInstanceGroup* group, const std::string& backend)
 {
@@ -877,7 +963,7 @@ AutoCompleteBackendFields(
 
   // There must be at least one version directory that we can inspect to
   // attempt to determine the platform. If not, we skip autofill with file name.
-  // For now we allow multiple versions and only inspect the first verison
+  // For now we allow multiple versions and only inspect the first version
   // directory to ensure it is valid. We can add more aggressive checks later.
   const bool has_version = (version_dirs.size() != 0);
   const auto version_path =
@@ -1255,9 +1341,10 @@ ValidateModelConfig(
   }
 
   // Ensure both platform and backend are referring to known backend,
-  // or both referring to unknown backend for user-provided backend.
-  if (GetBackendTypeFromPlatform(config.platform()) !=
-      GetBackendType(config.backend())) {
+  // and allow all platforms for a user-provided unknown backend.
+  auto backend_type = GetBackendType(config.backend());
+  if ((backend_type != BackendType::BACKEND_TYPE_UNKNOWN) &&
+      (backend_type != GetBackendTypeFromPlatform(config.platform()))) {
     return Status(
         Status::Code::INVALID_ARG,
         "unexpected 'platform' and 'backend' pair, got:" + config.platform() +
@@ -1357,6 +1444,15 @@ ValidateModelConfig(
   // If sequence batching is specified make sure the control is
   // specified correctly.
   if (config.has_sequence_batching()) {
+    // FIXME: DLIS-4034 - Response Cache does not yet support sequence batcher.
+    if (config.response_cache().enable()) {
+      return Status(
+          Status::Code::INVALID_ARG,
+          "Response Cache does not currently support model " + config.name() +
+              " with sequence batching scheduler. Please disable the response "
+              "cache.");
+    }
+
     const auto& batcher = config.sequence_batching();
 
     // Check boolean controls...
@@ -1801,13 +1897,15 @@ ValidateModelConfigInt64()
       "microseconds",
       "ModelConfig::dynamic_batching::priority_queue_policy::value::default_"
       "timeout_microseconds",
+      "ModelConfig::dynamic_batching::priority_levels",
+      "ModelConfig::dynamic_batching::priority_queue_policy::key",
+      "ModelConfig::dynamic_batching::default_priority_level",
       "ModelConfig::sequence_batching::direct::max_queue_delay_microseconds",
       "ModelConfig::sequence_batching::state::dims",
       "ModelConfig::sequence_batching::state::initial_state::dims",
       "ModelConfig::sequence_batching::oldest::max_queue_delay_microseconds",
       "ModelConfig::sequence_batching::max_sequence_idle_microseconds",
       "ModelConfig::ensemble_scheduling::step::model_version",
-      "ModelConfig::ensemble_scheduling::implicit_step::model_version",
       "ModelConfig::model_warmup::inputs::value::dims",
       "ModelConfig::optimization::cuda::graph_spec::input::value::dim",
       "ModelConfig::optimization::cuda::graph_spec::graph_lower_bound::input::"
@@ -1818,6 +1916,34 @@ ValidateModelConfigInt64()
     return Status(
         Status::Code::INTERNAL, "ModelConfig 64-bit field needs update");
   }
+
+  return Status::Success;
+}
+
+Status
+FixUInt(
+    triton::common::TritonJson::Value& document,
+    triton::common::TritonJson::Value& io, const std::string& name)
+{
+  triton::common::TritonJson::Value str_value;
+  if (!io.Find(name.c_str(), &str_value)) {
+    return Status::Success;
+  }
+
+  std::string str;
+  RETURN_IF_ERROR(str_value.AsString(&str));
+
+  uint64_t d;
+  try {
+    d = std::strtoull(str.c_str(), nullptr, 10);
+  }
+  catch (...) {
+    return Status(
+        Status::Code::INTERNAL,
+        (std::string("unable to convert '") + str + "' to unsigned integer"));
+  }
+
+  str_value.SetUInt(d);
 
   return Status::Success;
 }
@@ -1985,14 +2111,20 @@ ModelConfigToJson(
   // Fix dynamic_batching::max_queue_delay_microseconds,
   // dynamic_batching::default_queue_policy::default_timeout_microseconds,
   // dynamic_batching::priority_queue_policy::value::default_timeout_microseconds
+  // dynamic_batching::priority_levels
+  // dynamic_batching::default_priority_level
+  // dynamic_batching::priority_queue_policy::key is left as JSON only allows
+  // strings for keys
   {
     triton::common::TritonJson::Value db;
     if (config_json.Find("dynamic_batching", &db)) {
-      RETURN_IF_ERROR(FixInt(config_json, db, "max_queue_delay_microseconds"));
+      RETURN_IF_ERROR(FixUInt(config_json, db, "max_queue_delay_microseconds"));
+      RETURN_IF_ERROR(FixUInt(config_json, db, "priority_levels"));
+      RETURN_IF_ERROR(FixUInt(config_json, db, "default_priority_level"));
       triton::common::TritonJson::Value dqp;
       if (db.Find("default_queue_policy", &dqp)) {
         RETURN_IF_ERROR(
-            FixInt(config_json, dqp, "default_timeout_microseconds"));
+            FixUInt(config_json, dqp, "default_timeout_microseconds"));
       }
       triton::common::TritonJson::Value pqp;
       if (db.Find("priority_queue_policy", &pqp)) {
@@ -2003,7 +2135,7 @@ ModelConfigToJson(
           triton::common::TritonJson::Value el;
           RETURN_IF_ERROR(pqp.MemberAsObject(m.c_str(), &el));
           RETURN_IF_ERROR(
-              FixInt(config_json, el, "default_timeout_microseconds"));
+              FixUInt(config_json, el, "default_timeout_microseconds"));
         }
       }
     }
@@ -2016,16 +2148,16 @@ ModelConfigToJson(
     triton::common::TritonJson::Value sb;
     if (config_json.Find("sequence_batching", &sb)) {
       RETURN_IF_ERROR(
-          FixInt(config_json, sb, "max_sequence_idle_microseconds"));
+          FixUInt(config_json, sb, "max_sequence_idle_microseconds"));
       triton::common::TritonJson::Value oldest;
       if (sb.Find("oldest", &oldest)) {
         RETURN_IF_ERROR(
-            FixInt(config_json, oldest, "max_queue_delay_microseconds"));
+            FixUInt(config_json, oldest, "max_queue_delay_microseconds"));
       }
       triton::common::TritonJson::Value direct;
       if (sb.Find("direct", &direct)) {
         RETURN_IF_ERROR(
-            FixInt(config_json, direct, "max_queue_delay_microseconds"));
+            FixUInt(config_json, direct, "max_queue_delay_microseconds"));
       }
 
       triton::common::TritonJson::Value states;
@@ -2237,6 +2369,39 @@ TritonToDataType(const TRITONSERVER_DataType dtype)
   }
 
   return inference::DataType::TYPE_INVALID;
+}
+
+bool
+EquivalentInNonInstanceGroupConfig(
+    const inference::ModelConfig& old_config,
+    const inference::ModelConfig& new_config)
+{
+  ::google::protobuf::util::MessageDifferencer pb_diff;
+  pb_diff.IgnoreField(
+      old_config.descriptor()->FindFieldByLowercaseName("instance_group"));
+  return pb_diff.Compare(old_config, new_config);
+}
+
+bool
+EquivalentInInstanceConfig(
+    const inference::ModelInstanceGroup& instance_config_lhs,
+    const inference::ModelInstanceGroup& instance_config_rhs)
+{
+  ::google::protobuf::util::MessageDifferencer pb_diff;
+  pb_diff.IgnoreField(
+      instance_config_lhs.descriptor()->FindFieldByLowercaseName("name"));
+  pb_diff.IgnoreField(
+      instance_config_lhs.descriptor()->FindFieldByLowercaseName("count"));
+  return pb_diff.Compare(instance_config_lhs, instance_config_rhs);
+}
+
+std::string
+InstanceConfigSignature(const inference::ModelInstanceGroup& instance_config)
+{
+  inference::ModelInstanceGroup config = instance_config;
+  *config.mutable_name() = "[Normalized]";
+  config.set_count(1);
+  return config.SerializeAsString();
 }
 
 }}  // namespace triton::core

@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
 #include <atomic>
 #include <map>
 #include <string>
@@ -34,15 +35,18 @@
 #include <vector>
 
 #include "backend_manager.h"
+#include "cache_manager.h"
 #include "infer_parameter.h"
 #include "model_config.pb.h"
 #include "model_repository_manager.h"
 #include "rate_limiter.h"
-#include "response_cache.h"
 #include "status.h"
 #include "triton/common/model_config.h"
 
 namespace triton { namespace core {
+
+// Maps cache name -> json config string
+using CacheConfigMap = std::unordered_map<std::string, std::string>;
 
 class Model;
 class InferenceRequest;
@@ -75,6 +79,8 @@ class InferenceServer {
  public:
   // Construct an inference server.
   InferenceServer();
+
+  ~InferenceServer();
 
   // Initialize the server. Return true on success, false otherwise.
   Status Init();
@@ -192,15 +198,17 @@ class InferenceServer {
     pinned_memory_pool_size_ = std::max((int64_t)0, s);
   }
 
-  // Get / set the response cache byte size.
-  uint64_t ResponseCacheByteSize() const { return response_cache_byte_size_; }
-  void SetResponseCacheByteSize(uint64_t s)
+  // Get / set whether response cache will be enabled server-wide.
+  // NOTE: Models still need caching enabled in individual model configs.
+  bool ResponseCacheEnabled()
   {
-    response_cache_byte_size_ = s;
-    response_cache_enabled_ = (s > 0) ? true : false;
+    // Only return true if cache was enabled, and has been initialized
+    return response_cache_enabled_ && CacheManager() && CacheManager()->Cache();
   }
-
-  bool ResponseCacheEnabled() const { return response_cache_enabled_; }
+  void SetResponseCacheEnabled(bool e) { response_cache_enabled_ = e; }
+  void SetCacheConfig(CacheConfigMap cfg) { cache_config_map_ = cfg; }
+  std::string CacheDir() const { return cache_dir_; }
+  void SetCacheDir(std::string dir) { cache_dir_ = dir; }
 
   // Get / set CUDA memory pool size
   const std::map<int, uint64_t>& CudaMemoryPoolByteSize() const
@@ -238,6 +246,11 @@ class InferenceServer {
 
   void SetModelLoadThreadCount(unsigned int c) { model_load_thread_count_ = c; }
 
+  void SetModelNamespacingEnabled(const bool e)
+  {
+    enable_model_namespacing_ = e;
+  }
+
   // Set a backend command-line configuration
   void SetBackendCmdlineConfig(
       const triton::common::BackendCmdlineConfigMap& bc)
@@ -252,14 +265,13 @@ class InferenceServer {
   }
 
   void SetRepoAgentDir(const std::string& d) { repoagent_dir_ = d; }
-  void SetServerConfigFile(const std::string& d) { server_config_file_ = d; }
 
   // Return the requested model object.
   Status GetModel(
       const std::string& model_name, const int64_t model_version,
       std::shared_ptr<Model>* model)
   {
-    // Allow model retrival while server exiting to provide graceful
+    // Allow model retrieval while server exiting to provide graceful
     // completion of inference sequence that spans multiple requests.
     if ((ready_state_ != ServerReadyState::SERVER_READY) &&
         (ready_state_ != ServerReadyState::SERVER_EXITING)) {
@@ -267,6 +279,20 @@ class InferenceServer {
     }
     return model_repository_manager_->GetModel(
         model_name, model_version, model);
+  }
+
+  // Return the requested model object.
+  Status GetModel(
+      const ModelIdentifier& model_id, const int64_t model_version,
+      std::shared_ptr<Model>* model)
+  {
+    // Allow model retrieval while server exiting to provide graceful
+    // completion of inference sequence that spans multiple requests.
+    if ((ready_state_ != ServerReadyState::SERVER_READY) &&
+        (ready_state_ != ServerReadyState::SERVER_EXITING)) {
+      return Status(Status::Code::UNAVAILABLE, "Server not ready");
+    }
+    return model_repository_manager_->GetModel(model_id, model_version, model);
   }
 
   // Get the Backend Manager
@@ -278,10 +304,10 @@ class InferenceServer {
   // Return the pointer to RateLimiter object.
   std::shared_ptr<RateLimiter> GetRateLimiter() { return rate_limiter_; }
 
-  // Return the pointer to response cache object.
-  std::shared_ptr<RequestResponseCache> GetResponseCache()
+  // Get the Cache Manager
+  const std::shared_ptr<TritonCacheManager>& CacheManager()
   {
-    return response_cache_;
+    return cache_manager_;
   }
 
  private:
@@ -297,9 +323,11 @@ class InferenceServer {
   uint32_t exit_timeout_secs_;
   uint32_t buffer_manager_thread_count_;
   uint32_t model_load_thread_count_;
+  bool enable_model_namespacing_;
   uint64_t pinned_memory_pool_size_;
-  uint64_t response_cache_byte_size_;
   bool response_cache_enabled_;
+  CacheConfigMap cache_config_map_;
+  std::string cache_dir_;
   std::map<int, uint64_t> cuda_memory_pool_size_;
   double min_supported_compute_capability_;
   triton::common::BackendCmdlineConfigMap backend_cmdline_config_map_;
@@ -307,7 +335,6 @@ class InferenceServer {
   std::string repoagent_dir_;
   RateLimitMode rate_limit_mode_;
   RateLimiter::ResourceMap rate_limit_resource_map_;
-
 
   // Current state of the inference server.
   ServerReadyState ready_state_;
@@ -321,9 +348,7 @@ class InferenceServer {
   std::shared_ptr<RateLimiter> rate_limiter_;
   std::unique_ptr<ModelRepositoryManager> model_repository_manager_;
   std::shared_ptr<TritonBackendManager> backend_manager_;
-  std::shared_ptr<RequestResponseCache> response_cache_;
-
-  std::string server_config_file_;
+  std::shared_ptr<TritonCacheManager> cache_manager_;
 };
 
 }}  // namespace triton::core

@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -29,20 +29,26 @@
 #ifdef TRITON_ENABLE_METRICS
 
 #include <atomic>
+#include <istream>
 #include <mutex>
 #include <thread>
+
 #include "prometheus/counter.h"
 #include "prometheus/gauge.h"
 #include "prometheus/registry.h"
 #include "prometheus/serializer.h"
+#include "prometheus/summary.h"
 #include "prometheus/text_serializer.h"
-#include "response_cache.h"
+#include "status.h"
 
 #ifdef TRITON_ENABLE_METRICS_GPU
 #include <dcgm_agent.h>
 #endif  // TRITON_ENABLE_METRICS_GPU
 
 namespace triton { namespace core {
+
+using MetricsConfig = std::vector<std::pair<std::string, std::string>>;
+using MetricsConfigMap = std::unordered_map<std::string, MetricsConfig>;
 
 #ifdef TRITON_ENABLE_METRICS_CPU
 using MemInfo = std::unordered_map<std::string, uint64_t>;
@@ -117,16 +123,17 @@ class Metrics {
   // Enable reporting of CPU metrics
   static void EnableCpuMetrics();
 
-  // Enable reporting of Cache metrics
-  static void EnableCacheMetrics(
-      std::shared_ptr<RequestResponseCache> response_cache);
-
   // Start a thread for polling enabled metrics if any
-  static void StartPollingThreadSingleton(
-      std::shared_ptr<RequestResponseCache> response_cache);
+  static void StartPollingThreadSingleton();
 
   // Set the time interval in secs at which metrics are collected
   static void SetMetricsInterval(uint64_t metrics_interval_ms);
+
+  // Set the config for Metrics to control various options generically
+  static void SetConfigMap(MetricsConfigMap cfg);
+
+  // Get the config for Metrics
+  static const MetricsConfigMap& ConfigMap();
 
   // Get the prometheus registry
   static std::shared_ptr<prometheus::Registry> GetRegistry();
@@ -197,30 +204,65 @@ class Metrics {
   {
     return GetSingleton()->inf_compute_output_duration_us_family_;
   }
+
+  // Metric family of instantaneous inference queue size per model
+  static prometheus::Family<prometheus::Gauge>& FamilyInferenceQueueSize()
+  {
+    return GetSingleton()->inf_pending_request_count_family_;
+  }
+
   // Metric families of per-model response cache metrics
+  // NOTE: These are used in infer_stats for perf_analyzer
   static prometheus::Family<prometheus::Counter>& FamilyCacheHitCount()
   {
     return GetSingleton()->cache_num_hits_model_family_;
   }
-  static prometheus::Family<prometheus::Counter>& FamilyCacheHitLookupDuration()
+  static prometheus::Family<prometheus::Counter>& FamilyCacheHitDuration()
   {
-    return GetSingleton()->cache_hit_lookup_duration_us_model_family_;
+    return GetSingleton()->cache_hit_duration_us_model_family_;
   }
   static prometheus::Family<prometheus::Counter>& FamilyCacheMissCount()
   {
     return GetSingleton()->cache_num_misses_model_family_;
   }
-  static prometheus::Family<prometheus::Counter>&
-  FamilyCacheMissLookupDuration()
+  static prometheus::Family<prometheus::Counter>& FamilyCacheMissDuration()
   {
-    return GetSingleton()->cache_miss_lookup_duration_us_model_family_;
-  }
-  static prometheus::Family<prometheus::Counter>&
-  FamilyCacheMissInsertionDuration()
-  {
-    return GetSingleton()->cache_miss_insertion_duration_us_model_family_;
+    return GetSingleton()->cache_miss_duration_us_model_family_;
   }
 
+  // Summaries
+  static prometheus::Family<prometheus::Summary>&
+  FamilyInferenceRequestSummary()
+  {
+    return GetSingleton()->inf_request_summary_us_family_;
+  }
+  static prometheus::Family<prometheus::Summary>& FamilyInferenceQueueSummary()
+  {
+    return GetSingleton()->inf_queue_summary_us_family_;
+  }
+  static prometheus::Family<prometheus::Summary>&
+  FamilyInferenceComputeInputSummary()
+  {
+    return GetSingleton()->inf_compute_input_summary_us_family_;
+  }
+  static prometheus::Family<prometheus::Summary>&
+  FamilyInferenceComputeInferSummary()
+  {
+    return GetSingleton()->inf_compute_infer_summary_us_family_;
+  }
+  static prometheus::Family<prometheus::Summary>&
+  FamilyInferenceComputeOutputSummary()
+  {
+    return GetSingleton()->inf_compute_output_summary_us_family_;
+  }
+  static prometheus::Family<prometheus::Summary>& FamilyCacheHitSummary()
+  {
+    return GetSingleton()->cache_hit_summary_us_model_family_;
+  }
+  static prometheus::Family<prometheus::Summary>& FamilyCacheMissSummary()
+  {
+    return GetSingleton()->cache_miss_summary_us_model_family_;
+  }
 
  private:
   Metrics();
@@ -228,10 +270,7 @@ class Metrics {
   static Metrics* GetSingleton();
   bool InitializeDcgmMetrics();
   bool InitializeCpuMetrics();
-  bool InitializeCacheMetrics(
-      std::shared_ptr<RequestResponseCache> response_cache);
-  bool StartPollingThread(std::shared_ptr<RequestResponseCache> response_cache);
-  bool PollCacheMetrics(std::shared_ptr<RequestResponseCache> response_cache);
+  bool StartPollingThread();
   bool PollDcgmMetrics();
   bool PollCpuMetrics();
 
@@ -241,6 +280,7 @@ class Metrics {
   std::shared_ptr<prometheus::Registry> registry_;
   std::unique_ptr<prometheus::Serializer> serializer_;
 
+  // DLIS-4761: Refactor into groups of families
   prometheus::Family<prometheus::Counter>& inf_success_family_;
   prometheus::Family<prometheus::Counter>& inf_failure_family_;
   prometheus::Family<prometheus::Counter>& inf_count_family_;
@@ -253,33 +293,26 @@ class Metrics {
       inf_compute_infer_duration_us_family_;
   prometheus::Family<prometheus::Counter>&
       inf_compute_output_duration_us_family_;
-  // Global Response Cache metrics
-  prometheus::Family<prometheus::Gauge>& cache_num_entries_family_;
-  prometheus::Family<prometheus::Gauge>& cache_num_lookups_family_;
-  prometheus::Family<prometheus::Gauge>& cache_num_hits_family_;
-  prometheus::Family<prometheus::Gauge>& cache_num_misses_family_;
-  prometheus::Family<prometheus::Gauge>& cache_num_evictions_family_;
-  prometheus::Family<prometheus::Gauge>& cache_lookup_duration_us_family_;
-  prometheus::Family<prometheus::Gauge>& cache_insertion_duration_us_family_;
-  prometheus::Family<prometheus::Gauge>& cache_util_family_;
-  // Gauges for Global Response Cache metrics
-  prometheus::Gauge* cache_num_entries_global_;
-  prometheus::Gauge* cache_num_lookups_global_;
-  prometheus::Gauge* cache_num_hits_global_;
-  prometheus::Gauge* cache_num_misses_global_;
-  prometheus::Gauge* cache_num_evictions_global_;
-  prometheus::Gauge* cache_lookup_duration_us_global_;
-  prometheus::Gauge* cache_insertion_duration_us_global_;
-  prometheus::Gauge* cache_util_global_;
+  prometheus::Family<prometheus::Gauge>& inf_pending_request_count_family_;
+
   // Per-model Response Cache metrics
+  // NOTE: Per-model metrics are used in infer_stats for perf_analyzer. Global
+  // cache metrics will be implemented by cache and published through
+  // Metrics C API.
   prometheus::Family<prometheus::Counter>& cache_num_hits_model_family_;
-  prometheus::Family<prometheus::Counter>&
-      cache_hit_lookup_duration_us_model_family_;
+  prometheus::Family<prometheus::Counter>& cache_hit_duration_us_model_family_;
   prometheus::Family<prometheus::Counter>& cache_num_misses_model_family_;
-  prometheus::Family<prometheus::Counter>&
-      cache_miss_lookup_duration_us_model_family_;
-  prometheus::Family<prometheus::Counter>&
-      cache_miss_insertion_duration_us_model_family_;
+  prometheus::Family<prometheus::Counter>& cache_miss_duration_us_model_family_;
+
+  // Summaries
+  prometheus::Family<prometheus::Summary>& inf_request_summary_us_family_;
+  prometheus::Family<prometheus::Summary>& inf_queue_summary_us_family_;
+  prometheus::Family<prometheus::Summary>& inf_compute_input_summary_us_family_;
+  prometheus::Family<prometheus::Summary>& inf_compute_infer_summary_us_family_;
+  prometheus::Family<prometheus::Summary>&
+      inf_compute_output_summary_us_family_;
+  prometheus::Family<prometheus::Summary>& cache_hit_summary_us_model_family_;
+  prometheus::Family<prometheus::Summary>& cache_miss_summary_us_model_family_;
 
 #ifdef TRITON_ENABLE_METRICS_GPU
   prometheus::Family<prometheus::Gauge>& gpu_utilization_family_;
@@ -295,9 +328,6 @@ class Metrics {
   std::vector<prometheus::Gauge*> gpu_power_usage_;
   std::vector<prometheus::Gauge*> gpu_power_limit_;
   std::vector<prometheus::Counter*> gpu_energy_consumption_;
-
-  prometheus::Family<prometheus::Gauge>& gpu_uuid_to_deviceid_family_;
-  std::vector<prometheus::Gauge*> gpu_uuid_to_deviceid_;
 
   DcgmMetadata dcgm_metadata_;
 #endif  // TRITON_ENABLE_METRICS_GPU
@@ -320,17 +350,17 @@ class Metrics {
   CpuInfo last_cpu_info_;
 #endif  // TRITON_ENABLE_METRICS_CPU
 
-  // Thread for polling cache/gpu metrics periodically
+  // Thread for polling cpu/gpu metrics periodically
   std::unique_ptr<std::thread> poll_thread_;
   std::atomic<bool> poll_thread_exit_;
   bool metrics_enabled_;
   bool gpu_metrics_enabled_;
   bool cpu_metrics_enabled_;
-  bool cache_metrics_enabled_;
   bool poll_thread_started_;
   std::mutex metrics_enabling_;
   std::mutex poll_thread_starting_;
   uint64_t metrics_interval_ms_;
+  MetricsConfigMap config_;
 };
 
 }}  // namespace triton::core

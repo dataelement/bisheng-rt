@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -174,6 +174,14 @@ TRITONSERVER_InferenceTraceModelVersion()
 {
 }
 TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceTraceRequestId()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceTraceSpawnChildTrace()
+{
+}
+TRITONAPI_DECLSPEC void
 TRITONSERVER_InferenceRequestNew()
 {
 }
@@ -218,7 +226,15 @@ TRITONSERVER_InferenceRequestPriority()
 {
 }
 TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceRequestPriorityUInt64()
+{
+}
+TRITONAPI_DECLSPEC void
 TRITONSERVER_InferenceRequestSetPriority()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceRequestSetPriorityUInt64()
 {
 }
 TRITONAPI_DECLSPEC void
@@ -357,8 +373,17 @@ TRITONAPI_DECLSPEC void
 TRITONSERVER_ServerOptionsSetCudaMemoryPoolByteSize()
 {
 }
+// Deprecated. See TRITONSERVER_ServerOptionsSetCacheConfig instead.
 TRITONAPI_DECLSPEC void
 TRITONSERVER_ServerOptionsSetResponseCacheByteSize()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_ServerOptionsSetCacheConfig()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_ServerOptionsSetCacheDirectory()
 {
 }
 TRITONAPI_DECLSPEC void
@@ -383,6 +408,10 @@ TRITONSERVER_ServerOptionsSetBufferManagerThreadCount()
 }
 TRITONAPI_DECLSPEC void
 TRITONSERVER_ServerOptionsSetModelLoadThreadCount()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_ServerOptionsSetModelNamespacing()
 {
 }
 TRITONAPI_DECLSPEC void
@@ -674,6 +703,30 @@ TRITONBACKEND_RequestRelease()
 {
 }
 TRITONAPI_DECLSPEC void
+TRITONBACKEND_RequestTrace()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceRequestSetBoolParameter()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceRequestSetIntParameter()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONSERVER_InferenceRequestSetStringParameter()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONBACKEND_RequestParameter()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONBACKEND_RequestParameterCount()
+{
+}
+TRITONAPI_DECLSPEC void
 TRITONBACKEND_ResponseFactoryNew()
 {
 }
@@ -806,6 +859,10 @@ TRITONBACKEND_ModelSetState()
 {
 }
 TRITONAPI_DECLSPEC void
+TRITONBACKEND_ModelReportMemoryUsage()
+{
+}
+TRITONAPI_DECLSPEC void
 TRITONBACKEND_ModelInstanceName()
 {
 }
@@ -851,6 +908,10 @@ TRITONBACKEND_ModelInstanceState()
 }
 TRITONAPI_DECLSPEC void
 TRITONBACKEND_ModelInstanceSetState()
+{
+}
+TRITONAPI_DECLSPEC void
+TRITONBACKEND_ModelInstanceReportMemoryUsage()
 {
 }
 TRITONAPI_DECLSPEC void
@@ -961,7 +1022,67 @@ TRITONSERVER_GetMetricKind()
 }
 
 TRITONAPI_DECLSPEC void
+TRITONSERVER_ServerOptionsSetMetricsConfig()
+{
+}
+
+TRITONAPI_DECLSPEC void
 TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONBACKEND_BackendAttributeSetParallelModelInstanceLoading()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_ApiVersion()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheEntryBufferCount()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheEntryAddBuffer()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheEntryGetBuffer()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheEntrySetBuffer()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheInitialize()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheFinalize()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheInsert()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_CacheLookup()
+{
+}
+
+TRITONAPI_DECLSPEC void
+TRITONCACHE_Copy()
 {
 }
 

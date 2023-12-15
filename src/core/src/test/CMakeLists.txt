@@ -1,4 +1,4 @@
-# Copyright 2019-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2019-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -83,14 +83,20 @@ set(
 )
 
 #
-# Unit test for RequestResponseCache
+# Unit test for TritonCache
 #
 if(${TRITON_ENABLE_GPU})
   add_executable(
     response_cache_test
     response_cache_test.cc
-    ../response_cache.cc
-    ../response_cache.h
+    ../cache_manager.cc
+    ../cache_manager.h
+    ../cache_entry.cc
+    ../cache_entry.h
+    ../filesystem/api.cc
+    ../filesystem/api.h
+    ../shared_library.cc
+    ../shared_library.h
     ../status.cc
     ../status.h
     ../constants.h
@@ -135,7 +141,9 @@ if(${TRITON_ENABLE_GPU})
     PRIVATE
       triton-common-error        # from repo-common
       triton-common-logging      # from repo-common
+      triton-common-model-config # from repo-common
       proto-library              # from repo-common
+      triton-core
       GTest::gtest
       GTest::gtest_main
       protobuf::libprotobuf
@@ -190,6 +198,7 @@ target_link_libraries(
     triton-core
     GTest::gtest
     GTest::gtest_main
+    GTest::gmock
 )
 
 install(
@@ -382,12 +391,12 @@ add_executable(
   repo_agent_test.cc
   ../repo_agent.cc
   ../status.cc
-  ../filesystem.cc
+  ../filesystem/api.cc
   ../model_config_utils.cc
   ../repo_agent.h
   ../shared_library.h
   ../status.h
-  ../filesystem.h
+  ../filesystem/api.h
   ../model_config_utils.h
 )
 
@@ -460,7 +469,7 @@ if(${TRITON_ENABLE_METRICS})
   )
 
   target_compile_definitions(
-    metrics_api_test 
+    metrics_api_test
     PRIVATE
       TRITON_ENABLE_LOGGING=1
       TRITON_ENABLE_METRICS=1
@@ -475,6 +484,7 @@ if(${TRITON_ENABLE_METRICS})
       triton-core
       GTest::gtest
       GTest::gtest_main
+      GTest::gmock
       prometheus-cpp::core
       protobuf::libprotobuf
   )
@@ -522,5 +532,85 @@ target_link_libraries(
 
 install(
   TARGETS register_api_test
+  RUNTIME DESTINATION bin
+)
+
+#
+# Backend Output Detail Unittest
+#
+add_executable(
+  backend_output_detail_test
+  backend_output_detail_test.cc
+)
+
+target_include_directories(
+  backend_output_detail_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${GTEST_INCLUDE_DIRS}
+)
+
+set_target_properties(
+  backend_output_detail_test
+  PROPERTIES
+    SKIP_BUILD_RPATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH_USE_LINK_PATH FALSE
+    INSTALL_RPATH ""
+)
+
+target_link_libraries(
+  backend_output_detail_test
+  PRIVATE
+    triton-common-error   # from repo-common
+    triton-common-logging # from repo-common
+    triton-core
+    GTest::gtest
+    GTest::gtest_main
+)
+
+install(
+  TARGETS backend_output_detail_test
+  RUNTIME DESTINATION bin
+)
+
+#
+# Request Cancellation Unittest
+#
+add_executable(
+  request_cancellation_test
+  request_cancellation_test.cc
+)
+
+set_target_properties(
+  request_cancellation_test
+  PROPERTIES
+    SKIP_BUILD_RPATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH_USE_LINK_PATH FALSE
+    INSTALL_RPATH ""
+)
+
+target_include_directories(
+  request_cancellation_test
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${GTEST_INCLUDE_DIRS}
+)
+
+target_link_libraries(
+  request_cancellation_test
+  PRIVATE
+    triton-common-error   # from repo-common
+    triton-common-logging # from repo-common
+    triton-core
+    GTest::gtest
+    GTest::gtest_main
+)
+
+install(
+  TARGETS request_cancellation_test
   RUNTIME DESTINATION bin
 )

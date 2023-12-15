@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -34,6 +34,7 @@
 #include <queue>
 #include <set>
 #include <thread>
+
 #include "backend_model.h"
 #include "backend_model_instance.h"
 #include "model_config.pb.h"
@@ -54,7 +55,7 @@ class DynamicBatchScheduler : public Scheduler {
       TritonModel* model, TritonModelInstance* model_instance, const int nice,
       const bool dynamic_batching_enabled, const int32_t max_batch_size,
       const std::unordered_map<std::string, bool>& enforce_equal_shape_tensors,
-      const bool preserve_ordering, const bool response_cache_enable,
+      const bool preserve_ordering,
       const std::set<int32_t>& preferred_batch_sizes,
       const uint64_t max_queue_delay_microseconds,
       std::unique_ptr<Scheduler>* scheduler);
@@ -67,7 +68,7 @@ class DynamicBatchScheduler : public Scheduler {
       const bool dynamic_batching_enabled, const int32_t max_batch_size,
       const std::unordered_map<std::string, bool>& enforce_equal_shape_tensors,
       const inference::ModelDynamicBatching& batcher_config,
-      const bool response_cache_enable, std::unique_ptr<Scheduler>* scheduler);
+      std::unique_ptr<Scheduler>* scheduler);
 
   ~DynamicBatchScheduler();
 
@@ -87,18 +88,16 @@ class DynamicBatchScheduler : public Scheduler {
   // \see Scheduler::Stop()
   void Stop() override { stop_ = true; }
 
-  MetricModelReporter* MetricReporter() const { return reporter_.get(); }
-
  private:
   DynamicBatchScheduler(
       TritonModel* model, TritonModelInstance* model_instance,
       const bool dynamic_batching_enabled, const int32_t max_batch_size,
       const std::unordered_map<std::string, bool>& enforce_equal_shape_tensors,
-      const bool preserve_ordering, const bool response_cache_enable,
+      const bool preserve_ordering,
       const std::set<int32_t>& preferred_batch_sizes,
       const uint64_t max_queue_delay_microseconds,
       const inference::ModelQueuePolicy& default_queue_policy,
-      const uint32_t priority_levels,
+      const uint64_t priority_levels,
       const ModelQueuePolicyMap& queue_policy_map);
 
   void BatcherThread(const int nice);
@@ -110,8 +109,24 @@ class DynamicBatchScheduler : public Scheduler {
       std::unique_ptr<InferenceResponse>& cached_response);
   void FinalizeResponses();
 
+  // Custom batching function calls
+  // Returns whether custom batching is enabled.
+  bool CustomBatchEnabled() const;
+  // If custom batching is enabled for this model, see if this request should be
+  // included.
+  void CustomBatchIncl(InferenceRequest* request, bool* should_include);
+  // If custom batching is enabled for this model, initialize the batching
+  // function.
+  void CustomBatchInit();
+  // If custom batching is enabled for this model, finalizethe batching
+  // function.
+  void CustomBatchFini();
+
   TritonModel* model_;
   TritonModelInstance* model_instance_;
+
+  // Name of the model.
+  std::string model_name_;
 
   // True if dynamic batching is enabled.
   const bool dynamic_batching_enabled_;
@@ -171,9 +186,6 @@ class DynamicBatchScheduler : public Scheduler {
 
   // Preserves the order in which responses are finalized
   std::mutex finalize_mtx_;
-
-  // Reporter for metrics, or nullptr if no metrics should be reported
-  std::shared_ptr<MetricModelReporter> reporter_;
 };
 
 }}  // namespace triton::core

@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,6 +25,8 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "backend_model_instance.h"
+
+#include "status.h"
 
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -134,16 +136,42 @@ WarmupRequestComplete(
   }
 }
 
+// Helper function for creating an instance
+Status
+VerifyModelLoadGpuFraction(
+    const std::string& name, TRITONSERVER_InstanceGroupKind kind,
+    int32_t device_id,
+    const triton::common::BackendCmdlineConfigMap& backend_config_map)
+{
+  size_t free, total;
+  double memory_limit;
+  RETURN_IF_ERROR(GetDeviceMemoryInfo(device_id, &free, &total));
+  RETURN_IF_ERROR(BackendConfigurationModelLoadGpuFraction(
+      backend_config_map, device_id, &memory_limit));
+  const size_t allow = total * memory_limit;
+  const size_t used = total - free;
+  if (used > allow) {
+    return Status(
+        Status::Code::UNAVAILABLE,
+        std::string("can not create model '") + name +
+            "': memory limit set for " +
+            TRITONSERVER_InstanceGroupKindString(kind) + " " +
+            std::to_string(device_id) +
+            " has exceeded, model loading is rejected.");
+  }
+  return Status::Success;
+}
+
 }  // namespace
 
 TritonModelInstance::TritonModelInstance(
-    TritonModel* model, const std::string& name, const size_t index,
+    TritonModel* model, const std::string& name, const Signature& signature,
     const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id,
     const std::vector<std::string>& profile_names, const bool passive,
     const triton::common::HostPolicyCmdlineConfig& host_policy,
     const TritonServerMessage& host_policy_message,
     const std::vector<SecondaryDevice>& secondary_devices)
-    : model_(model), name_(name), index_(index), kind_(kind),
+    : model_(model), name_(name), signature_(signature), kind_(kind),
       device_id_(device_id), host_policy_(host_policy),
       host_policy_message_(host_policy_message), profile_names_(profile_names),
       passive_(passive), secondary_devices_(secondary_devices), state_(nullptr)
@@ -156,9 +184,14 @@ TritonModelInstance::TritonModelInstance(
     const int id = (kind_ == TRITONSERVER_INSTANCEGROUPKIND_GPU)
                        ? device_id_
                        : METRIC_REPORTER_ID_CPU;
+    // Let every metric reporter know if caching is enabled to correctly include
+    // cache miss time into request duration on cache misses.
+    const bool response_cache_enabled =
+        model_->ResponseCacheEnabled() &&
+        model_->Server()->ResponseCacheEnabled();
     MetricModelReporter::Create(
-        model_->Name(), model_->Version(), id, model_->Config().metric_tags(),
-        &reporter_);
+        model_->Name(), model_->Version(), id, response_cache_enabled,
+        model_->Config().metric_tags(), &reporter_);
   }
 #endif  // TRITON_ENABLE_METRICS
 }
@@ -168,6 +201,8 @@ TritonModelInstance::~TritonModelInstance()
   if (triton_backend_thread_.get() != nullptr) {
     triton_backend_thread_->StopBackendThread();
   }
+
+  model_->Server()->GetRateLimiter()->UnregisterModelInstance(this);
 
   // Model finalization is optional...
   if (model_->Backend()->ModelInstanceFiniFn() != nullptr) {
@@ -179,127 +214,55 @@ TritonModelInstance::~TritonModelInstance()
 }
 
 Status
-TritonModelInstance::CreateInstances(
-    TritonModel* model,
-    const triton::common::BackendCmdlineConfigMap& backend_cmdline_config_map,
-    const triton::common::HostPolicyCmdlineConfigMap& host_policy_map,
-    const inference::ModelConfig& model_config, const bool device_blocking)
+TritonModelInstance::CreateInstance(
+    TritonModel* model, const std::string& name, const Signature& signature,
+    TRITONSERVER_InstanceGroupKind kind, int32_t device_id,
+    const std::vector<std::string>& profile_names, const bool passive,
+    const std::string& host_policy_name,
+    const inference::ModelRateLimiter& rate_limiter_config,
+    const std::vector<SecondaryDevice>& secondary_devices,
+    std::shared_ptr<TritonModelInstance>* triton_model_instance)
 {
   static triton::common::HostPolicyCmdlineConfig empty_host_policy;
+  const triton::common::HostPolicyCmdlineConfig* host_policy =
+      &empty_host_policy;
+  const auto policy_it = model->HostPolicyMap().find(host_policy_name);
+  if (policy_it != model->HostPolicyMap().end()) {
+    host_policy = &policy_it->second;
+  }
 
-  // This structure is used to allocate TritonBackendThread to instances on same
-  // device for device blocking execution policy.
-  std::map<uint32_t, std::shared_ptr<TritonBackendThread>> device_to_thread_map;
+  RETURN_IF_ERROR(SetNumaConfigOnThread(*host_policy));
+  auto err = ConstructAndInitializeInstance(
+      model, name, signature, kind, device_id, profile_names, passive,
+      host_policy_name, *host_policy, rate_limiter_config, secondary_devices,
+      triton_model_instance);
+  RETURN_IF_ERROR(ResetNumaMemoryPolicy());
+  RETURN_IF_ERROR(err);
 
-  for (const auto& group : model_config.instance_group()) {
-    std::vector<std::string> profile_names;
-    for (const auto& profile_name : group.profile()) {
-      profile_names.push_back(profile_name);
-    }
-    std::vector<SecondaryDevice> secondary_devices;
-    for (const auto& secondary_device : group.secondary_devices()) {
-      secondary_devices.emplace_back(
-          inference::
-              ModelInstanceGroup_SecondaryDevice_SecondaryDeviceKind_Name(
-                  secondary_device.kind()),
-          secondary_device.device_id());
-    }
-    for (int32_t c = 0; c < group.count(); ++c) {
-      std::string instance_name{group.count() > 1
-                                    ? group.name() + "_" + std::to_string(c)
-                                    : group.name()};
-      const bool passive = group.passive();
-      std::vector<std::tuple<
-          std::string, TRITONSERVER_InstanceGroupKind, int32_t,
-          const inference::ModelRateLimiter*>>
-          instance_setting;
-      if (group.kind() == inference::ModelInstanceGroup::KIND_CPU) {
-        instance_setting.emplace_back(
-            group.host_policy().empty() ? "cpu" : group.host_policy(),
-            TRITONSERVER_INSTANCEGROUPKIND_CPU, 0 /* device_id */,
-            &group.rate_limiter());
-      } else if (group.kind() == inference::ModelInstanceGroup::KIND_GPU) {
-        for (const int32_t device_id : group.gpus()) {
-          instance_setting.emplace_back(
-              group.host_policy().empty() ? ("gpu_" + std::to_string(device_id))
-                                          : group.host_policy(),
-              TRITONSERVER_INSTANCEGROUPKIND_GPU, device_id,
-              &group.rate_limiter());
-        }
-      } else if (group.kind() == inference::ModelInstanceGroup::KIND_MODEL) {
-        instance_setting.emplace_back(
-            group.host_policy().empty() ? "model" : group.host_policy(),
-            TRITONSERVER_INSTANCEGROUPKIND_MODEL, 0 /* device_id */,
-            &group.rate_limiter());
-      } else {
-        return Status(
-            Status::Code::INVALID_ARG,
-            std::string("instance_group kind ") +
-                ModelInstanceGroup_Kind_Name(group.kind()) + " not supported");
-      }
-      for (const auto is : instance_setting) {
-        const auto& kind = std::get<1>(is);
-        const auto& id = std::get<2>(is);
-
-        const std::string& policy_name = std::get<0>(is);
-        const triton::common::HostPolicyCmdlineConfig* host_policy;
-        const auto policy_it = host_policy_map.find(policy_name);
-        if (policy_it != host_policy_map.end()) {
-          host_policy = &policy_it->second;
-        } else {
-          host_policy = &empty_host_policy;
-        }
-        RETURN_IF_ERROR(SetNumaConfigOnThread(*host_policy));
-        auto err = CreateInstance(
-            model, instance_name, c, kind, id, profile_names, passive,
-            policy_name, *host_policy, *(std::get<3>(is)), device_blocking,
-            &device_to_thread_map, secondary_devices);
-        RETURN_IF_ERROR(ResetNumaMemoryPolicy());
-        RETURN_IF_ERROR(err);
-
-        // When deploying on GPU, we want to make sure the GPU memory usage
-        // is within allowed range, otherwise, stop the creation to ensure
-        // there is sufficient GPU memory for other use.
-        // We check the usage after loading the instance to better enforcing
-        // the limit. If we check before loading, we may create instance
-        // that occupies the rest of available memory which against the purpose
-        if (kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
-          size_t free, total;
-          double memory_limit;
-          RETURN_IF_ERROR(GetDeviceMemoryInfo(id, &free, &total));
-          RETURN_IF_ERROR(BackendConfigurationModelLoadGpuFraction(
-              backend_cmdline_config_map, id, &memory_limit));
-          const size_t allow = total * memory_limit;
-          const size_t used = total - free;
-          if (used > allow) {
-            return Status(
-                Status::Code::UNAVAILABLE,
-                std::string("can not create model '") + instance_name +
-                    "': memory limit set for " +
-                    TRITONSERVER_InstanceGroupKindString(kind) + " " +
-                    std::to_string(id) +
-                    " has exceeded, model loading is rejected.");
-          }
-        }
-      }
-    }
+  // When deploying on GPU, we want to make sure the GPU memory usage
+  // is within allowed range, otherwise, stop the creation to ensure
+  // there is sufficient GPU memory for other use.
+  // We check the usage after loading the instance to better enforcing
+  // the limit. If we check before loading, we may create instance
+  // that occupies the rest of available memory which against the purpose
+  if (kind == TRITONSERVER_INSTANCEGROUPKIND_GPU) {
+    RETURN_IF_ERROR(VerifyModelLoadGpuFraction(
+        name, kind, device_id, model->BackendConfigMap()));
   }
 
   return Status::Success;
 }
 
 Status
-TritonModelInstance::CreateInstance(
-    TritonModel* model, const std::string& name, const size_t index,
+TritonModelInstance::ConstructAndInitializeInstance(
+    TritonModel* model, const std::string& name, const Signature& signature,
     const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id,
     const std::vector<std::string>& profile_names, const bool passive,
     const std::string& host_policy_name,
     const triton::common::HostPolicyCmdlineConfig& host_policy,
     const inference::ModelRateLimiter& rate_limiter_config,
-    const bool device_blocking,
-    std::map<uint32_t, std::shared_ptr<TritonBackendThread>>*
-        device_to_thread_map,
-    const std::vector<SecondaryDevice>& secondary_devices)
+    const std::vector<SecondaryDevice>& secondary_devices,
+    std::shared_ptr<TritonModelInstance>* triton_model_instance)
 {
   // Create the JSON representation of the backend configuration.
   triton::common::TritonJson::Value host_policy_json(
@@ -315,24 +278,35 @@ TritonModelInstance::CreateInstance(
   TritonServerMessage host_policy_message(host_policy_json);
 
   std::unique_ptr<TritonModelInstance> local_instance(new TritonModelInstance(
-      model, name, index, kind, device_id, profile_names, passive, host_policy,
-      host_policy_message, secondary_devices));
+      model, name, signature, kind, device_id, profile_names, passive,
+      host_policy, host_policy_message, secondary_devices));
 
   TRITONBACKEND_ModelInstance* triton_instance =
       reinterpret_cast<TRITONBACKEND_ModelInstance*>(local_instance.get());
 
   // Instance initialization is optional... We must set set shared
   // library path to point to the backend directory in case the
-  // backend library attempts to load additional shared libaries.
+  // backend library attempts to load additional shared libraries.
   if (model->Backend()->ModelInstanceInitFn() != nullptr) {
+    // We must set set shared library path to point to the backend directory in
+    // case the backend library attempts to load additional shared libraries.
+    // Currently, the set and reset function is effective only on Windows, so
+    // there is no need to set path on non-Windows.
+    // However, parallel model loading will not see any speedup on Windows and
+    // the global lock inside the SharedLibrary is a WAR.
+    // [FIXME] Reduce lock WAR on SharedLibrary (DLIS-4300)
+#ifdef _WIN32
     std::unique_ptr<SharedLibrary> slib;
     RETURN_IF_ERROR(SharedLibrary::Acquire(&slib));
     RETURN_IF_ERROR(slib->SetLibraryDirectory(model->Backend()->Directory()));
+#endif
 
     TRITONSERVER_Error* err =
         model->Backend()->ModelInstanceInitFn()(triton_instance);
 
+#ifdef _WIN32
     RETURN_IF_ERROR(slib->ResetLibraryDirectory());
+#endif
     RETURN_IF_TRITONSERVER_ERROR(err);
   }
 
@@ -341,10 +315,10 @@ TritonModelInstance::CreateInstance(
     RETURN_IF_ERROR(model->Server()->GetRateLimiter()->RegisterModelInstance(
         local_instance.get(), rate_limiter_config));
     RETURN_IF_ERROR(local_instance->SetBackendThread(
-        kind, device_id, device_blocking, device_to_thread_map));
+        kind, device_id, model->DeviceBlocking()));
   }
 
-  RETURN_IF_ERROR(model->AddInstance(std::move(local_instance), passive));
+  triton_model_instance->reset(local_instance.release());
 
   return Status::Success;
 }
@@ -352,16 +326,14 @@ TritonModelInstance::CreateInstance(
 Status
 TritonModelInstance::SetBackendThread(
     const TRITONSERVER_InstanceGroupKind kind, const int32_t device_id,
-    const bool device_blocking,
-    std::map<uint32_t, std::shared_ptr<TritonBackendThread>>*
-        device_to_thread_map)
+    const bool device_blocking)
 {
-  if (device_blocking && (kind == TRITONSERVER_INSTANCEGROUPKIND_GPU)) {
-    auto thread_it = device_to_thread_map->find(device_id);
-    if (thread_it != device_to_thread_map->end()) {
+  if (ShareBackendThread(device_blocking, kind)) {
+    auto device_instances = model_->GetInstancesByDevice(device_id);
+    if (!device_instances.empty()) {
       LOG_VERBOSE(1) << "Using already started backend thread for " << Name()
                      << " on device " << device_id;
-      triton_backend_thread_ = thread_it->second;
+      triton_backend_thread_ = device_instances[0]->triton_backend_thread_;
     }
   }
   if (triton_backend_thread_.get() == nullptr) {
@@ -369,7 +341,6 @@ TritonModelInstance::SetBackendThread(
     RETURN_IF_ERROR(TritonBackendThread::CreateBackendThread(
         Name(), this, 0 /* nice */, device_id, &local_backend_thread));
     triton_backend_thread_ = std::move(local_backend_thread);
-    device_to_thread_map->insert({device_id, triton_backend_thread_});
   } else {
     triton_backend_thread_->AddModelInstance(this);
   }
@@ -564,25 +535,55 @@ TritonModelInstance::GenerateWarmupData()
   return Status::Success;
 }
 
-void
-TritonModelInstance::Schedule(
-    std::vector<std::unique_ptr<InferenceRequest>>&& requests,
-    const std::function<void()>& OnCompletion)
+Status
+TritonModelInstance::PrepareRequestsForExecution(
+    std::vector<std::unique_ptr<InferenceRequest>>& requests)
 {
+  for (auto& r : requests) {
+    // Load the input states for the inference request.
+    RETURN_IF_ERROR(r->LoadInputStates());
+    // Set request state to signify that request is no longer pending.
+    RETURN_IF_ERROR(r->SetState(InferenceRequest::State::EXECUTING));
+  }
+
+  return Status::Success;
+}
+
+Status
+TritonModelInstance::PrepareRequestsOrRespond(
+    std::vector<std::unique_ptr<InferenceRequest>>& requests)
+{
+  auto status = PrepareRequestsForExecution(requests);
+  // If any errors occurred, respond with error for each request.
+  if (!status.IsOk()) {
+    for (auto& r : requests) {
+      InferenceRequest::RespondIfError(r, status, true /* release_requests */);
+    }
+    // Log a single error for batch of requests for better visibility
+    LOG_STATUS_ERROR(status, "Requests failed pre-execution checks");
+  }
+
+  return status;
+}
+
+Status
+TritonModelInstance::Schedule(
+    std::vector<std::unique_ptr<InferenceRequest>>&& requests)
+{
+  // Prepare requests for execution, respond to requests if any error occur.
+  RETURN_IF_ERROR(PrepareRequestsOrRespond(requests));
+
   // Use a thread local vector to avoid needing to malloc each
   // time an inference is run.
   thread_local std::vector<TRITONBACKEND_Request*> triton_requests(1024);
   triton_requests.clear();
   for (auto& r : requests) {
-    // Load the input states for the inference request.
-    r->LoadInputStates();
     triton_requests.push_back(
         reinterpret_cast<TRITONBACKEND_Request*>(r.release()));
   }
 
   Execute(triton_requests);
-
-  OnCompletion();
+  return Status::Success;
 }
 
 Status
@@ -691,14 +692,13 @@ TritonModelInstance::TritonBackendThread::CreateBackendThread(
     std::unique_ptr<TritonBackendThread>* triton_backend_thread)
 {
   TritonBackendThread* raw_triton_backend_thread =
-      new TritonBackendThread(name, model_instance->Model());
+      new TritonBackendThread(name, model_instance->Model(), nice, device_id);
   std::unique_ptr<TritonBackendThread> runner(raw_triton_backend_thread);
 
   runner->AddModelInstance(model_instance);
-  runner->backend_thread_ =
-      std::thread([raw_triton_backend_thread, nice, device_id]() {
-        raw_triton_backend_thread->BackendThread(nice, device_id);
-      });
+  runner->backend_thread_ = std::thread([raw_triton_backend_thread]() {
+    raw_triton_backend_thread->BackendThread();
+  });
 
   triton_backend_thread->reset(runner.release());
 
@@ -734,8 +734,9 @@ TritonModelInstance::TritonBackendThread::InitAndWarmUpModelInstance(
 }
 
 TritonModelInstance::TritonBackendThread::TritonBackendThread(
-    const std::string& name, TritonModel* model)
-    : name_(name), model_(model)
+    const std::string& name, TritonModel* model, const int nice,
+    const int32_t device_id)
+    : name_(name), nice_(nice), device_id_(device_id), model_(model)
 {
 }
 
@@ -757,21 +758,20 @@ TritonModelInstance::TritonBackendThread::StopBackendThread()
 }
 
 void
-TritonModelInstance::TritonBackendThread::BackendThread(
-    const int nice, const int32_t device_id)
+TritonModelInstance::TritonBackendThread::BackendThread()
 {
 #ifndef _WIN32
-  if (setpriority(PRIO_PROCESS, syscall(SYS_gettid), nice) == 0) {
+  if (setpriority(PRIO_PROCESS, syscall(SYS_gettid), nice_) == 0) {
     LOG_VERBOSE(1) << "Starting backend thread for " << name_ << " at nice "
-                   << nice << " on device " << device_id << "...";
+                   << nice_ << " on device " << device_id_ << "...";
   } else {
     LOG_VERBOSE(1) << "Starting backend thread for " << name_
-                   << " at default nice (requested nice " << nice << " failed)"
-                   << " on device " << device_id << "...";
+                   << " at default nice (requested nice " << nice_ << " failed)"
+                   << " on device " << device_id_ << "...";
   }
 #else
   LOG_VERBOSE(1) << "Starting backend thread for " << name_
-                 << " at default nice on device " << device_id << "...";
+                 << " at default nice on device " << device_id_ << "...";
 #endif
 
   bool should_exit = false;
@@ -959,6 +959,16 @@ TRITONBACKEND_ModelInstanceReportBatchStatistics(
       compute_end_ns, exec_end_ns);
 #endif  // TRITON_ENABLE_STATS
 
+  return nullptr;  // success
+}
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_ModelInstanceReportMemoryUsage(
+    TRITONBACKEND_ModelInstance* instance,
+    TRITONSERVER_BufferAttributes** usage, uint32_t usage_size)
+{
+  TritonModelInstance* ti = reinterpret_cast<TritonModelInstance*>(instance);
+  ti->SetMemoryUsage({reinterpret_cast<BufferAttributes**>(usage), usage_size});
   return nullptr;  // success
 }
 

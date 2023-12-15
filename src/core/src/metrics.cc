@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include "metrics.h"
 
 #include <thread>
+
 #include "constants.h"
 #include "prometheus/detail/utils.h"
 #include "triton/common/logging.h"
@@ -37,6 +38,7 @@
 #ifdef TRITON_ENABLE_METRICS_GPU
 #include <cuda_runtime_api.h>
 #include <dcgm_agent.h>
+
 #include <cstring>
 #include <set>
 #include <string>
@@ -79,6 +81,7 @@ Metrics::Metrics()
               .Help("Cumulative inference queuing duration in microseconds "
                     "(includes cached requests)")
               .Register(*registry_)),
+
       inf_compute_input_duration_us_family_(
           prometheus::BuildCounter()
               .Name("nv_inference_compute_input_duration_us")
@@ -97,72 +100,81 @@ Metrics::Metrics()
               .Help("Cumulative inference compute output duration in "
                     "microseconds (does not include cached requests)")
               .Register(*registry_)),
-      cache_num_entries_family_(
+
+      inf_pending_request_count_family_(
           prometheus::BuildGauge()
-              .Name("nv_cache_num_entries")
-              .Help("Number of responses stored in response cache")
+              .Name("nv_inference_pending_request_count")
+              .Help("Instantaneous number of pending requests awaiting "
+                    "execution per-model.")
               .Register(*registry_)),
-      cache_num_lookups_family_(
-          prometheus::BuildGauge()
-              .Name("nv_cache_num_lookups")
-              .Help("Number of cache lookups in response cache")
-              .Register(*registry_)),
-      cache_num_hits_family_(prometheus::BuildGauge()
-                                 .Name("nv_cache_num_hits")
-                                 .Help("Number of cache hits in response cache")
-                                 .Register(*registry_)),
-      cache_num_misses_family_(
-          prometheus::BuildGauge()
-              .Name("nv_cache_num_misses")
-              .Help("Number of cache misses in response cache")
-              .Register(*registry_)),
-      cache_num_evictions_family_(
-          prometheus::BuildGauge()
-              .Name("nv_cache_num_evictions")
-              .Help("Number of cache evictions in response cache")
-              .Register(*registry_)),
-      cache_lookup_duration_us_family_(
-          prometheus::BuildGauge()
-              .Name("nv_cache_lookup_duration")
-              .Help(
-                  "Total cache lookup duration (hit and miss), in microseconds")
-              .Register(*registry_)),
-      cache_insertion_duration_us_family_(
-          prometheus::BuildGauge()
-              .Name("nv_cache_insertion_duration")
-              .Help("Total cache insertion duration, in microseconds")
-              .Register(*registry_)),
-      cache_util_family_(prometheus::BuildGauge()
-                             .Name("nv_cache_util")
-                             .Help("Cache utilization [0.0 - 1.0]")
-                             .Register(*registry_)),
+
       // Per-model cache metric families
+      // NOTE: These are used in infer_stats for perf_analyzer
       cache_num_hits_model_family_(prometheus::BuildCounter()
                                        .Name("nv_cache_num_hits_per_model")
                                        .Help("Number of cache hits per model")
                                        .Register(*registry_)),
-      cache_hit_lookup_duration_us_model_family_(
+      cache_hit_duration_us_model_family_(
           prometheus::BuildCounter()
-              .Name("nv_cache_hit_lookup_duration_per_model")
-              .Help(
-                  "Total cache hit lookup duration per model, in microseconds")
+              .Name("nv_cache_hit_duration_per_model")
+              .Help("Total cache hit duration per model, in microseconds")
               .Register(*registry_)),
       cache_num_misses_model_family_(
           prometheus::BuildCounter()
               .Name("nv_cache_num_misses_per_model")
               .Help("Number of cache misses per model")
               .Register(*registry_)),
-      cache_miss_lookup_duration_us_model_family_(
+      cache_miss_duration_us_model_family_(
           prometheus::BuildCounter()
-              .Name("nv_cache_miss_lookup_duration_per_model")
-              .Help(
-                  "Total cache miss lookup duration per model, in microseconds")
-              .Register(*registry_)),
-      cache_miss_insertion_duration_us_model_family_(
-          prometheus::BuildCounter()
-              .Name("nv_cache_miss_insertion_duration_per_model")
-              .Help("Total cache miss insertion duration per model, in "
+              .Name("nv_cache_miss_duration_per_model")
+              .Help("Total cache miss (insert+lookup) duration per model, in "
                     "microseconds")
+              .Register(*registry_)),
+
+      // Summaries
+      inf_request_summary_us_family_(
+          prometheus::BuildSummary()
+              .Name("nv_inference_request_summary_us")
+              .Help("Summary of inference request duration in microseconds "
+                    "(includes cached requests)")
+              .Register(*registry_)),
+      inf_queue_summary_us_family_(
+          prometheus::BuildSummary()
+              .Name("nv_inference_queue_summary_us")
+              .Help("Summary of inference queuing duration in microseconds "
+                    "(includes cached requests)")
+              .Register(*registry_)),
+      inf_compute_input_summary_us_family_(
+          prometheus::BuildSummary()
+              .Name("nv_inference_compute_input_summary_us")
+              .Help("Cumulative compute input duration in microseconds (does "
+                    "not include cached requests)")
+              .Register(*registry_)),
+      inf_compute_infer_summary_us_family_(
+          prometheus::BuildSummary()
+              .Name("nv_inference_compute_infer_summary_us")
+              .Help("Cumulative compute inference duration in microseconds "
+                    "(does not include cached requests)")
+              .Register(*registry_)),
+      inf_compute_output_summary_us_family_(
+          prometheus::BuildSummary()
+              .Name("nv_inference_compute_output_summary_us")
+              .Help("Cumulative inference compute output duration in "
+                    "microseconds (does not include cached requests)")
+              .Register(*registry_)),
+
+      cache_hit_summary_us_model_family_(
+          prometheus::BuildSummary()
+              .Name("nv_cache_hit_summary_per_model")
+              .Help("Summary of cache hit counts/durations per model, in "
+                    "microseconds.")
+              .Register(*registry_)),
+
+      cache_miss_summary_us_model_family_(
+          prometheus::BuildSummary()
+              .Name("nv_cache_miss_summary_per_model")
+              .Help("Summary of cache miss counts/durations per model, in "
+                    "microseconds.")
               .Register(*registry_)),
 
 #ifdef TRITON_ENABLE_METRICS_GPU
@@ -192,10 +204,6 @@ Metrics::Metrics()
               .Help("GPU energy consumption in joules since the Triton Server "
                     "started")
               .Register(*registry_)),
-      gpu_uuid_to_deviceid_family_(prometheus::BuildGauge()
-                                       .Name("nv_gpu_uuid_to_deviceid")
-                                       .Help("GPU UUID to device mapping")
-                                       .Register(*registry_)),
 #endif  // TRITON_ENABLE_METRICS_GPU
 
 #ifdef TRITON_ENABLE_METRICS_CPU
@@ -214,8 +222,7 @@ Metrics::Metrics()
 #endif  // TRITON_ENABLE_METRICS_CPU
 
       metrics_enabled_(false), gpu_metrics_enabled_(false),
-      cpu_metrics_enabled_(false), cache_metrics_enabled_(false),
-      metrics_interval_ms_(2000)
+      cpu_metrics_enabled_(false), metrics_interval_ms_(2000)
 {
 }
 
@@ -229,7 +236,7 @@ Metrics::HashLabels(const std::map<std::string, std::string>& labels)
 
 Metrics::~Metrics()
 {
-  // Signal the cache thread to exit and then wait for it...
+  // Signal the poll thread to exit and then wait for it...
   if (poll_thread_ != nullptr) {
     poll_thread_exit_.store(true);
     poll_thread_->join();
@@ -262,6 +269,20 @@ Metrics::~Metrics()
   }
 }
 
+const MetricsConfigMap&
+Metrics::ConfigMap()
+{
+  auto singleton = GetSingleton();
+  return singleton->config_;
+}
+
+void
+Metrics::SetConfigMap(MetricsConfigMap cfg)
+{
+  auto singleton = GetSingleton();
+  singleton->config_ = cfg;
+}
+
 bool
 Metrics::Enabled()
 {
@@ -274,21 +295,6 @@ Metrics::EnableMetrics()
 {
   auto singleton = GetSingleton();
   singleton->metrics_enabled_ = true;
-}
-
-void
-Metrics::EnableCacheMetrics(
-    std::shared_ptr<RequestResponseCache> response_cache)
-{
-  auto singleton = GetSingleton();
-  // Ensure thread-safe enabling of Cache Metrics
-  std::lock_guard<std::mutex> lock(singleton->metrics_enabling_);
-  if (singleton->cache_metrics_enabled_) {
-    return;
-  }
-
-  singleton->InitializeCacheMetrics(response_cache);
-  singleton->cache_metrics_enabled_ = true;
 }
 
 void
@@ -330,8 +336,7 @@ Metrics::SetMetricsInterval(uint64_t metrics_interval_ms)
 }
 
 void
-Metrics::StartPollingThreadSingleton(
-    std::shared_ptr<RequestResponseCache> response_cache)
+Metrics::StartPollingThreadSingleton()
 {
   auto singleton = GetSingleton();
 
@@ -341,38 +346,31 @@ Metrics::StartPollingThreadSingleton(
     return;
   }
 
-  // Start thread for polling cache/dcgm metrics
-  singleton->StartPollingThread(response_cache);
+  // Start thread for polling cpu/gpu metrics
+  singleton->StartPollingThread();
 
   // Toggle flag so this function is only executed once
   singleton->poll_thread_started_ = true;
 }
 
 bool
-Metrics::StartPollingThread(
-    std::shared_ptr<RequestResponseCache> response_cache)
+Metrics::StartPollingThread()
 {
   // Nothing to poll if no polling metrics enabled, don't spawn a thread
-  if (!cache_metrics_enabled_ && !gpu_metrics_enabled_ &&
-      !cpu_metrics_enabled_) {
-    LOG_WARNING << "No polling metrics (CPU, GPU, Cache) are enabled. Will not "
+  if (!gpu_metrics_enabled_ && !cpu_metrics_enabled_) {
+    LOG_WARNING << "No polling metrics (CPU, GPU) are enabled. Will not "
                    "poll for them.";
     return false;
   }
   poll_thread_exit_.store(false);
 
   // Start a separate thread for polling metrics at specified interval
-  poll_thread_.reset(new std::thread([this, response_cache] {
+  poll_thread_.reset(new std::thread([this] {
     // Thread will update metrics indefinitely until exit flag set
     while (!poll_thread_exit_.load()) {
       // Sleep for metric interval
       std::this_thread::sleep_for(
           std::chrono::milliseconds(metrics_interval_ms_ / 2));
-
-      // Poll Response Cache metrics
-      if (cache_metrics_enabled_ && response_cache != nullptr) {
-        PollCacheMetrics(response_cache);
-      }
 
 #ifdef TRITON_ENABLE_METRICS_GPU
       // Poll DCGM GPU metrics
@@ -390,29 +388,6 @@ Metrics::StartPollingThread(
     }
   }));
 
-  return true;
-}
-
-bool
-Metrics::PollCacheMetrics(std::shared_ptr<RequestResponseCache> response_cache)
-{
-  if (response_cache == nullptr) {
-    LOG_WARNING << "error polling cache metrics, cache metrics will not be "
-                << "available: cache was nullptr";
-    return false;
-  }
-
-  // Update global cache metrics
-  cache_num_entries_global_->Set(response_cache->NumEntries());
-  cache_num_lookups_global_->Set(response_cache->NumLookups());
-  cache_num_hits_global_->Set(response_cache->NumHits());
-  cache_num_misses_global_->Set(response_cache->NumMisses());
-  cache_num_evictions_global_->Set(response_cache->NumEvictions());
-  cache_lookup_duration_us_global_->Set(
-      response_cache->TotalLookupLatencyNs() / 1000);
-  cache_insertion_duration_us_global_->Set(
-      response_cache->TotalInsertionLatencyNs() / 1000);
-  cache_util_global_->Set(response_cache->TotalUtilization());
   return true;
 }
 
@@ -702,32 +677,6 @@ Metrics::PollDcgmMetrics()
 }
 
 bool
-Metrics::InitializeCacheMetrics(
-    std::shared_ptr<RequestResponseCache> response_cache)
-{
-  if (response_cache == nullptr) {
-    LOG_WARNING
-        << "error initializing cache metrics, cache metrics will not be "
-        << "available: cache was nullptr";
-    return false;
-  }
-
-  const std::map<std::string, std::string> cache_labels;
-  cache_num_entries_global_ = &cache_num_entries_family_.Add(cache_labels);
-  cache_num_lookups_global_ = &cache_num_lookups_family_.Add(cache_labels);
-  cache_num_hits_global_ = &cache_num_hits_family_.Add(cache_labels);
-  cache_num_misses_global_ = &cache_num_misses_family_.Add(cache_labels);
-  cache_num_evictions_global_ = &cache_num_evictions_family_.Add(cache_labels);
-  cache_lookup_duration_us_global_ =
-      &cache_lookup_duration_us_family_.Add(cache_labels);
-  cache_insertion_duration_us_global_ =
-      &cache_insertion_duration_us_family_.Add(cache_labels);
-  cache_util_global_ = &cache_util_family_.Add(cache_labels);
-  LOG_INFO << "Collecting Response Cache metrics";
-  return true;
-}
-
-bool
 Metrics::InitializeCpuMetrics()
 {
 #ifndef TRITON_ENABLE_METRICS_CPU
@@ -853,8 +802,6 @@ Metrics::InitializeDcgmMetrics()
         << "Cannot get CUDA device count, GPU metrics will not be available";
     return false;
   }
-
-  std::vector<size_t> device_ids;
   for (int i = 0; i < cuda_gpu_count; ++i) {
     std::string pci_bus_id = "0000";  // pad 0's for uniformity
     char pcibusid_str[64];
@@ -870,17 +817,6 @@ Metrics::InitializeDcgmMetrics()
       LOG_INFO << "Collecting metrics for GPU " << i << ": "
                << pci_bus_id_to_device_name[pci_bus_id];
       auto& gpu_labels = pci_bus_id_to_gpu_labels[pci_bus_id];
-
-      // // debug
-      // for (auto p : gpu_labels) {
-      //   std::cout << "gpu_labels.k/v:" << p.first << "," << p.second << "\n";
-      // }
-
-      // std::cout << "---DEBUG:" << pci_bus_id << ","
-      //           << "," <<  pci_bus_id_to_dcgm_id[pci_bus_id] << "\n";
-
-      device_ids.push_back(pci_bus_id_to_dcgm_id[pci_bus_id]);
-
       gpu_utilization_.push_back(&gpu_utilization_family_.Add(gpu_labels));
       gpu_memory_total_.push_back(&gpu_memory_total_family_.Add(gpu_labels));
       gpu_memory_used_.push_back(&gpu_memory_used_family_.Add(gpu_labels));
@@ -888,20 +824,12 @@ Metrics::InitializeDcgmMetrics()
       gpu_power_limit_.push_back(&gpu_power_limit_family_.Add(gpu_labels));
       gpu_energy_consumption_.push_back(
           &gpu_energy_consumption_family_.Add(gpu_labels));
-
-      gpu_uuid_to_deviceid_.push_back(
-          &gpu_uuid_to_deviceid_family_.Add(gpu_labels));
-
       uint32_t dcgm_id = pci_bus_id_to_dcgm_id[pci_bus_id];
       dcgm_metadata_.cuda_ids_to_dcgm_ids_[i] = dcgm_id;
       dcgm_metadata_.available_cuda_gpu_ids_.emplace_back(i);
     } else {
       LOG_WARNING << "GPU metrics will not be available for device:" << i;
     }
-  }
-
-  for (int i = 0; i < cuda_gpu_count; ++i) {
-    gpu_uuid_to_deviceid_[i]->Set((int)device_ids[i]);
   }
 
   // create a gpu group

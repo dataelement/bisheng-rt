@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <time.h>
+
 #include <algorithm>
 #include <csignal>
 #include <iostream>
@@ -90,6 +91,7 @@ InferenceServer::InferenceServer()
   extensions_.push_back("system_shared_memory");
   extensions_.push_back("cuda_shared_memory");
   extensions_.push_back("binary_tensor_data");
+  extensions_.push_back("parameters");
 #ifdef TRITON_ENABLE_STATS
   extensions_.push_back("statistics");
 #endif  // TRITON_ENABLE_STATS
@@ -104,8 +106,8 @@ InferenceServer::InferenceServer()
   exit_timeout_secs_ = 30;
   pinned_memory_pool_size_ = 1 << 28;
   buffer_manager_thread_count_ = 0;
-  model_load_thread_count_ =
-      std::max(2u, 2 * std::thread::hardware_concurrency());
+  model_load_thread_count_ = 4;
+  enable_model_namespacing_ = false;
 
 #ifdef TRITON_ENABLE_GPU
   min_supported_compute_capability_ = TRITON_MIN_COMPUTE_CAPABILITY;
@@ -129,6 +131,7 @@ InferenceServer::Init()
         Status::Code::INVALID_ARG, "--model-repository must be specified");
   }
 
+  // RepoAgentManager
   if (repoagent_dir_.empty()) {
     ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
     return Status(
@@ -141,10 +144,39 @@ InferenceServer::Init()
     return status;
   }
 
+  // BackendManager
   status = TritonBackendManager::Create(&backend_manager_);
   if (!status.IsOk()) {
     ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
     return status;
+  }
+
+  // CacheManager
+  status = TritonCacheManager::Create(&cache_manager_, cache_dir_);
+  if (!status.IsOk()) {
+    ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
+    return status;
+  }
+
+  // Only a single global cache is supported at this time.
+  if (cache_config_map_.size() > 1) {
+    ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
+    return Status(
+        Status::Code::INVALID_ARG,
+        "found multiple cache configurations, but only a single cache is "
+        "currently supported");
+  }
+
+  // Initialize each cache with its respective config
+  for (const auto& iter : cache_config_map_) {
+    const auto& name = iter.first;
+    const auto& config = iter.second;
+    std::shared_ptr<TritonCache> cache;
+    status = cache_manager_->CreateCache(name, config, &cache);
+    if (!status.IsOk()) {
+      ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
+      return status;
+    }
   }
 
   if (buffer_manager_thread_count_ > 0) {
@@ -174,18 +206,6 @@ InferenceServer::Init()
   if (!status.IsOk()) {
     ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
     return status;
-  }
-
-  if (response_cache_byte_size_ > 0) {
-    std::unique_ptr<RequestResponseCache> local_response_cache;
-    status = RequestResponseCache::Create(
-        response_cache_byte_size_, &local_response_cache);
-    if (!status.IsOk()) {
-      ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
-      return status;
-    }
-
-    response_cache_ = std::move(local_response_cache);
   }
 
 
@@ -229,7 +249,8 @@ InferenceServer::Init()
   status = ModelRepositoryManager::Create(
       this, version_, model_repository_paths_, startup_models_,
       strict_model_config_, polling_enabled, model_control_enabled,
-      life_cycle_options, &model_repository_manager_, server_config_file_);
+      life_cycle_options, enable_model_namespacing_,
+      &model_repository_manager_);
   if (!status.IsOk()) {
     if (model_repository_manager_ == nullptr) {
       ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
@@ -246,6 +267,14 @@ InferenceServer::Init()
   }
 
   return status;
+}
+
+InferenceServer::~InferenceServer()
+{
+  PinnedMemoryManager::Reset();
+#ifdef TRITON_ENABLE_GPU
+  CudaMemoryManager::Reset();
+#endif  // TRITON_ENABLE_GPU
 }
 
 Status
@@ -469,7 +498,7 @@ InferenceServer::ModelReadyVersions(
     for (const auto& vs_pair : mv_pair.second) {
       versions.emplace_back(vs_pair.first);
     }
-    ready_model_versions->emplace(mv_pair.first, std::move(versions));
+    ready_model_versions->emplace(mv_pair.first.str(), std::move(versions));
   }
 
   return Status::Success;
@@ -502,7 +531,7 @@ InferenceServer::InferAsync(std::unique_ptr<InferenceRequest>& request)
 #ifdef TRITON_ENABLE_STATS
   request->CaptureRequestStartNs();
   INFER_TRACE_ACTIVITY(
-      request->Trace(), TRITONSERVER_TRACE_REQUEST_START,
+      request->TraceProxy(), TRITONSERVER_TRACE_REQUEST_START,
       request->RequestStartNs());
 #endif  // TRITON_ENABLE_STATS
 
@@ -587,7 +616,7 @@ InferenceServer::PrintBackendAndModelSummary()
     backends_table.InsertRow(backend_record);
   }
   std::string backends_table_string = backends_table.PrintTable();
-  LOG_VERBOSE(2) << backends_table_string;
+  LOG_INFO << backends_table_string;
 
   // Models Summary
   auto model_states = model_repository_manager_->ModelStates();
@@ -601,12 +630,12 @@ InferenceServer::PrintBackendAndModelSummary()
 
   for (const auto& model_state : model_states) {
     auto model_version_map = model_state.second;
-    std::string model_name = model_state.first;
+    ModelIdentifier model_id = model_state.first;
 
     // If model_version_map size is zero, no version is found for this model
     if (model_version_map.size() == 0) {
       std::vector<std::string> model_record;
-      model_record.emplace_back(model_name);
+      model_record.emplace_back(model_id.str());
       model_record.emplace_back("-");
       model_record.emplace_back("Not loaded: No model version was found");
       models_table.InsertRow(model_record);
@@ -622,7 +651,7 @@ InferenceServer::PrintBackendAndModelSummary()
           model_status += ": " + model_status_pair.second;
         }
 
-        model_record.emplace_back(model_name);
+        model_record.emplace_back(model_id.str());
         model_record.emplace_back(model_version);
         model_record.emplace_back(model_status);
         models_table.InsertRow(model_record);

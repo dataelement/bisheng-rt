@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -65,10 +65,18 @@ class Payload {
     return requests_;
   }
   uint64_t BatcherStartNs() { return batcher_start_ns_; }
-  void SetCallback(std::function<void()> OnCallback);
+  // Callback used for internal optimizations around payload dequeueing and
+  // execution, such as informing schedulers that payload slot(s) are available.
+  // Only a single callback of this form is used. For resource cleanup, see
+  // the OnRelease callbacks.
   void Callback();
-  void AddInternalReleaseCallback(std::function<void()>&& callback);
+  void SetCallback(std::function<void()> OnCallback);
+  // Callbacks used for any resource cleanup when a payload is about to be
+  // released. Some payloads may be released early before execution, such as
+  // paylods can be merged together for efficiency. Multiple release callbacks
+  // may be specified.
   void OnRelease();
+  void AddInternalReleaseCallback(std::function<void()>&& callback);
   void SetInstance(TritonModelInstance* model_instance);
   TritonModelInstance* GetInstance() { return instance_; }
   void MarkSaturated();
@@ -77,6 +85,7 @@ class Payload {
   {
     return &required_equal_inputs_;
   }
+  void** UserPointerAddr() { return &user_pointer_; }
 
   State GetState() { return state_; }
   void SetState(State state);
@@ -97,6 +106,9 @@ class Payload {
   RequiredEqualInputs required_equal_inputs_;
 
   bool saturated_;
+
+  // Pointer for use with user-supplied batching strategy.
+  void* user_pointer_ = nullptr;
 };
 
 }}  // namespace triton::core

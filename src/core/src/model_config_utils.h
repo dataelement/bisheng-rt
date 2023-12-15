@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include "filesystem/api.h"
 #include "model_config.pb.h"
 #include "status.h"
 #include "triton/common/model_config.h"
@@ -89,7 +90,7 @@ Status GetNormalizedModelConfig(
 /// Auto-complete backend related fields (platform, backend and default model
 /// filename) if not set, note that only Triton recognized backends will be
 /// checked.
-/// \param model_path The name of the model.
+/// \param model_name The name of the model.
 /// \param model_path The full-path to the directory containing the
 /// model configuration.
 /// \param config Returns the auto-completed model configuration.
@@ -116,6 +117,17 @@ Status NormalizeInstanceGroup(
     const double min_compute_capability,
     const std::vector<inference::ModelInstanceGroup>& preferred_groups,
     inference::ModelConfig* config);
+
+/// [FIXME] Remove once a more permanent solution is implemented  (DLIS-4211)
+/// Localize EXECUTION_ENV_PATH in python backend.
+/// \param model_path The full-path to the directory containing the model
+/// configuration, before localization.
+/// \param config The model configuration
+/// \param localized_model_dir The localized model directory
+/// \return The error status
+Status LocalizePythonBackendExecutionEnvironmentPath(
+    const std::string& model_path, inference::ModelConfig* config,
+    std::shared_ptr<LocalizedPath>* localized_model_dir);
 
 /// Auto-complete the instance count based on instance kind and backend name.
 /// \param group The instance group to set the count for.
@@ -266,5 +278,33 @@ TRITONSERVER_DataType DataTypeToTriton(const inference::DataType dtype);
 /// \param dtype The Triton server data type.
 /// \return The data type.
 inference::DataType TritonToDataType(const TRITONSERVER_DataType dtype);
+
+/// Check if non instance group settings on the model configs are equivalent.
+/// \param old_config The old model config.
+/// \param new_config The new model config.
+/// \return True if the model configs are equivalent in all non instance group
+/// settings. False if they differ in non instance group settings.
+bool EquivalentInNonInstanceGroupConfig(
+    const inference::ModelConfig& old_config,
+    const inference::ModelConfig& new_config);
+
+/// Check if both model instance configs are equivalent. 'name' and 'count'
+/// fields do not alter the functionality of the instance and hence excluded
+/// from checking.
+/// \param instance_config_lhs The left hand side instance config.
+/// \param instance_config_rhs The right hand side instance config.
+/// \return True if instance configs are the same without checking 'name' and
+/// 'count' fields. False if they are different without checking the fields.
+bool EquivalentInInstanceConfig(
+    const inference::ModelInstanceGroup& instance_config_lhs,
+    const inference::ModelInstanceGroup& instance_config_rhs);
+
+/// Obtain a signature identifying the instance config. 'name' and 'count'
+/// fields do not alter the functionality of the instance and hence excluded
+/// from altering the signature.
+/// \param instance_config The instance config.
+/// \return Signature identifying the instance config.
+std::string InstanceConfigSignature(
+    const inference::ModelInstanceGroup& instance_config);
 
 }}  // namespace triton::core

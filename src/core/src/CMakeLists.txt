@@ -1,4 +1,4 @@
-# Copyright 2019-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2019-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -67,15 +67,36 @@ endif() # TRITON_ENABLE_GPU
 #
 # Boost
 #
-find_package(Boost REQUIRED)
-message(STATUS "Using Boost ${Boost_VERSION}")
+# Minimum of 1.78 required for use of boost::span. This can eventually be
+# relaxed and replaced with std::span in C++20.
+#
+# find_package(Boost 1.78 REQUIRED)
+# message(STATUS "Using Boost ${Boost_VERSION}")
+
+include(ExternalProject)
+
+#
+# Boost
+#
+ExternalProject_Add(
+  boostorg
+  URL http://192.168.106.8/pkgs/boost_1_79_0.tar.gz
+  URL_HASH SHA256=273f1be93238a068aba4f9735a4a2b003019af067b9c183ed227780b8f36062c
+  PREFIX "boost-src"
+  CONFIGURE_COMMAND mkdir -p ${CMAKE_BINARY_DIR}/boost_output || echo "true" &&
+      ${CMAKE_COMMAND} -E copy_directory <SOURCE_DIR>/boost/ ${CMAKE_BINARY_DIR}/boost_output/boost
+  INSTALL_COMMAND ""
+  BUILD_COMMAND ""
+)
+set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost_output")
+message(STATUS "Using Boost ${boostorg_INCLUDE_DIRS}")
 
 #
 # Protobuf
 #
 set(protobuf_MODULE_COMPATIBLE TRUE CACHE BOOL "protobuf_MODULE_COMPATIBLE" FORCE)
 find_package(Protobuf CONFIG REQUIRED)
-message(STATUS "Using protobuf ${Protobuf_VERSION}")
+message(STATUS "---Using protobuf ${Protobuf_VERSION}")
 
 #
 # Prometheus
@@ -97,8 +118,17 @@ endif() # TRITON_ENABLE_GCS
 # S3
 #
 if(${TRITON_ENABLE_S3})
+  find_package(ZLIB REQUIRED)
   find_package(AWSSDK REQUIRED COMPONENTS s3)
   message(STATUS "Using aws-sdk-cpp ${AWSSDK_VERSION}")
+endif()
+
+#
+# Azure Storage
+#
+if(${TRITON_ENABLE_AZURE_STORAGE})
+  find_package(azure-storage-blobs-cpp CONFIG REQUIRED)
+  message(STATUS "Using Azure storage blobs ${azure-storage-blobs-cpp_VERSION}")
 endif()
 
 configure_file(libtritonserver.ldscript libtritonserver.ldscript COPYONLY)
@@ -111,11 +141,13 @@ set(
   backend_model.cc
   backend_model_instance.cc
   buffer_attributes.cc
+  cache_entry.cc
+  cache_manager.cc
   cuda_utils.cc
   dynamic_batch_scheduler.cc
   ensemble_scheduler.cc
   ensemble_utils.cc
-  filesystem.cc
+  filesystem/api.cc
   infer_parameter.cc
   infer_request.cc
   infer_response.cc
@@ -136,13 +168,13 @@ set(
   pinned_memory_manager.cc
   rate_limiter.cc
   repo_agent.cc
-  response_cache.cc
   scheduler_utils.cc
   sequence_batch_scheduler.cc
   sequence_state.cc
   server.cc
   shared_library.cc
   status.cc
+  tritoncache.cc
   tritonserver.cc
 )
 
@@ -154,12 +186,14 @@ set(
   backend_model.h
   backend_model_instance.h
   buffer_attributes.h
+  cache_entry.h
+  cache_manager.h
   constants.h
   cuda_utils.h
   dynamic_batch_scheduler.h
   ensemble_scheduler.h
   ensemble_utils.h
-  filesystem.h
+  filesystem/api.h
   infer_parameter.h
   infer_request.h
   infer_response.h
@@ -181,7 +215,6 @@ set(
   rate_limiter.h
   repo_agent.h
   response_allocator.h
-  response_cache.h
   scheduler.h
   scheduler_utils.h
   sequence_batch_scheduler.h
@@ -230,6 +263,9 @@ add_library(
   TritonCore::triton-core ALIAS triton-core
 )
 
+add_dependencies(triton-core boostorg)
+
+
 target_compile_features(triton-core PRIVATE cxx_std_11)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   message("Using MSVC as compiler, default target on Windows 10. "
@@ -269,7 +305,7 @@ target_include_directories(
   triton-core
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
-    ${Boost_INCLUDE_DIRS}
+    ${boostorg_INCLUDE_DIRS}
     ${Protobuf_INCLUDE_DIRS}
 )
 
@@ -294,8 +330,9 @@ if(${TRITON_ENABLE_GCS})
     PRIVATE $<TARGET_PROPERTY:google-cloud-cpp::storage,INTERFACE_INCLUDE_DIRECTORIES>
   )
   if (NOT WIN32)
+    # [WIP] still needed?
     set_source_files_properties(
-      filesystem.cc
+      filesystem/api.cc
       PROPERTIES
         COMPILE_FLAGS -Wno-missing-field-initializers
     )
@@ -312,7 +349,7 @@ endif()
 if(${TRITON_ENABLE_AZURE_STORAGE})
   target_include_directories(
     triton-core
-    PRIVATE ${azure-storage-cpplite_DIR}/include
+    PRIVATE $<TARGET_PROPERTY:Azure::azure-storage-blobs,INTERFACE_INCLUDE_DIRECTORIES>
   )
 endif() # TRITON_ENABLE_AZURE_STORAGE
 
@@ -442,8 +479,6 @@ target_link_libraries(
     triton-common-logging            # from repo-common
     triton-common-json               # from repo-common
     triton-common-table-printer      # from repo-common
-    triton-common-cipher             # from repo-common
-    triton-common-fs                 # from repo-common
     protobuf::libprotobuf
     ${RE2_LIBRARY}
 )
@@ -484,10 +519,7 @@ if(${TRITON_ENABLE_AZURE_STORAGE})
   target_link_libraries(
     triton-core
     PRIVATE
-      -L${azure-storage-cpplite_DIR}/lib
-      -lazure-storage-lite
-      -luuid
-      -lcurl
+      Azure::azure-storage-blobs
   )
 endif() # TRITON_ENABLE_AZURE_STORAGE
 
@@ -517,7 +549,7 @@ install(
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Currently unit tests do not build for windows...
-if (NOT WIN32)
-  add_subdirectory(test test)
-endif() # NOT WIN32
+# # Currently unit tests do not build for windows...
+# if (NOT WIN32)
+#   add_subdirectory(test test)
+# endif() # NOT WIN32

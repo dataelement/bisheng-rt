@@ -1,4 +1,4 @@
-// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -39,6 +39,14 @@
 
 namespace triton { namespace core {
 
+uint64_t
+CaptureTimeNs()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
 bool
 IsStaleState(Payload::State payload_state)
 {
@@ -47,16 +55,29 @@ IsStaleState(Payload::State payload_state)
       (payload_state == Payload::State::RELEASED));
 }
 
+void
+FinishSkippedRequests(
+    std::vector<std::deque<std::unique_ptr<InferenceRequest>>>&& requests,
+    const Status& response_status)
+{
+  for (auto& queue : requests) {
+    for (auto& request : queue) {
+      InferenceRequest::RespondIfError(request, response_status, true);
+    }
+  }
+}
+
 DynamicBatchScheduler::DynamicBatchScheduler(
     TritonModel* model, TritonModelInstance* model_instance,
     const bool dynamic_batching_enabled, const int32_t max_batch_size,
     const std::unordered_map<std::string, bool>& enforce_equal_shape_tensors,
-    const bool preserve_ordering, const bool response_cache_enable,
+    const bool preserve_ordering,
     const std::set<int32_t>& preferred_batch_sizes,
     const uint64_t max_queue_delay_microseconds,
     const inference::ModelQueuePolicy& default_queue_policy,
-    const uint32_t priority_levels, const ModelQueuePolicyMap& queue_policy_map)
+    const uint64_t priority_levels, const ModelQueuePolicyMap& queue_policy_map)
     : model_(model), model_instance_(model_instance),
+      model_name_(model->Name()),
       dynamic_batching_enabled_(dynamic_batching_enabled),
       queue_(default_queue_policy, priority_levels, queue_policy_map),
       stop_(false), max_batch_size_((size_t)std::max(1, max_batch_size)),
@@ -70,16 +91,8 @@ DynamicBatchScheduler::DynamicBatchScheduler(
   rate_limiter_ = model_->Server()->GetRateLimiter();
   // Both the server and model config should specify
   // caching enabled for model to utilize response cache.
-  response_cache_enabled_ =
-      (model_->Server()->ResponseCacheEnabled() && response_cache_enable);
-#ifdef TRITON_ENABLE_METRICS
-  // Initialize metric reporter for cache statistics if cache enabled
-  if (response_cache_enabled_) {
-    MetricModelReporter::Create(
-        model_->Name(), model_->Version(), METRIC_REPORTER_ID_RESPONSE_CACHE,
-        model_->Config().metric_tags(), &reporter_);
-  }
-#endif  // TRITON_ENABLE_METRICS
+  response_cache_enabled_ = model_->ResponseCacheEnabled() &&
+                            model_->Server()->ResponseCacheEnabled();
   max_preferred_batch_size_ = 0;
   for (const auto size : preferred_batch_sizes_) {
     max_preferred_batch_size_ =
@@ -99,7 +112,7 @@ DynamicBatchScheduler::Create(
     TritonModel* model, TritonModelInstance* model_instance, const int nice,
     const bool dynamic_batching_enabled, const int32_t max_batch_size,
     const std::unordered_map<std::string, bool>& enforce_equal_shape_tensors,
-    const bool preserve_ordering, const bool response_cache_enable,
+    const bool preserve_ordering,
     const std::set<int32_t>& preferred_batch_sizes,
     const uint64_t max_queue_delay_microseconds,
     std::unique_ptr<Scheduler>* scheduler)
@@ -113,8 +126,7 @@ DynamicBatchScheduler::Create(
 
   return Create(
       model, model_instance, nice, dynamic_batching_enabled, max_batch_size,
-      enforce_equal_shape_tensors, batcher_config, response_cache_enable,
-      scheduler);
+      enforce_equal_shape_tensors, batcher_config, scheduler);
 }
 
 Status
@@ -123,7 +135,7 @@ DynamicBatchScheduler::Create(
     const bool dynamic_batching_enabled, const int32_t max_batch_size,
     const std::unordered_map<std::string, bool>& enforce_equal_shape_tensors,
     const inference::ModelDynamicBatching& batcher_config,
-    const bool response_cache_enable, std::unique_ptr<Scheduler>* scheduler)
+    std::unique_ptr<Scheduler>* scheduler)
 {
   std::set<int32_t> preferred_batch_sizes;
   for (const auto size : batcher_config.preferred_batch_size()) {
@@ -133,8 +145,7 @@ DynamicBatchScheduler::Create(
   DynamicBatchScheduler* dyna_sched = new DynamicBatchScheduler(
       model, model_instance, dynamic_batching_enabled, max_batch_size,
       enforce_equal_shape_tensors, batcher_config.preserve_ordering(),
-      response_cache_enable, preferred_batch_sizes,
-      batcher_config.max_queue_delay_microseconds(),
+      preferred_batch_sizes, batcher_config.max_queue_delay_microseconds(),
       batcher_config.default_queue_policy(), batcher_config.priority_levels(),
       batcher_config.priority_queue_policy());
   std::unique_ptr<DynamicBatchScheduler> sched(dyna_sched);
@@ -178,7 +189,7 @@ DynamicBatchScheduler::Enqueue(std::unique_ptr<InferenceRequest>& request)
   if (request->QueueStartNs() == 0) {
     request->CaptureQueueStartNs();
     INFER_TRACE_ACTIVITY(
-        request->Trace(), TRITONSERVER_TRACE_QUEUE_START,
+        request->TraceProxy(), TRITONSERVER_TRACE_QUEUE_START,
         request->QueueStartNs());
 #ifdef TRITON_ENABLE_TRACING
     request->TraceInputTensors(
@@ -244,8 +255,11 @@ DynamicBatchScheduler::Enqueue(std::unique_ptr<InferenceRequest>& request)
       // equal to next preferred batch size, then wake batcher up to service
       // this request. We do the actual wake outside of the lock to avoid
       // having the woken thread immediately block on the lock
-      wake_batcher =
-          model_->Server()->GetRateLimiter()->PayloadSlotAvailable(model_);
+      // Explicitly force non-blocking to prevent waiting for the slot to
+      // be available.
+      wake_batcher = model_->Server()->GetRateLimiter()->PayloadSlotAvailable(
+          model_, model_instance_, queue_.SupportPrefetching(),
+          true /*force_non_blocking*/);
 
       // We may wake up runner less often if we don't enforce equal shape
       // within a batch, otherwise must always wake up runner to check it
@@ -272,6 +286,7 @@ DynamicBatchScheduler::NewPayload()
   curr_payload_ = model_->Server()->GetRateLimiter()->GetPayload(
       Payload::Operation::INFER_RUN, model_instance_);
   payload_saturated_ = false;
+  CustomBatchInit();
 }
 
 void
@@ -279,15 +294,15 @@ DynamicBatchScheduler::BatcherThread(const int nice)
 {
 #ifndef _WIN32
   if (setpriority(PRIO_PROCESS, syscall(SYS_gettid), nice) == 0) {
-    LOG_VERBOSE(1) << "Starting dynamic-batcher thread for " << model_->Name()
+    LOG_VERBOSE(1) << "Starting dynamic-batcher thread for " << model_name_
                    << " at nice " << nice << "...";
   } else {
-    LOG_VERBOSE(1) << "Starting dynamic-batcher thread for " << model_->Name()
+    LOG_VERBOSE(1) << "Starting dynamic-batcher thread for " << model_name_
                    << " at default nice (requested nice " << nice
                    << " failed)...";
   }
 #else
-  LOG_VERBOSE(1) << "Starting dynamic-batcher thread for " << model_->Name()
+  LOG_VERBOSE(1) << "Starting dynamic-batcher thread for " << model_name_
                  << " at default nice...";
 #endif
   // For debugging/testing, delay start of threads until the queue
@@ -297,21 +312,22 @@ DynamicBatchScheduler::BatcherThread(const int nice)
     const char* dstr = getenv("TRITONSERVER_DELAY_SCHEDULER");
     if (dstr != nullptr) {
       delay_cnt = atoi(dstr);
-      LOG_VERBOSE(1) << "Delaying batcher thread for " << model_->Name()
+      LOG_VERBOSE(1) << "Delaying batcher thread for " << model_name_
                      << " until " << delay_cnt << " queued requests...";
     }
   }
 
   auto wait_for_slots = [this]() {
-    return model_->Server()->GetRateLimiter()->PayloadSlotAvailable(model_);
+    return model_->Server()->GetRateLimiter()->PayloadSlotAvailable(
+        model_, model_instance_, queue_.SupportPrefetching());
   };
   const uint64_t default_wait_microseconds = 500 * 1000;
 
   while (!scheduler_thread_exit_.load()) {
-    NVTX_RANGE(nvtx_, "DynamicBatcher " + model_->Name());
+    NVTX_RANGE(nvtx_, "DynamicBatcher " + model_name_);
 
-    std::shared_ptr<std::vector<std::deque<std::unique_ptr<InferenceRequest>>>>
-        rejected_requests;
+    std::vector<std::deque<std::unique_ptr<InferenceRequest>>>
+        rejected_requests, cancelled_requests;
     uint64_t wait_microseconds = 0;
 
     // Hold the lock for as short a time as possible.
@@ -333,8 +349,8 @@ DynamicBatchScheduler::BatcherThread(const int nice)
         if (queue_.Size() >= delay_cnt) {
           delay_cnt = 0;
         }
-        LOG_VERBOSE(1) << "Delaying batcher thread " << model_->Name()
-                       << " until " << delay_cnt
+        LOG_VERBOSE(1) << "Delaying batcher thread " << model_name_ << " until "
+                       << delay_cnt
                        << " queued requests, current total = " << queue_.Size();
       } else if (queue_.Empty()) {
         wait_microseconds = default_wait_microseconds;
@@ -355,8 +371,10 @@ DynamicBatchScheduler::BatcherThread(const int nice)
           // Use dynamic batching to get request(s) to execute.
           wait_microseconds = GetDynamicBatch();
 
-          // Get requests that are rejected from searching dynamic batch.
-          queue_.ReleaseRejectedRequests(&rejected_requests);
+          // Get requests that are rejected or cancelled from searching dynamic
+          // batch.
+          queue_.ReleaseSkippedRequests(
+              &rejected_requests, &cancelled_requests);
 
           // Extract batch only if there is pending batch
           auto pending_batch_queue_cnt = queue_.PendingBatchCount();
@@ -405,27 +423,23 @@ DynamicBatchScheduler::BatcherThread(const int nice)
     if (curr_payload_->GetState() == Payload::State::READY) {
       auto callback = [this]() { cv_.notify_one(); };
       curr_payload_->SetCallback(callback);
+      {
+        std::lock_guard<std::mutex> exec_lock(*(curr_payload_->GetExecMutex()));
+        CustomBatchFini();
+      }
       model_->Server()->GetRateLimiter()->EnqueuePayload(model_, curr_payload_);
     }
 
-    // Finish rejected requests if any
-    if (rejected_requests != nullptr) {
-      static Status rejected_status =
-          Status(Status::Code::UNAVAILABLE, "Request timeout expired");
-      for (auto& rejected_queue : *rejected_requests) {
-        for (auto& rejected_request : rejected_queue) {
-          InferenceRequest::RespondIfError(
-              rejected_request, rejected_status, true);
-        }
-      }
-    }
+    // Finish rejected and cancelled requests if any
+    const static Status rejected_status =
+        Status(Status::Code::UNAVAILABLE, "Request timeout expired");
+    const static Status cancelled_status = Status(Status::Code::CANCELLED);
+    FinishSkippedRequests(std::move(rejected_requests), rejected_status);
+    FinishSkippedRequests(std::move(cancelled_requests), cancelled_status);
   }  // end runner loop
 
-  // Fix core generated in verbose mode
-  // LOG_VERBOSE(1) << "Stopping dynamic-batcher thread for " << model_->Name()
-  //                << "...";
-
-  LOG_VERBOSE(1) << "Stopping dynamic-batcher thread ...";
+  LOG_VERBOSE(1) << "Stopping dynamic-batcher thread for " << model_name_
+                 << "...";
 }
 
 uint64_t
@@ -440,9 +454,16 @@ DynamicBatchScheduler::GetDynamicBatch()
   // batch size would be exceeded or if the shape of the next request
   // does not match the shape of the pending batch.
   bool send_now = false;
+
+  // If the previous payload was not executed, reset the cursor to the start
+  // of the queue to re-iterate over it and find the ideal batch.
   if (!queue_.IsCursorValid()) {
     queue_.ResetCursor();
     pending_batch_size_ = 0;
+    if (CustomBatchEnabled()) {
+      CustomBatchFini();
+      CustomBatchInit();
+    }
   }
   size_t best_preferred_batch_size = 0;
   queued_batch_size_ -= queue_.ApplyPolicyAtCursor();
@@ -498,6 +519,16 @@ DynamicBatchScheduler::GetDynamicBatch()
       }
     }
 
+    if (CustomBatchEnabled()) {
+      bool should_include = false;
+      CustomBatchIncl(queue_.RequestAtCursor().get(), &should_include);
+      if (!should_include) {
+        curr_payload_->MarkSaturated();
+        send_now = true;
+        break;
+      }
+    }
+
     pending_batch_size_ += batch_size;
     queue_.AdvanceCursor();
     queued_batch_size_ -= queue_.ApplyPolicyAtCursor();
@@ -509,7 +540,7 @@ DynamicBatchScheduler::GetDynamicBatch()
     }
   }
 
-  // Obatin the age of the oldest pending request to compare with the maximum
+  // Obtain the age of the oldest pending request to compare with the maximum
   // batch queuing delay
   uint64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                         std::chrono::steady_clock::now().time_since_epoch())
@@ -518,8 +549,8 @@ DynamicBatchScheduler::GetDynamicBatch()
   bool delay_is_exceeded =
       (pending_batch_delay_ns_ != 0) && (delay_ns >= pending_batch_delay_ns_);
 
-  // If we found a preferred batch size and the queue delay hasn't been
-  // exceeded, then execute that.
+  // If we found a preferred batch size and the queue delay hasn't
+  // been exceeded, then execute that.
   if ((best_preferred_batch_size != 0) && !delay_is_exceeded) {
     if (pending_batch_delay_ns_ == 0) {
       payload_saturated_ = true;
@@ -603,31 +634,56 @@ DynamicBatchScheduler::DelegateResponse(
   std::lock_guard<std::mutex> lock(completion_queue_mtx_);
   completion_queue_.emplace_back();
   auto queue_slot = &completion_queue_.back();
-  // Pass raw ptr to lambda for tracking stats from cache and updating
-  // metric reporter on cache miss stats after insertion
-  InferenceRequest* raw_request_ptr = request.get();
+  // Cache plumbing
+  const std::string& key = request->CacheKey();
+  const bool is_key_set = request->CacheKeyIsSet();
+  const uint64_t lookup_end_ns = request->CacheLookupEndNs();
+  const uint64_t lookup_start_ns = request->CacheLookupStartNs();
 
   request->SetResponseDelegator(
-      [this, queue_slot, raw_request_ptr](
+      [this, queue_slot, key, is_key_set, lookup_end_ns, lookup_start_ns](
           std::unique_ptr<InferenceResponse>&& response, const uint32_t flags) {
-        if (response_cache_enabled_ && raw_request_ptr->CacheKeyIsSet()) {
+        if (response_cache_enabled_) {
+          // Logical error, the key should be set if caching is enabled
+          // for this model
+          if (!is_key_set) {
+            LOG_ERROR << "Request cache key was not set correctly.";
+          }
+
           // Cache insertion happens here because we need the backend to have
           // computed the inference response first in the case of cache miss
-          auto cache = model_->Server()->GetResponseCache();
-          auto status = cache->Insert(*response, raw_request_ptr);
+          auto cache = model_->Server()->CacheManager()->Cache();
+
+#ifdef TRITON_ENABLE_STATS
+          const uint64_t insert_start_ns = CaptureTimeNs();
+#endif  // TRITON_ENABLE_STATS
+
+          auto status = cache->Insert(response.get(), key);
+
+#ifdef TRITON_ENABLE_STATS
+          const uint64_t insert_end_ns = CaptureTimeNs();
+#endif  // TRITON_ENABLE_STATS
+
           bool cache_miss =
               (status.StatusCode() != Status::Code::ALREADY_EXISTS);
           if (cache_miss) {
 #ifdef TRITON_ENABLE_STATS
-            // Update cache miss statistics even on failure to insert
-            // as we still spend time on lookup and attempting to insert
-            raw_request_ptr->ReportStatisticsCacheMiss(reporter_.get());
-#endif  // TRITON_ENABLE_STATS
+            uint64_t lookup_ns = lookup_end_ns - lookup_start_ns;
+            // Logical error, this shouldn't happen
+            if (lookup_start_ns > lookup_end_ns) {
+              lookup_ns = 0;
+              LOG_ERROR << "Request lookup duration was not set correctly.";
+            }
 
+            uint64_t insert_ns = insert_end_ns - insert_start_ns;
+            uint64_t cache_miss_ns = lookup_ns + insert_ns;
+            // Use model_ to update stats directly because request object can be
+            // released by the backend before getting to this callback.
+            model_->MutableStatsAggregator()->UpdateSuccessCacheMiss(
+                model_->MetricReporter().get(), cache_miss_ns);
+#endif  // TRITON_ENABLE_STATS
             if (!status.IsOk()) {
-              LOG_ERROR << raw_request_ptr->LogRequest()
-                        << "Failed to insert request_hash ["
-                        << raw_request_ptr->CacheKey()
+              LOG_ERROR << "Failed to insert key [" << key
                         << "] into response cache: " << status.Message();
             }
           }  // Otherwise do nothing; we update cache hit statistics on Lookup
@@ -650,17 +706,36 @@ DynamicBatchScheduler::CacheLookUp(
     std::unique_ptr<InferenceRequest>& request,
     std::unique_ptr<InferenceResponse>& cached_response)
 {
-  auto cache = model_->Server()->GetResponseCache();
-  // Lookup request in cache
+  Status status;
+  auto cache = model_->Server()->CacheManager()->Cache();
   std::unique_ptr<InferenceResponse> local_response;
   request->ResponseFactory()->CreateResponse(&local_response);
-  auto status = cache->Lookup(local_response.get(), request.get());
+  // Hash request into cache key
+  std::string key = "";
+  if (!request->CacheKeyIsSet()) {
+    status = cache->Hash(*request, &key);
+    if (!status.IsOk()) {
+      LOG_ERROR << "Failed to hash request: " << status.Message();
+      return;
+    }
+    request->SetCacheKey(key);
+  } else {
+    key = request->CacheKey();
+  }
+
+  // Lookup and capture timestamps
+  {
+    request->CaptureCacheLookupStartNs();
+    status = cache->Lookup(local_response.get(), key);
+    request->CaptureCacheLookupEndNs();
+  }
+
   if (status.IsOk() && (local_response != nullptr)) {
     cached_response = std::move(local_response);
 #ifdef TRITON_ENABLE_STATS
     // Update model metrics/stats on cache hits
     // Backends will update metrics as normal on cache misses
-    request->ReportStatisticsCacheHit(reporter_.get());
+    request->ReportStatisticsCacheHit(model_->MetricReporter().get());
 #endif  // TRITON_ENABLE_STATS
   }
 }
@@ -697,4 +772,58 @@ DynamicBatchScheduler::FinalizeResponses()
     InferenceResponse::Send(std::move(response.first), response.second);
   }
 }
+
+bool
+DynamicBatchScheduler::CustomBatchEnabled() const
+{
+  return model_->ModelBatchInitFn();
+}
+
+void
+DynamicBatchScheduler::CustomBatchIncl(
+    InferenceRequest* request, bool* should_include)
+{
+  if (!CustomBatchEnabled())
+    return;
+  TRITONSERVER_Error* err = model_->ModelBatchInclFn()(
+      reinterpret_cast<TRITONBACKEND_Request*>(request),
+      *curr_payload_.get()->UserPointerAddr(), should_include);
+  if (err) {
+    LOG_ERROR << "Custom batching include function failed for model "
+              << model_->Name() << ": " << TRITONSERVER_ErrorMessage(err);
+    TRITONSERVER_ErrorDelete(err);
+  }
+}
+
+void
+DynamicBatchScheduler::CustomBatchInit()
+{
+  if (!CustomBatchEnabled())
+    return;
+  TRITONSERVER_Error* err = model_->ModelBatchInitFn()(
+      *model_->Batcher(), curr_payload_.get()->UserPointerAddr());
+  if (err != nullptr) {
+    LOG_ERROR << "Custom batching initialization function failed for model "
+              << model_->Name() << ": " << TRITONSERVER_ErrorMessage(err);
+    TRITONSERVER_ErrorDelete(err);
+  }
+}
+
+void
+DynamicBatchScheduler::CustomBatchFini()
+{
+  if (!CustomBatchEnabled() ||
+      *curr_payload_.get()->UserPointerAddr() == nullptr)
+    return;
+  TRITONSERVER_Error* err =
+      model_->ModelBatchFiniFn()(*curr_payload_.get()->UserPointerAddr());
+  *curr_payload_.get()->UserPointerAddr() = nullptr;
+
+  if (err != nullptr) {
+    LOG_ERROR << "Custom batching finalization function failed for model "
+              << model_->Name() << ": " << TRITONSERVER_ErrorMessage(err);
+    TRITONSERVER_ErrorDelete(err);
+  }
+}
+
 }}  // namespace triton::core

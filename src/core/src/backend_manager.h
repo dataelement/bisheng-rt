@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,11 +25,14 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
+#include <list>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
+
 #include "constants.h"
+#include "filesystem/api.h"
 #include "server_message.h"
 #include "status.h"
 #include "triton/common/model_config.h"
@@ -43,9 +46,15 @@ namespace triton { namespace core {
 class TritonBackend {
  public:
   struct Attribute {
-    Attribute() : exec_policy_(TRITONBACKEND_EXECUTION_BLOCKING) {}
+    Attribute()
+        : exec_policy_(TRITONBACKEND_EXECUTION_BLOCKING),
+          parallel_instance_loading_(false)
+    {
+    }
     TRITONBACKEND_ExecutionPolicy exec_policy_;
     std::vector<inference::ModelInstanceGroup> preferred_groups_;
+    // Whether the backend supports loading model instances in parallel
+    bool parallel_instance_loading_;
   };
   typedef TRITONSERVER_Error* (*TritonModelInitFn_t)(
       TRITONBACKEND_Model* model);
@@ -68,6 +77,7 @@ class TritonBackend {
 
   const std::string& Name() const { return name_; }
   const std::string& Directory() const { return dir_; }
+  const std::string& LibPath() const { return libpath_; }
   const TritonServerMessage& BackendConfig() const { return backend_config_; }
   const Attribute& BackendAttributes() const { return attributes_; }
 
@@ -82,6 +92,11 @@ class TritonBackend {
 
   void* State() { return state_; }
   void SetState(void* state) { state_ = state; }
+  bool IsPythonBackendBased() { return is_python_based_backend_; }
+  void SetPythonBasedBackendFlag(bool is_python_based_backend)
+  {
+    is_python_based_backend_ = is_python_based_backend;
+  }
 
   TritonModelInitFn_t ModelInitFn() const { return model_init_fn_; }
   TritonModelFiniFn_t ModelFiniFn() const { return model_fini_fn_; }
@@ -126,6 +141,8 @@ class TritonBackend {
   // Full path to the backend shared library.
   const std::string libpath_;
 
+  bool is_python_based_backend_;
+
   // Backend configuration as JSON
   TritonServerMessage backend_config_;
 
@@ -158,7 +175,7 @@ class TritonBackendManager {
       const std::string& name, const std::string& dir,
       const std::string& libpath,
       const triton::common::BackendCmdlineConfig& backend_cmdline_config,
-      std::shared_ptr<TritonBackend>* backend);
+      bool is_python_based_backend, std::shared_ptr<TritonBackend>* backend);
 
   Status BackendState(
       std::unique_ptr<

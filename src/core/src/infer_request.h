@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
 #include "buffer_attributes.h"
 #include "infer_response.h"
 #include "infer_stats.h"
@@ -37,6 +38,7 @@
 #include "response_allocator.h"
 #include "sequence_state.h"
 #include "status.h"
+#include "triton/common/logging.h"
 #include "triton/common/model_config.h"
 #include "tritonserver_apis.h"
 
@@ -56,6 +58,22 @@ class MetricModelReporter;
 //
 class InferenceRequest {
  public:
+  /// State for the request object.
+  enum class State {
+    // The request has been initialized, but not yet enqueued.
+    INITIALIZED,
+
+    // The request has been enqueued, but is not yet executing.
+    PENDING,
+
+    // The request has been picked up by a backend model instance for execution,
+    // but hasn't been released yet.
+    EXECUTING,
+
+    // The request has been released.
+    RELEASED
+  };
+
   // Input tensor
   class Input {
    public:
@@ -305,24 +323,30 @@ class InferenceRequest {
   // request is normalized.
   uint32_t BatchSize() const { return batch_size_; }
 
-  uint32_t Priority() const { return priority_; }
-  void SetPriority(uint32_t p);
+  uint64_t Priority() const { return priority_; }
+  void SetPriority(uint64_t p);
 
   uint64_t TimeoutMicroseconds() const { return timeout_us_; }
   void SetTimeoutMicroseconds(uint64_t t) { timeout_us_ = t; }
 
-  uint64_t CacheKey() const { return cache_key_; }
+  const std::string& CacheKey() const { return cache_key_; }
   // It is up to the user to update the cache_key_ if modifying any hashable
   // fields of the request after cache_key_is_set_ has been set to true.
-  void SetCacheKey(uint64_t key)
+  void SetCacheKey(const std::string& key)
   {
     cache_key_ = key;
     cache_key_is_set_ = true;
   }
   bool CacheKeyIsSet() const { return cache_key_is_set_; }
 
+  // Define and validate state transitions for request.
+  Status SetState(InferenceRequest::State state);
+
 #ifdef TRITON_ENABLE_TRACING
-  const std::shared_ptr<InferenceTraceProxy>& Trace() const { return trace_; }
+  const std::shared_ptr<InferenceTraceProxy>& TraceProxy() const
+  {
+    return trace_;
+  }
   std::shared_ptr<InferenceTraceProxy>* MutableTrace() { return &trace_; }
   void SetTrace(const std::shared_ptr<InferenceTraceProxy>& trace)
   {
@@ -338,6 +362,17 @@ class InferenceRequest {
   Status TraceInputTensors(
       TRITONSERVER_InferenceTraceActivity activity, const std::string& msg);
 #endif  // TRITON_ENABLE_TRACING
+
+  // Add a parameter to the request.
+  Status AddParameter(const char* name, const char* value);
+  Status AddParameter(const char* name, const int64_t value);
+  Status AddParameter(const char* name, const bool value);
+  Status SetParameters(const std::deque<InferenceParameter>& parameters);
+  const std::deque<InferenceParameter>& Parameters() const
+  {
+    return parameters_;
+  }
+
 
   // The original inputs are the inputs added to the request before
   // the inference execution (that is before
@@ -463,16 +498,17 @@ class InferenceRequest {
     return Status::Success;
   }
 
-  // Initialize the response factory that is to be used with any
-  // responses produced for this request.
+  // Initialize the response factory arguments that are going to be used with
+  // any responses produced for this request.
   Status SetResponseCallback(
       const ResponseAllocator* allocator, void* alloc_userp,
       TRITONSERVER_InferenceResponseCompleteFn_t response_fn,
       void* response_userp)
   {
-    response_factory_.reset(new InferenceResponseFactory(
-        model_shared_, id_, allocator, alloc_userp, response_fn, response_userp,
-        response_delegator_));
+    response_allocator_ = allocator;
+    alloc_userp_ = alloc_userp;
+    response_callback_ = response_fn;
+    response_userp_ = response_userp;
     return Status::Success;
   }
 
@@ -488,7 +524,7 @@ class InferenceRequest {
       int64_t* memory_type_id);
 
   // Add a callback to be invoked on releasing the request object from Triton.
-  // Multile callbacks can be added by calling this function in order,
+  // Multiple callbacks can be added by calling this function in order,
   // and they will be invoked in reversed order.
   Status AddInternalReleaseCallback(std::function<void()>&& callback)
   {
@@ -515,6 +551,13 @@ class InferenceRequest {
   }
 
   Status LoadInputStates();
+
+  void SetResponseFactory()
+  {
+    response_factory_.reset(new InferenceResponseFactory(
+        model_shared_, id_, response_allocator_, alloc_userp_,
+        response_callback_, response_userp_, response_delegator_));
+  }
 
   const std::shared_ptr<SequenceStates>& GetSequenceStates() const
   {
@@ -598,26 +641,6 @@ class InferenceRequest {
     return cache_lookup_end_ns_;
   }
 
-  uint64_t CacheInsertionStartNs() const { return cache_insertion_start_ns_; }
-  uint64_t CaptureCacheInsertionStartNs()
-  {
-    cache_insertion_start_ns_ =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count();
-    return cache_insertion_start_ns_;
-  }
-
-  uint64_t CacheInsertionEndNs() const { return cache_insertion_end_ns_; }
-  uint64_t CaptureCacheInsertionEndNs()
-  {
-    cache_insertion_end_ns_ =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-            .count();
-    return cache_insertion_end_ns_;
-  }
-
   uint64_t BatcherStartNs() const { return batcher_start_ns_; }
   uint64_t CaptureBatcherStartNs()
   {
@@ -653,13 +676,9 @@ class InferenceRequest {
       const uint64_t compute_output_duration_ns);
 
   // Report the statistics to stats collectors associated with the request on
-  // response cache hits.
+  // response cache hits. Cache miss stats will be updated through model object
+  // directly because the backend may release the request object.
   void ReportStatisticsCacheHit(MetricModelReporter* metric_reporter);
-
-  // Report the statistics to stats collectors associated with the request on
-  // response cache misses and update request duration to include cache
-  // insertion time.
-  void ReportStatisticsCacheMiss(MetricModelReporter* metric_reporter);
 
   // Statistics for each request are aggregated into the corresponding
   // model's statistics. Optionally this function may be used to
@@ -669,15 +688,59 @@ class InferenceRequest {
   {
     secondary_stats_aggregator_ = secondary_stats_aggregator;
   }
-
 #endif  // TRITON_ENABLE_STATS
+
+  // Mark the request as cancelled.
+  Status Cancel()
+  {
+    if (!response_factory_) {
+      return Status(
+          Status::Code::INTERNAL,
+          "It is not possible to cancel an inference request before calling "
+          "TRITONSERVER_InferAsync.");
+    }
+    response_factory_->Cancel();
+    return Status::Success;
+  }
+
+  // Check if the request is marked as cancelled. This does not indicate if the
+  // request is actually cancelled. The request is cancelled if and only if it
+  // is responded with a cancelled status.
+  Status IsCancelled(bool* is_cancelled)
+  {
+    if (!response_factory_) {
+      return Status(
+          Status::Code::INTERNAL,
+          "It is not possible to query cancellation status before calling "
+          "TRITONSERVER_InferAsync.");
+    }
+    *is_cancelled = response_factory_->IsCancelled();
+    return Status::Success;
+  }
+
+  bool IsCancelled()
+  {
+    bool is_cancelled = false;
+    Status status = IsCancelled(&is_cancelled);
+    if (!status.IsOk()) {
+      LOG_ERROR << status.Message();
+    }
+    return is_cancelled;
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(InferenceRequest);
   friend std::ostream& operator<<(
       std::ostream& out, const InferenceRequest& request);
+  friend std::ostream& operator<<(
+      std::ostream& out, const InferenceRequest::State& state);
+
 
   Status Normalize();
+
+  // Helpers for pending request metrics
+  void IncrementPendingRequestCount();
+  void DecrementPendingRequestCount();
 
   // Has anything in the request potentially changed in a way that
   // causes normalization to be required when preparing the request
@@ -705,9 +768,9 @@ class InferenceRequest {
   uint32_t flags_;
   SequenceId correlation_id_;
   uint32_t batch_size_;
-  uint32_t priority_;
+  uint64_t priority_;
   uint64_t timeout_us_;
-  uint64_t cache_key_ = 0;
+  std::string cache_key_ = "";
   // Helper to determine if request was successfully hashed
   // and cache_key_ field is valid
   bool cache_key_is_set_ = false;
@@ -760,6 +823,10 @@ class InferenceRequest {
   // Whether the stats of the request should be collected.
   bool collect_stats_;
 
+  // The parameters of the request. Use a deque so that there is no
+  // reallocation.
+  std::deque<InferenceParameter> parameters_;
+
 #ifdef TRITON_ENABLE_STATS
   uint64_t request_start_ns_;
   InferenceStatsAggregator* secondary_stats_aggregator_ = nullptr;
@@ -772,6 +839,18 @@ class InferenceRequest {
 
   // Sequence I/O states used for implicit state.
   std::shared_ptr<SequenceStates> sequence_states_;
+
+  // The state of the request.
+  std::atomic<InferenceRequest::State> state_;
+  // Whether this is a null request used for direct sequence batch padding or
+  // not.
+  bool null_request_;
+
+  // Response factory arguments
+  const ResponseAllocator* response_allocator_;
+  void* response_userp_;
+  void* alloc_userp_;
+  TRITONSERVER_InferenceResponseCompleteFn_t response_callback_;
 };
 
 std::ostream& operator<<(std::ostream& out, const InferenceRequest& request);

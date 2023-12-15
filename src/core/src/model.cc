@@ -1,4 +1,4 @@
-// Copyright 2018-2021, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -28,8 +28,9 @@
 
 #include <chrono>
 #include <future>
+
 #include "constants.h"
-#include "filesystem.h"
+#include "filesystem/api.h"
 #include "infer_request.h"
 #include "model_config_utils.h"
 #include "triton/common/logging.h"
@@ -88,20 +89,12 @@ Model::SetScheduler(std::unique_ptr<Scheduler> scheduler)
 }
 
 Status
-Model::Init()
+Model::Init(const bool is_config_provided)
 {
-  // If the model configuration has not been set, then look
-  // whether the config file was explicitly provided.
-  if (!set_model_config_) {
-    const auto config_path = JoinPath({model_dir_, kModelConfigPbTxt});
-    bool exists = false;
-    RETURN_IF_ERROR(FileExists(config_path, &exists));
-    if (!exists) {
-      return Status(
-          Status::Code::NOT_FOUND,
-          "unable to find the model configuration file '" + config_path +
-              "' for model '" + Name() + "'");
-    }
+  if (!set_model_config_ && !is_config_provided) {
+    return Status(
+        Status::Code::NOT_FOUND,
+        "model configuration is not provided for model '" + Name() + "'");
   }
 
   RETURN_IF_ERROR(ValidateModelConfig(config_, min_compute_capability_));
@@ -133,11 +126,17 @@ Model::Init()
   } else if (config_.has_ensemble_scheduling()) {
     // For ensemble, allow any priority level to pass through
     default_priority_level_ = 0;
-    max_priority_level_ = UINT32_MAX;
+    max_priority_level_ = UINT64_MAX;
   } else {
     default_priority_level_ = 0;
     max_priority_level_ = 0;
   }
+
+#ifdef TRITON_ENABLE_METRICS
+  MetricModelReporter::Create(
+      Name(), Version(), METRIC_REPORTER_ID_UTILITY, ResponseCacheEnabled(),
+      Config().metric_tags(), &reporter_);
+#endif  // TRITON_ENABLE_METRICS
 
   return Status::Success;
 }
