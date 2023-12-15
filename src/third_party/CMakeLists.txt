@@ -74,13 +74,28 @@ endif()
 set(HTTP_SERVER "192.168.106.8:8100")
 set(THIRD_PARTY_PREFIX "${TRITON_THIRD_PARTY_INSTALL_PREFIX}/common")
 
+
+# [FIXME] apply the same version to all third party, and pick a Triton default
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(THIRD_PARTY_CMAKE_CXX_STANDARD 17)
+else()
+  set(THIRD_PARTY_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+endif()
+
 #
 # Build libcurl
 #
+
+set(LIBCURL_EXTRA_BUILD_ARGS "")
+if (WIN32)
+  set(LIBCURL_EXTRA_BUILD_ARGS "-DCURL_USE_SCHANNEL:BOOL=ON")
+endif()
+message(STATUS "SET CMAKE_USE_LIBSSH2:${CMAKE_USE_LIBSSH2}")
+message(STATUS "SET CMAKE_USE_OPENSSL:${CMAKE_USE_OPENSSL}")
 ExternalProject_Add(curl
   PREFIX curl
   GIT_REPOSITORY "https://github.com/curl/curl.git"
-  GIT_TAG "curl-7_66_0"
+  GIT_TAG "curl-7_80_0"
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/curl/src/curl"
   EXCLUDE_FROM_ALL ON
   CMAKE_CACHE_ARGS
@@ -94,6 +109,7 @@ ExternalProject_Add(curl
     -DHTTP_ONLY:BOOL=ON
     -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
     -DCMAKE_INSTALL_PREFIX:PATH=${TRITON_THIRD_PARTY_INSTALL_PREFIX}/curl
+    ${LIBCURL_EXTRA_BUILD_ARGS}
   PATCH_COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/install_src.py --src <SOURCE_DIR> ${INSTALL_SRC_DEST_ARG}
 )
 
@@ -144,7 +160,7 @@ ExternalProject_Add(grpc-repo
 ExternalProject_Add(nlohmann-json
   PREFIX nlohmann-json
   GIT_REPOSITORY "https://github.com/nlohmann/json.git"
-  GIT_TAG "v3.9.0"
+  GIT_TAG "v3.10.5"
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/json"
   EXCLUDE_FROM_ALL ON
   CMAKE_CACHE_ARGS
@@ -203,6 +219,7 @@ ExternalProject_Add(absl
   DOWNLOAD_COMMAND ""
   CMAKE_CACHE_ARGS
     # -DCMAKE_CXX_STANDARD=14
+    # -DCMAKE_CXX_STANDARD:STRING=${THIRD_PARTY_CMAKE_CXX_STANDARD}
     -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=TRUE
     -DCMAKE_INSTALL_PREFIX:PATH=${TRITON_THIRD_PARTY_INSTALL_PREFIX}/absl
     -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
@@ -271,6 +288,7 @@ ExternalProject_Add(grpc
   EXCLUDE_FROM_ALL ON
   DOWNLOAD_COMMAND ""
   CMAKE_CACHE_ARGS
+    # -DCMAKE_CXX_STANDARD:STRING=${THIRD_PARTY_CMAKE_CXX_STANDARD}
     -DgRPC_INSTALL:BOOL=ON
     -DgRPC_BUILD_TESTS:BOOL=OFF
     -DgRPC_PROTOBUF_PROVIDER:STRING=package
@@ -487,7 +505,7 @@ ExternalProject_Add(cnmem
 ExternalProject_Add(aws-sdk-cpp
   PREFIX aws-sdk-cpp
   GIT_REPOSITORY "https://github.com/aws/aws-sdk-cpp.git"
-  GIT_TAG "1.8.186"
+  GIT_TAG "1.11.60"
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/aws-sdk-cpp/src/aws-sdk-cpp"
   EXCLUDE_FROM_ALL ON
   CMAKE_CACHE_ARGS
