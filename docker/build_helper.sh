@@ -548,7 +548,7 @@ case $opt in
     #   build_tensorrt_backend && \
     #   build_onnx_backend && \
     #   build_pt_backend
-    build_python_backend
+    build_dataelem_backend
     ;;
   *)
     echo "error parameters"

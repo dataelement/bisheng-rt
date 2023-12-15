@@ -2334,6 +2334,8 @@ TRITONSERVER_ServerNew(
   lserver->SetModelLoadThreadCount(loptions->ModelLoadThreadCount());
   lserver->SetModelNamespacingEnabled(loptions->ModelNamespacingEnabled());
 
+  lserver->SetServerConfigFile(loptions->ServerConfigFile());
+
   // SetBackendCmdlineConfig must be called after all AddBackendConfig calls
   // have completed.
   // Note that the auto complete config condition is reverted
@@ -2470,7 +2472,7 @@ TRITONSERVER_ServerNew(
       "cache_enabled", std::to_string(lserver->ResponseCacheEnabled())});
 
   std::string options_table_string = options_table.PrintTable();
-  LOG_INFO << options_table_string;
+  LOG_VERBOSE(2) << options_table_string;
 
   if (!status.IsOk()) {
     if (loptions->ExitOnError()) {
@@ -2990,6 +2992,12 @@ TRITONSERVER_ServerModelIndex(
       triton::common::TritonJson::ValueType::ARRAY);
 
   for (const auto& in : index) {
+    // filter internal directory in model repository
+    if (in.name_.compare("graphs") == 0 || in.name_.compare("resource") == 0 ||
+        in.name_.compare("op_defs") == 0) {
+      continue;
+    }
+
     triton::common::TritonJson::Value model_index(
         repository_index_json, triton::common::TritonJson::ValueType::OBJECT);
     RETURN_IF_STATUS_ERROR(model_index.AddStringRef("name", in.name_.c_str()));

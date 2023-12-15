@@ -438,8 +438,11 @@ DynamicBatchScheduler::BatcherThread(const int nice)
     FinishSkippedRequests(std::move(cancelled_requests), cancelled_status);
   }  // end runner loop
 
-  LOG_VERBOSE(1) << "Stopping dynamic-batcher thread for " << model_name_
-                 << "...";
+  // Fix core generated in verbose mode
+  // LOG_VERBOSE(1) << "Stopping dynamic-batcher thread for " << model_->Name()
+  //                << "...";
+
+  LOG_VERBOSE(1) << "Stopping dynamic-batcher thread ...";
 }
 
 uint64_t

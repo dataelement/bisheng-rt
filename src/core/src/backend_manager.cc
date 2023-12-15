@@ -229,7 +229,8 @@ TritonBackend::LoadBackendLibrary()
 extern "C" {
 
 TRITONAPI_DECLSPEC TRITONSERVER_Error*
-TRITONBACKEND_ApiVersion(uint32_t* major, uint32_t* minor)
+TRITONBACKEND_ApiVersion(
+    uint32_t* major, uint32_t* minor, uint32_t* patch, uint32_t* sub_patch)
 {
   *major = TRITONBACKEND_API_VERSION_MAJOR;
   *minor = TRITONBACKEND_API_VERSION_MINOR;
