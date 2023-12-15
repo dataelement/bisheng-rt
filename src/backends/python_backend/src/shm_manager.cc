@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,12 +24,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "shm_manager.h"
+
 #include <boost/interprocess/managed_external_buffer.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/interprocess/shared_memory_object.hpp>
 #include <iostream>
-
-#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
 
@@ -43,10 +43,13 @@ SharedMemoryManager::SharedMemoryManager(
 
   try {
     if (create) {
+      // Remove (if any) and create the region.
+      bi::shared_memory_object::remove(shm_region_name.c_str());
       shm_obj_ = std::make_unique<bi::shared_memory_object>(
-          bi::open_or_create, shm_region_name.c_str(), bi::read_write);
+          bi::create_only, shm_region_name.c_str(), bi::read_write);
       shm_obj_->truncate(shm_size);
     } else {
+      // Open the existing region.
       shm_obj_ = std::make_unique<bi::shared_memory_object>(
           bi::open_only, shm_region_name.c_str(), bi::read_write);
     }
@@ -73,7 +76,7 @@ SharedMemoryManager::SharedMemoryManager(
          "' to requested size (" + std::to_string(shm_size) +
          " bytes). If you are running Triton inside docker, use '--shm-size' "
          "flag to control the shared memory region size. Each Python backend "
-         "model instance requires at least 64MBs of shared memory. Error: " +
+         "model instance requires at least 1 MB of shared memory. Error: " +
          ex.what());
     // Remove the shared memory region if there was an error.
     bi::shared_memory_object::remove(shm_region_name.c_str());

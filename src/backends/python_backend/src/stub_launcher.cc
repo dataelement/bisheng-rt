@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "stub_launcher.h"
+
 #include "python_be.h"
 
 namespace triton { namespace backend { namespace python {
@@ -61,22 +62,25 @@ StubLauncher::Initialize(ModelState* model_state)
   model_state->ModelConfig().Write(&model_config_buffer_);
   is_decoupled_ = model_state->IsDecoupled();
   model_repository_path_ = model_state->RepositoryPath();
+  runtime_modeldir_ = model_state->RuntimeModelDir();
+  if (runtime_modeldir_.empty()) {
+    runtime_modeldir_ = "DEFAULT";
+  }
 
-  // Increase the stub process count to avoid shared memory region name
-  // collision
-  model_state->StateForBackend()->number_of_instance_inits++;
+  // Atomically increase and read the stub process count to avoid shared memory
+  // region name collision
+  int num_init = ++model_state->StateForBackend()->number_of_instance_inits;
   shm_region_name_ =
       model_state->StateForBackend()->shared_memory_region_prefix +
-      std::to_string(model_state->StateForBackend()->number_of_instance_inits);
+      std::to_string(num_init);
 
   model_version_ = model_state->Version();
 
   std::stringstream ss;
+  ss << model_repository_path_ << "/" << model_version_ << "/";
   std::string artifact_name;
   RETURN_IF_ERROR(model_state->ModelConfig().MemberAsString(
       "default_model_filename", &artifact_name));
-  ss << model_repository_path_ << "/" << model_version_ << "/";
-
   if (artifact_name.size() > 0) {
     ss << artifact_name;
   } else {
@@ -85,15 +89,6 @@ StubLauncher::Initialize(ModelState* model_state)
   }
 
   model_path_ = ss.str();
-  struct stat buffer;
-
-  // Check if model.py exists
-  if (stat(model_path_.c_str(), &buffer) != 0) {
-    return TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL,
-        ("model.py does not exist in the model repository path: " + model_path_)
-            .c_str());
-  }
 
   // Path to the extracted Python env
   std::string python_execution_env = "";
@@ -132,6 +127,8 @@ StubLauncher::Setup()
   ipc_control_ = nullptr;
   stub_message_queue_ = nullptr;
   parent_message_queue_ = nullptr;
+  stub_to_parent_mq_ = nullptr;
+  parent_to_stub_mq_ = nullptr;
   memory_manager_ = nullptr;
 
   try {
@@ -160,6 +157,14 @@ StubLauncher::Setup()
       parent_message_queue_ =
           MessageQueue<bi::managed_external_buffer::handle_t>::Create(
               shm_pool_, shm_message_queue_size_));
+  RETURN_IF_EXCEPTION(
+      stub_to_parent_mq_ =
+          MessageQueue<bi::managed_external_buffer::handle_t>::Create(
+              shm_pool_, shm_message_queue_size_));
+  RETURN_IF_EXCEPTION(
+      parent_to_stub_mq_ =
+          MessageQueue<bi::managed_external_buffer::handle_t>::Create(
+              shm_pool_, shm_message_queue_size_));
 
   std::unique_ptr<MessageQueue<intptr_t>> memory_manager_message_queue;
   RETURN_IF_EXCEPTION(
@@ -174,13 +179,17 @@ StubLauncher::Setup()
   memory_manager_ =
       std::make_unique<MemoryManager>(std::move(memory_manager_message_queue));
   ipc_control_->parent_message_queue = parent_message_queue_->ShmHandle();
+  ipc_control_->stub_to_parent_mq = stub_to_parent_mq_->ShmHandle();
   ipc_control_->stub_message_queue = stub_message_queue_->ShmHandle();
+  ipc_control_->parent_to_stub_mq = parent_to_stub_mq_->ShmHandle();
 
   new (&(ipc_control_->stub_health_mutex)) bi::interprocess_mutex;
   health_mutex_ = &(ipc_control_->stub_health_mutex);
 
   stub_message_queue_->ResetSemaphores();
   parent_message_queue_->ResetSemaphores();
+  stub_to_parent_mq_->ResetSemaphores();
+  parent_to_stub_mq_->ResetSemaphores();
 
   is_initialized_ = false;
 
@@ -190,13 +199,83 @@ StubLauncher::Setup()
 TRITONSERVER_Error*
 StubLauncher::Launch()
 {
-  RETURN_IF_ERROR(Setup());
-
   std::string stub_name;
   if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
     stub_name = model_name_;
   } else {
     stub_name = model_instance_name_;
+  }
+
+  const char* stub_args[4];
+  stub_args[0] = "bash";
+  stub_args[1] = "-c";
+  stub_args[3] = nullptr;  // Last argument must be nullptr
+
+  // Default Python backend stub
+  std::string python_backend_stub = python_lib_ + "/triton_python_backend_stub";
+
+  // Path to alternative Python backend stub
+  std::string model_python_backend_stub =
+      std::string(model_repository_path_) + "/triton_python_backend_stub";
+
+  if (FileExists(model_python_backend_stub)) {
+    python_backend_stub = model_python_backend_stub;
+  }
+
+  std::string bash_argument;
+
+  // This shared memory variable indicates whether the stub process should
+  // revert the LD_LIBRARY_PATH changes to avoid shared library issues in
+  // executables and libraries.
+  ipc_control_->uses_env = false;
+  if (python_execution_env_ != "") {
+    std::stringstream ss;
+
+    // Need to properly set the LD_LIBRARY_PATH so that Python environments
+    // using different python versions load properly.
+    ss << "source " << path_to_activate_
+       << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
+       << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
+       << " " << shm_region_name_ << " " << shm_default_byte_size_ << " "
+       << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
+       << " " << ipc_control_handle_ << " " << stub_name << " "
+       << runtime_modeldir_;
+    ipc_control_->uses_env = true;
+    bash_argument = ss.str();
+  } else {
+    std::stringstream ss;
+    ss << " exec " << python_backend_stub << " " << model_path_ << " "
+       << shm_region_name_ << " " << shm_default_byte_size_ << " "
+       << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
+       << " " << ipc_control_handle_ << " " << stub_name << " "
+       << runtime_modeldir_;
+    bash_argument = ss.str();
+  }
+  LOG_MESSAGE(
+      TRITONSERVER_LOG_VERBOSE,
+      (std::string("Starting Python backend stub: ") + bash_argument).c_str());
+
+  stub_args[2] = bash_argument.c_str();
+
+  int stub_status_code =
+      system((python_backend_stub + "> /dev/null 2>&1").c_str());
+
+  // If running stub process without any arguments returns any status code,
+  // other than 1, it can indicate a permission issue as a result of
+  // downloading the stub process from a cloud object storage service.
+  if (WEXITSTATUS(stub_status_code) != 1) {
+    // Give the execute permission for the triton_python_backend_stub to the
+    // owner.
+    int error = chmod(python_backend_stub.c_str(), S_IXUSR);
+    if (error != 0) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Failed to give execute permission to "
+                       "triton_python_backend_stub in ") +
+           python_backend_stub + " " + stub_name +
+           " Error No.: " + std::to_string(error))
+              .c_str());
+    }
   }
 
   pid_t pid = fork();
@@ -206,93 +285,20 @@ StubLauncher::Launch()
         "Failed to fork the stub process for auto-complete.");
   }
   if (pid == 0) {
-    const char* stub_args[4];
-    stub_args[0] = "bash";
-    stub_args[1] = "-c";
-    stub_args[3] = nullptr;  // Last argument must be nullptr
-
-    // Default Python backend stub
-    std::string python_backend_stub =
-        python_lib_ + "/triton_python_backend_stub";
-
-    // Path to alternative Python backend stub
-    std::string model_python_backend_stub =
-        std::string(model_repository_path_) + "/triton_python_backend_stub";
-
-    if (FileExists(model_python_backend_stub)) {
-      python_backend_stub = model_python_backend_stub;
-    }
-
-    std::string bash_argument;
-
-    // This shared memory variable indicates whether the stub process should
-    // revert the LD_LIBRARY_PATH changes to avoid shared library issues in
-    // executables and libraries.
-    ipc_control_->uses_env = false;
-    if (python_execution_env_ != "") {
-      std::stringstream ss;
-
-      // Need to properly set the LD_LIBRARY_PATH so that Python environments
-      // using different python versions load properly.
-      ss << "source " << path_to_activate_
-         << " && exec env LD_LIBRARY_PATH=" << path_to_libpython_
-         << ":$LD_LIBRARY_PATH " << python_backend_stub << " " << model_path_
-         << " " << shm_region_name_ << " " << shm_default_byte_size_ << " "
-         << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-         << " " << ipc_control_handle_ << " " << stub_name;
-      ipc_control_->uses_env = true;
-      bash_argument = ss.str();
-    } else {
-      std::stringstream ss;
-      ss << " exec " << python_backend_stub << " " << model_path_ << " "
-         << shm_region_name_ << " " << shm_default_byte_size_ << " "
-         << shm_growth_byte_size_ << " " << parent_pid_ << " " << python_lib_
-         << " " << ipc_control_handle_ << " " << stub_name;
-      bash_argument = ss.str();
-    }
-    LOG_MESSAGE(
-        TRITONSERVER_LOG_VERBOSE,
-        (std::string("Starting Python backend stub: ") + bash_argument)
-            .c_str());
-
-    stub_args[2] = bash_argument.c_str();
-
-    int stub_status_code =
-        system((python_backend_stub + "> /dev/null 2>&1").c_str());
-
-    // If running stub process without any arguments returns any status code,
-    // other than 1, it can indicate a permission issue as a result of
-    // downloading the stub process from a cloud object storage service.
-    if (WEXITSTATUS(stub_status_code) != 1) {
-      // Give the execute permission for the triton_python_backend_stub to the
-      // owner.
-      int error = chmod(python_backend_stub.c_str(), S_IXUSR);
-      if (error != 0) {
-        return TRITONSERVER_ErrorNew(
-            TRITONSERVER_ERROR_INTERNAL,
-            (std::string("Failed to give execute permission to "
-                         "triton_python_backend_stub in ") +
-             python_backend_stub + " " + stub_name +
-             " Error No.: " + std::to_string(error))
-                .c_str());
-      }
-    }
-
-    if (execvp("bash", (char**)stub_args) != 0) {
-      std::stringstream ss;
-      ss << "Failed to run python backend stub. Errno = " << errno << '\n'
-         << "Python backend stub path: " << python_backend_stub << '\n'
-         << "Shared Memory Region Name: " << shm_region_name_ << '\n'
-         << "Shared Memory Default Byte Size: " << shm_default_byte_size_
-         << '\n'
-         << "Shared Memory Growth Byte Size: " << shm_growth_byte_size_ << '\n';
-      std::string log_message = ss.str();
-      LOG_MESSAGE(TRITONSERVER_LOG_ERROR, log_message.c_str());
-
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          (std::string("Failed to initialize ") + stub_name).c_str());
-    }
+    // Replace this child process with the new stub process.
+    execvp("bash", (char**)stub_args);
+    // execvp() never return if succeeded. Otherwise, an error has occurred.
+    std::stringstream ss;
+    ss << "Failed to run python backend stub. Errno = " << errno << '\n'
+       << "Python backend stub path: " << python_backend_stub << '\n'
+       << "Shared Memory Region Name: " << shm_region_name_ << '\n'
+       << "Shared Memory Default Byte Size: " << shm_default_byte_size_ << '\n'
+       << "Shared Memory Growth Byte Size: " << shm_growth_byte_size_ << '\n';
+    // Print the error message directly because the underlying mutexes in
+    // LOG_MESSAGE() could be forked when it is locked by other thread(s).
+    std::cerr << '\n' << ss.str() << '\n';
+    // Terminate the child execution immediately to avoid any issues.
+    _Exit(1);
   } else {
     ScopedDefer _([&] {
       // Push a dummy message to the message queue so that the stub
@@ -311,6 +317,18 @@ StubLauncher::Launch()
     });
 
     stub_pid_ = pid;
+
+    // The stub process would send two messages to the parent process during the
+    // initialization.
+    // 1. When the stub process's health monitoring thread has started.
+    // 2. When the initialization is fully completed and the Python model is
+    // loaded.
+    //
+    // The reason it is broken into two steps is that creation of the health
+    // monitoring thread may take longer which can make the server process think
+    // that the stub process is unhealthy and return early. Waiting until the
+    // health thread is spawn would make sure would prevent this issue.
+    parent_message_queue_->Pop();
 
     if (stub_process_kind_ == "AUTOCOMPLETE_STUB") {
       try {
@@ -419,8 +437,11 @@ StubLauncher::ModelInstanceStubProcess()
   initialize_message->Args() = initialize_map_handle;
   stub_message_queue_->Push(initialize_message->ShmHandle());
 
+  bi::managed_external_buffer::handle_t message;
+  RETURN_IF_ERROR(ReceiveMessageFromStub(message));
+
   std::unique_ptr<IPCMessage> initialize_response_message =
-      IPCMessage::LoadFromSharedMemory(shm_pool_, parent_message_queue_->Pop());
+      IPCMessage::LoadFromSharedMemory(shm_pool_, message);
 
   if (initialize_response_message->Command() != PYTHONSTUB_InitializeResponse) {
     return TRITONSERVER_ErrorNew(
@@ -511,6 +532,13 @@ StubLauncher::TerminateStub()
 }
 
 void
+StubLauncher::ClearQueues()
+{
+  stub_to_parent_mq_.reset();
+  parent_to_stub_mq_.reset();
+}
+
+void
 StubLauncher::KillStubProcess()
 {
   kill(stub_pid_, SIGKILL);
@@ -519,4 +547,57 @@ StubLauncher::KillStubProcess()
   stub_pid_ = 0;
 }
 
+TRITONSERVER_Error*
+StubLauncher::ReceiveMessageFromStub(
+    bi::managed_external_buffer::handle_t& message)
+{
+  bool success = false;
+  while (!success) {
+    uint64_t timeout_miliseconds = 1000;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() +
+          boost::posix_time::milliseconds(timeout_miliseconds);
+
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+
+      // Check if lock has been acquired.
+      if (lock) {
+        ipc_control_->stub_health = false;
+      } else {
+        // If it failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        return TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "Failed to obtain the health mutex.");
+      }
+    }
+
+    message = parent_message_queue_->Pop(
+        timeout_miliseconds /* duration ms */, success);
+
+    bool is_stub_alive = false;
+    {
+      boost::posix_time::ptime timeout =
+          boost::get_system_time() + boost::posix_time::seconds(1);
+      bi::scoped_lock<bi::interprocess_mutex> lock(*health_mutex_, timeout);
+      if (lock) {
+        is_stub_alive = ipc_control_->stub_health;
+      } else {
+        // If It failed to obtain the lock, it means that the stub has been
+        // stuck or exited while holding the health mutex lock.
+        is_stub_alive = false;
+      }
+    }
+
+    if (!success && !is_stub_alive) {
+      return TRITONSERVER_ErrorNew(
+          TRITONSERVER_ERROR_INTERNAL,
+          (std::string("Stub process '") + model_instance_name_ +
+           "' is not healthy.")
+              .c_str());
+    }
+  }
+
+  return nullptr;  // success
+}
 }}};  // namespace triton::backend::python

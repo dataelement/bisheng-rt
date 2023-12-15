@@ -27,12 +27,13 @@
 
 #include <string>
 #include <vector>
+
 #include "triton/core/tritonbackend.h"
 #include "triton/core/tritonserver.h"
 
 namespace triton { namespace backend {
 
-// Colletion of common properties that describes a buffer in Triton
+// Collection of common properties that describes a buffer in Triton
 struct MemoryDesc {
   MemoryDesc()
       : buffer_(nullptr), byte_size_(0), memory_type_(TRITONSERVER_MEMORY_CPU),
@@ -96,7 +97,7 @@ class BackendMemory {
 
   // Creates a BackendMemory object from a pre-allocated buffer. The buffer
   // is not owned by the object created with this function. Hence, for
-  // proper operation, the lifetime of the buffer should atleast extend till
+  // proper operation, the lifetime of the buffer should at least extend till
   // the corresponding BackendMemory.
   static TRITONSERVER_Error* Create(
       TRITONBACKEND_MemoryManager* manager, const AllocationType alloc_type,

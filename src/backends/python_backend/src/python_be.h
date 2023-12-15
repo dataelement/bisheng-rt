@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 #include <sys/vfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
 #include <array>
 #include <atomic>
 #include <boost/asio.hpp>
@@ -55,12 +56,16 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
+
 #include "infer_request.h"
 #include "infer_response.h"
 #include "ipc_message.h"
 #include "memory_manager.h"
 #include "message_queue.h"
+#include "metric.h"
+#include "metric_family.h"
 #include "pb_env.h"
 #include "pb_map.h"
 #include "pb_metric_reporter.h"
@@ -213,6 +218,7 @@ struct BackendState {
   std::string shared_memory_region_prefix;
   int64_t thread_pool_size;
   std::unique_ptr<EnvironmentManager> env_manager;
+  std::string runtime_modeldir;
 };
 
 class ModelState : public BackendModel {
@@ -232,6 +238,9 @@ class ModelState : public BackendModel {
   // Is decoupled API being used.
   bool IsDecoupled() { return decoupled_; }
 
+  // Returns the value in the `runtime_modeldir_` field
+  std::string RuntimeModelDir() { return runtime_modeldir_; }
+
   // Launch auto-complete stub process.
   TRITONSERVER_Error* LaunchAutoCompleteStubProcess();
 
@@ -247,6 +256,7 @@ class ModelState : public BackendModel {
   std::string python_execution_env_;
   bool force_cpu_only_input_tensors_;
   bool decoupled_;
+  std::string runtime_modeldir_;
   std::unique_ptr<StubLauncher> auto_complete_stub_;
 };
 
@@ -256,11 +266,11 @@ class ModelInstanceState : public BackendModelInstance {
 
   TRITONBACKEND_Model* triton_model_;
   std::unique_ptr<StubLauncher> model_instance_stub_;
-  std::vector<TRITONSERVER_InferenceResponse*> bls_inference_responses_;
-  std::mutex bls_responses_mutex_;
   std::vector<intptr_t> closed_requests_;
   std::mutex closed_requests_mutex_;
 
+  std::thread stub_to_parent_queue_monitor_;
+  bool stub_to_parent_thread_;
   // Decoupled monitor thread
   std::thread decoupled_monitor_;
   bool decoupled_thread_;
@@ -269,6 +279,8 @@ class ModelInstanceState : public BackendModelInstance {
   std::unique_ptr<IPCMessage> received_message_;
   std::vector<std::future<void>> futures_;
   std::unique_ptr<boost::asio::thread_pool> thread_pool_;
+  std::unordered_map<void*, std::shared_ptr<InferPayload>> infer_payload_;
+  std::unique_ptr<RequestExecutor> request_executor_;
 
  public:
   static TRITONSERVER_Error* Create(
@@ -287,9 +299,6 @@ class ModelInstanceState : public BackendModelInstance {
   bool IsStubProcessAlive();
 
   // Get a message from the stub process
-  TRITONSERVER_Error* ReceiveMessageFromStub(off_t& message);
-
-  // Get a message from the stub process
   void SendMessageAndReceiveResponse(
       off_t message, off_t& response, bool& restart,
       std::shared_ptr<std::vector<TRITONBACKEND_Response*>>& responses,
@@ -305,6 +314,13 @@ class ModelInstanceState : public BackendModelInstance {
   // function during the execute phase. No other thread should pop any message
   // from the message queue in the decoupled mode.
   void DecoupledMessageQueueMonitor();
+
+  // This function is executed on a separate thread and monitors the queue for
+  // message sent from stub to parent process.
+  void StubToParentMQMonitor();
+
+  // Process the log request.
+  void ProcessLogRequest(const std::unique_ptr<IPCMessage>& message);
 
   // Convert TRITONBACKEND_Input to Python backend tensors.
   TRITONSERVER_Error* GetInputTensor(
@@ -326,7 +342,8 @@ class ModelInstanceState : public BackendModelInstance {
   bool ExistsInClosedRequests(intptr_t closed_request);
 
   // Execute a BLS Request
-  void ExecuteBLSRequest(std::shared_ptr<IPCMessage> ipc_message);
+  void ExecuteBLSRequest(
+      std::shared_ptr<IPCMessage> ipc_message, const bool is_stream);
 
   // Cleanup BLS responses
   void CleanupBLSResponses();
@@ -353,5 +370,50 @@ class ModelInstanceState : public BackendModelInstance {
 
   // Model instance stub
   std::unique_ptr<StubLauncher>& Stub() { return model_instance_stub_; }
+
+  // Stop the stub_to_parent_queue_monitor thread
+  void TerminateMonitor();
+
+  // Start the stub_to_parent_queue_monitor thread
+  void StartMonitor();
+
+  // Send bls decoupled response to the stub process
+  void SendBLSDecoupledResponse(std::unique_ptr<InferResponse> infer_response);
+
+  // Prepare the response batch object
+  void PrepareResponseBatch(
+      ResponseBatch** response_batch,
+      AllocatedSharedMemory<char>& response_batch_shm,
+      std::unique_ptr<IPCMessage>* ipc_message,
+      bi::managed_external_buffer::handle_t** response_handle);
+
+  // Prepare the response handle
+  void PrepareResponseHandle(
+      std::unique_ptr<InferResponse>* infer_response,
+      bi::managed_external_buffer::handle_t* response_handle);
+
+  // Process the bls decoupled cleanup request
+  void ProcessBLSCleanupRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process request cancellation query
+  void ProcessIsRequestCancelled(const std::unique_ptr<IPCMessage>& message);
+
+  // Process a message. The function 'request_handler' is invoked
+  // to handle the request. T should be either 'MetricFamily', 'Metric' or
+  // 'ModelLoader', and MessageType should be either 'MetricFamilyMessage',
+  // 'MetricMessage' or 'ModelLoaderMessage'.
+  template <typename T, typename MessageType>
+  void ProcessMessage(
+      const std::unique_ptr<IPCMessage>& message,
+      std::function<void(std::unique_ptr<T>&, MessageType*)> request_handler);
+
+  // Process a metric family request
+  void ProcessMetricFamilyRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process a metric request
+  void ProcessMetricRequest(const std::unique_ptr<IPCMessage>& message);
+
+  // Process a model control request
+  void ProcessModelControlRequest(const std::unique_ptr<IPCMessage>& message);
 };
 }}}  // namespace triton::backend::python

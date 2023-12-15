@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,8 @@
 #pragma once
 
 #include <memory>
+
+#include "infer_payload.h"
 #include "infer_request.h"
 #include "infer_response.h"
 
@@ -41,9 +43,9 @@ class RequestExecutor {
   std::unique_ptr<SharedMemoryManager>& shm_pool_;
 
  public:
-  std::unique_ptr<InferResponse> Infer(
-      const std::shared_ptr<InferRequest>& infer_request,
-      TRITONSERVER_InferenceResponse** response);
+  std::future<std::unique_ptr<InferResponse>> Infer(
+      std::shared_ptr<InferRequest>& infer_request,
+      std::shared_ptr<InferPayload>& infer_payload);
 
   RequestExecutor(
       std::unique_ptr<SharedMemoryManager>& shm_pool,

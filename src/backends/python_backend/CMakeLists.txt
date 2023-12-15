@@ -1,4 +1,4 @@
-# Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -42,10 +42,14 @@ set(TRITON_BACKEND_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
 set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 #
 # Dependencies
 #
-# FetchContent's composibility isn't very good. We must include the
+# FetchContent's composability isn't very good. We must include the
 # transitive closure of all repos so that we can override the tag.
 #
 include(FetchContent)
@@ -67,35 +71,14 @@ FetchContent_Declare(
   SOURCE_DIR ${TRITON_SRC_DIR}/backend
 )
 
-# FetchContent_Declare(
-#   repo-common
-#   GIT_REPOSITORY https://github.com/triton-inference-server/common.git
-#   GIT_TAG ${TRITON_COMMON_REPO_TAG}
-# )
-# FetchContent_Declare(
-#   repo-core
-#   GIT_REPOSITORY https://github.com/triton-inference-server/core.git
-#   GIT_TAG ${TRITON_CORE_REPO_TAG}
-# )
-# FetchContent_Declare(
-#   repo-backend
-#   GIT_REPOSITORY https://github.com/triton-inference-server/backend.git
-#   GIT_TAG ${TRITON_BACKEND_REPO_TAG}
-# )
 FetchContent_MakeAvailable(repo-common repo-core repo-backend)
 
 FetchContent_Declare(
   pybind11
-  URL http://192.168.106.8/pkgs/pybind11-v2.6.tar.gz
-  URL_HASH SHA256=0abf84ff29e4fea7c3137dac5182900f71a150be341b7174685006912e72ca98
+  URL http://192.168.106.8/pkgs/pybind11-v2.10.0.tar.gz
+  URL_HASH SHA256=5c79d0067e4a0c5f25b11ddca61f91e2a2a9143897ac34e67561e0f80d3e7ea9 
 )
 
-# FetchContent_Declare(
-#   pybind11
-#   GIT_REPOSITORY "https://github.com/pybind/pybind11"
-#   GIT_TAG "v2.6"
-#   GIT_SHALLOW ON
-# )
 FetchContent_MakeAvailable(pybind11)
 
 #
@@ -103,11 +86,8 @@ FetchContent_MakeAvailable(pybind11)
 #
 FetchContent_Declare(
   dlpack
-  URL http://192.168.106.8/pkgs/dlpack-v0.5.tar.gz
-  URL_HASH SHA256=5d86b54a5e516e1fa3bbfaf9e60879b39eb223788f1968c206a2f5003b16e5bd
-  # GIT_REPOSITORY "https://github.com/dmlc/dlpack"
-  # GIT_TAG "v0.5"
-  # GIT_SHALLOW ON
+  URL http://192.168.106.8/pkgs/dlpack-v0.8.tar.gz
+  URL_HASH SHA256=a7566683117f099935b8c0df97e374b851ff797bd7d53ac13666187507473a04
 )
 FetchContent_MakeAvailable(dlpack)
 
@@ -116,8 +96,8 @@ FetchContent_MakeAvailable(dlpack)
 #
 ExternalProject_Add(
   boostorg
-  URL http://192.168.106.8/pkgs/boost_1_76_0.tar.gz
-  URL_HASH SHA256=7bd7ddceec1a1dfdcbdb3e609b60d01739c38390a5f956385a12f3122049f0ca
+  URL http://192.168.106.8/pkgs/boost_1_79_0.tar.gz
+  URL_HASH SHA256=273f1be93238a068aba4f9735a4a2b003019af067b9c183ed227780b8f36062c
   PREFIX "boost-src"
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E copy_directory
                     <SOURCE_DIR>/boost/ ${CMAKE_BINARY_DIR}/boost
@@ -125,6 +105,7 @@ ExternalProject_Add(
   BUILD_COMMAND ""
 )
 set(boostorg_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/boost/")
+
 
 #
 # CUDA
@@ -164,6 +145,8 @@ set(
   src/scoped_defer.h
   src/pb_error.cc
   src/pb_error.h
+  src/pb_log.cc
+  src/pb_log.h
   src/pb_memory.cc
   src/pb_memory.h
   src/pb_tensor.cc
@@ -173,6 +156,15 @@ set(
   src/shm_manager.cc
   src/shm_manager.h
   src/pb_exception.h
+  src/pb_preferred_memory.h
+  src/metric.h
+  src/metric.cc
+  src/metric_family.h
+  src/metric_family.cc
+  src/gpu_buffers.cc
+  src/gpu_buffers.h
+  src/model_loader.h
+  src/model_loader.cc
 )
 
 set(
@@ -189,6 +181,8 @@ set(
   src/request_executor.h
   src/stub_launcher.h
   src/stub_launcher.cc
+  src/infer_payload.h
+  src/infer_payload.cc
 )
 
 list(APPEND
@@ -209,6 +203,10 @@ set(
   src/response_sender.h
   src/pb_stub.h
   src/pb_stub.cc
+  src/pb_response_iterator.h
+  src/pb_response_iterator.cc
+  src/pb_cancel.cc
+  src/pb_cancel.h
 )
 
 list(APPEND
@@ -251,8 +249,8 @@ target_link_libraries(
     dlpack
     Threads::Threads
     triton-backend-utils          # from repo-backend
-    -ldl                          # dlopen
-    -lrt                          # shared memory 
+    ${CMAKE_DL_LIBS}              # dlopen and dlclose
+    -lrt                          # shared memory
     triton-core-serverstub        # from repo-core
     ZLIB::ZLIB
     -larchive
@@ -264,8 +262,9 @@ target_link_libraries(
    dlpack
    Threads::Threads
    triton-backend-utils           # from repo-backend
+   ${CMAKE_DL_LIBS}               # dlopen and dlclose
    pybind11::embed
-   -lrt                           # shared memory 
+   -lrt                           # shared memory
    -larchive                      # libarchive
 )
 

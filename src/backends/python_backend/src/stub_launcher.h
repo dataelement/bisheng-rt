@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #pragma once
 
 #include <unistd.h>
+
 #include <atomic>
 #include <boost/asio.hpp>
 #include <boost/asio/post.hpp>
@@ -40,6 +41,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 #include "ipc_message.h"
 #include "memory_manager.h"
 #include "message_queue.h"
@@ -97,6 +99,20 @@ class StubLauncher {
     return parent_message_queue_;
   }
 
+  // Stub to parent message queue
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  StubToParentMessageQueue()
+  {
+    return stub_to_parent_mq_;
+  }
+
+  // Parent to stub message queue
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>&
+  ParentToStubMessageQueue()
+  {
+    return parent_to_stub_mq_;
+  }
+
   // Memory Manager
   std::unique_ptr<MemoryManager>& GetMemoryManager() { return memory_manager_; }
 
@@ -125,8 +141,15 @@ class StubLauncher {
   // Destruct Stub process
   void TerminateStub();
 
+  // Reset log queue and bls decoupled queue pointers
+  void ClearQueues();
+
   // Kill stub process
   void KillStubProcess();
+
+  // Get a message from the stub process
+  TRITONSERVER_Error* ReceiveMessageFromStub(
+      bi::managed_external_buffer::handle_t& message);
 
  private:
   pid_t parent_pid_;
@@ -138,6 +161,7 @@ class StubLauncher {
   std::string shm_region_name_;
   std::string model_repository_path_;
   std::string model_path_;
+  std::string runtime_modeldir_;
   const std::string stub_process_kind_;
   std::string model_name_;
   const std::string model_instance_name_;
@@ -163,6 +187,10 @@ class StubLauncher {
       stub_message_queue_;
   std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
       parent_message_queue_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      stub_to_parent_mq_;
+  std::unique_ptr<MessageQueue<bi::managed_external_buffer::handle_t>>
+      parent_to_stub_mq_;
   std::unique_ptr<MemoryManager> memory_manager_;
   std::unique_ptr<IPCControlShm, std::function<void(IPCControlShm*)>>
       ipc_control_;

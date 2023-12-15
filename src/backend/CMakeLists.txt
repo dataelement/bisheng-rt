@@ -34,6 +34,8 @@ project(tritonbackend LANGUAGES C CXX)
 option(TRITON_ENABLE_GPU "Enable GPU support in backend utilities" ON)
 option(TRITON_ENABLE_MALI_GPU "Enable Arm MALI GPU support in backend utilities" OFF)
 option(TRITON_ENABLE_STATS "Include statistics collections in backend utilities" ON)
+# Default OFF unless backend explicitly request to use provided implementation
+option(TRITON_ENABLE_MEMORY_TRACKER "Include device memory tracker in backend utilities" OFF)
 
 set(TRITON_COMMON_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/common repo")
 set(TRITON_CORE_REPO_TAG "main" CACHE STRING "Tag for triton-inference-server/core repo")
@@ -42,23 +44,15 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+if(TRITON_ENABLE_MEMORY_TRACKER AND NOT TRITON_ENABLE_GPU)
+  message(WARNING "TRITON_ENABLE_MEMORY_TRACKER=ON requires TRITON_ENABLE_GPU=ON, TRITON_ENABLE_MEMORY_TRACKER will be disable")
+  set(TRITON_ENABLE_MEMORY_TRACKER OFF CACHE BOOL "Device memory tracker disabled" FORCE)
+endif()
+
 #
 # Dependencies
 #
 include(FetchContent)
-
-# FetchContent_Declare(
-#   repo-common
-#   GIT_REPOSITORY https://github.com/triton-inference-server/common.git
-#   GIT_TAG ${TRITON_COMMON_REPO_TAG}
-#   GIT_SHALLOW ON
-# )
-# FetchContent_Declare(
-#   repo-core
-#   GIT_REPOSITORY https://github.com/triton-inference-server/core.git
-#   GIT_TAG ${TRITON_CORE_REPO_TAG}
-#   GIT_SHALLOW ON
-# )
 
 FetchContent_Declare(
   repo-common
@@ -76,6 +70,7 @@ FetchContent_MakeAvailable(repo-common repo-core)
 # CUDA
 #
 if(${TRITON_ENABLE_GPU})
+  set(CUDA_USE_STATIC_CUDA_RUNTIME OFF)
   find_package(CUDAToolkit REQUIRED)
   find_package(CUDA REQUIRED)
   message(STATUS "Using CUDA ${CUDA_VERSION}")
@@ -91,7 +86,7 @@ endif() # TRITON_ENABLE_GPU
 #
 # Backend library containing useful source and utilities
 #
-set(SRC_FILES 
+set(SRC_FILES
   "src/backend_common.cc"
   "src/backend_input_collector.cc"
   "src/backend_memory.cc"
@@ -102,6 +97,9 @@ set(SRC_FILES
 
 if(${TRITON_ENABLE_GPU})
   set(SRC_FILES ${SRC_FILES} "src/kernel.h")
+  if(${TRITON_ENABLE_MEMORY_TRACKER})
+    set(SRC_FILES ${SRC_FILES} "src/device_memory_tracker.cc")
+  endif() # TRITON_ENABLE_MEMORY_TRACKER
 endif() # TRITON_ENABLE_GPU
 
 add_library(
@@ -119,7 +117,7 @@ if(${TRITON_ENABLE_GPU})
 
   set(CUDA_LIBRARIES PUBLIC ${CUDA_LIBRARIES})
   cuda_add_library(
-    kernel-library-new
+    kernel_library_new
     src/kernel.cu src/kernel.h
     OPTIONS -arch compute_60
     OPTIONS -code compute_60,sm_60,sm_61,sm_70,sm_75,sm_80,sm_86,sm_89,sm_90
@@ -156,10 +154,16 @@ target_compile_options(
 
 # TRITON_ENABLE_GPU exposed in header so set PUBLIC
 if(${TRITON_ENABLE_GPU})
-target_compile_definitions(
-  triton-backend-utils
-  PUBLIC TRITON_ENABLE_GPU=1
-)
+  target_compile_definitions(
+    triton-backend-utils
+    PUBLIC TRITON_ENABLE_GPU=1
+  )
+  if(${TRITON_ENABLE_MEMORY_TRACKER})
+    target_compile_definitions(
+      triton-backend-utils
+      PUBLIC TRITON_ENABLE_MEMORY_TRACKER=1
+    )
+  endif() # TRITON_ENABLE_MEMORY_TRACKER
 endif() # TRITON_ENABLE_GPU
 
 # TRITON_ENABLE_MALI_GPU exposed in header so set PUBLIC
@@ -200,8 +204,15 @@ if(${TRITON_ENABLE_GPU})
     PUBLIC
       CUDA::cudart
     PRIVATE
-    kernel-library-new
+      kernel_library_new
   )
+  if(${TRITON_ENABLE_MEMORY_TRACKER})
+    target_link_libraries(
+      triton-backend-utils
+      PUBLIC
+        CUDA::cupti
+    )
+  endif() # TRITON_ENABLE_MEMORY_TRACKER
 endif() # TRITON_ENABLE_GPU
 
 #
@@ -222,7 +233,7 @@ install(
 if(${TRITON_ENABLE_GPU})
   install(
     TARGETS
-      kernel-library-new
+      kernel_library_new
     EXPORT
       triton-backend-targets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
