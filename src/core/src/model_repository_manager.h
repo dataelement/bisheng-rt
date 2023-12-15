@@ -35,6 +35,7 @@
 #include "infer_parameter.h"
 #include "model_config.pb.h"
 #include "model_lifecycle.h"
+#include "ops_def.pb.h"
 #include "status.h"
 #include "triton/common/model_config.h"
 
@@ -394,7 +395,8 @@ class ModelRepositoryManager {
       const bool model_control_enabled,
       const ModelLifeCycleOptions& life_cycle_options,
       const bool enable_model_namespacing,
-      std::unique_ptr<ModelRepositoryManager>* model_repository_manager);
+      std::unique_ptr<ModelRepositoryManager>* model_repository_manager,
+      const std::string& server_config_file);
 
   /// Poll the model repository to determine the new set of models and
   /// compare with the current set. And serve the new set of models based
@@ -525,6 +527,11 @@ class ModelRepositoryManager {
       std::set<ModelIdentifier>* modified,
       std::set<ModelIdentifier>* unmodified, ModelInfoMap* infos,
       bool* all_models_polled);
+
+  // New Logic for config control
+  Status LoadModelsFromConfig(
+      const std::string& config_file, bool* all_models_polled,
+      void* server_config_obj = nullptr);
 
   /// Poll the requested models in the model repository and
   /// compare with the current set. Return the additions, deletions,
