@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,32 +25,43 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
+
+#include "pb_string.h"
+#include "pb_utils.h"
+#include "scoped_defer.h"
 
 namespace triton { namespace backend { namespace python {
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
-
- public:
-  EnvironmentManager();
-
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+/// \param success indicating whether the process of fetching the GPU buffers
+/// was successful.
+/// \param error if success is equal to false, the error object will be set.
+/// \param buffers list of buffers elements.
+/// \param buffer_count the number of buffers.
+struct GPUBuffersShm {
+  bool success;
+  bi::managed_external_buffer::handle_t error;
+  bi::managed_external_buffer::handle_t buffers;
+  uint32_t buffer_count;
 };
 
-}}}  // namespace triton::backend::python
+/// Helper class to facilitate transfer of metadata associated
+/// the GPU buffers in shared memory.
+class GPUBuffersHelper {
+ public:
+  GPUBuffersHelper();
+  void AddBuffer(const bi::managed_external_buffer::handle_t& handle);
+  void Complete(std::unique_ptr<SharedMemoryManager>& shm_pool);
+  void SetError(
+      std::unique_ptr<SharedMemoryManager>& shm_pool, const std::string& error);
+  bi::managed_external_buffer::handle_t ShmHandle();
+
+ private:
+  AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_shm_;
+  std::vector<bi::managed_external_buffer::handle_t> buffers_;
+  AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+      buffers_handle_shm_;
+  std::unique_ptr<PbString> error_shm_;
+  bool completed_;
+};
+
+}}};  // namespace triton::backend::python

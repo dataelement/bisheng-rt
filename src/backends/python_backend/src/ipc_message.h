@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
+
 #include "shm_manager.h"
 
 
@@ -44,11 +45,25 @@ typedef enum PYTHONSTUB_commandtype_enum {
   PYTHONSTUB_FinalizeResponse,
   PYTHONSTUB_LoadGPUBuffers,
   PYTHONSTUB_InferExecRequest,
+  PYTHONSTUB_InferStreamExecRequest,
   PYTHONSTUB_InferExecResponse,
   PYTHONSTUB_ResponseSend,
   PYTHONSTUB_ResponseClose,
   PYTHONSTUB_AutoCompleteRequest,
-  PYTHONSTUB_AutoCompleteResponse
+  PYTHONSTUB_AutoCompleteResponse,
+  PYTHONSTUB_LogRequest,
+  PYTHONSTUB_CleanupRequest,
+  PYTHONSTUB_MetricFamilyRequestNew,
+  PYTHONSTUB_MetricFamilyRequestDelete,
+  PYTHONSTUB_MetricRequestNew,
+  PYTHONSTUB_MetricRequestDelete,
+  PYTHONSTUB_MetricRequestValue,
+  PYTHONSTUB_MetricRequestIncrement,
+  PYTHONSTUB_MetricRequestSet,
+  PYTHONSTUB_LoadModelRequest,
+  PYTHONSTUB_UnloadModelRequest,
+  PYTHONSTUB_ModelReadinessRequest,
+  PYTHONSTUB_IsRequestCancelled
 } PYTHONSTUB_CommandType;
 
 ///
@@ -89,7 +104,6 @@ class IPCMessage {
   bi::interprocess_mutex* ResponseMutex();
   bi::managed_external_buffer::handle_t& Args();
   bi::managed_external_buffer::handle_t ShmHandle();
-  void Release();
 
  private:
   AllocatedSharedMemory<IPCMessageShm> ipc_message_shm_;

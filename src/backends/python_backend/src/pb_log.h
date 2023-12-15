@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -32,44 +32,60 @@
 #include "pb_utils.h"
 
 namespace triton { namespace backend { namespace python {
-
-struct PbErrorShm {
-  TRITONSERVER_Error_Code code;
-  bi::managed_external_buffer::handle_t message_shm_handle;
-};
-
-class PbError {
+class PbLog {
  public:
-  PbError(
-      const std::string& message,
-      TRITONSERVER_Error_Code code = TRITONSERVER_ERROR_INTERNAL)
-      : code_(code), message_(message)
-  {
-  }
-  DISALLOW_COPY_AND_ASSIGN(PbError);
+  /// Create a PbLog instance
+  PbLog(
+      const std::string& filename, uint32_t line, const std::string& message,
+      LogLevel level);
 
-  TRITONSERVER_Error_Code Code();
+  /// Get the filename where the log was recorded
+  const std::string& Filename();
+
+  /// Get the log message
   const std::string& Message();
 
-  void SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool);
-  bi::managed_external_buffer::handle_t ShmHandle();
+  /// Get the log level of the message
+  const LogLevel& Level();
 
-  static std::shared_ptr<PbError> LoadFromSharedMemory(
+  /// Get the line number of the log message
+  const uint32_t& Line();
+
+ private:
+  std::string filename_;
+  uint32_t line_;
+  std::string message_;
+  LogLevel level_;
+};
+
+class PbLogShm {
+ public:
+  /// Save PbLog object to shared memory
+  static std::unique_ptr<PbLogShm> Create(
+      std::unique_ptr<SharedMemoryManager>& shm_pool,
+      const std::string& filename, const uint32_t& line,
+      const std::string& message, const LogLevel& level);
+
+  /// Load PbLog object to shared memory
+  static std::unique_ptr<PbLog> LoadFromSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool,
       bi::managed_external_buffer::handle_t handle);
 
+  /// Get the shared memory handle of the saved log message
+  bi::managed_external_buffer::handle_t ShmHandle();
+
+  /// Get a pointer to the saved log message
+  LogSendMessage* LogMessage();
+
  private:
-  PbError(
-      std::shared_ptr<PbString>&& message_shm,
-      AllocatedSharedMemory<PbErrorShm>&& error_shm,
-      TRITONSERVER_Error_Code code, std::string&& message);
+  AllocatedSharedMemory<LogSendMessage> log_container_shm_;
+  std::unique_ptr<PbString> filename_pb_string_;
+  std::unique_ptr<PbString> message_pb_string_;
 
-  std::shared_ptr<PbString> message_shm_;
-  AllocatedSharedMemory<PbErrorShm> error_shm_;
-  bi::managed_external_buffer::handle_t shm_handle_;
+  LogSendMessage* log_container_shm_ptr_;
 
-  TRITONSERVER_Error_Code code_;
-  std::string message_;
+  PbLogShm(
+      AllocatedSharedMemory<LogSendMessage>& log_container_shm,
+      std::unique_ptr<PbString>& filename, std::unique_ptr<PbString>& message);
 };
-
 }}};  // namespace triton::backend::python

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,33 +24,71 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
+#include "infer_payload.h"
 
 namespace triton { namespace backend { namespace python {
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
+InferPayload::InferPayload(
+    const bool is_decoupled,
+    std::function<void(std::unique_ptr<InferResponse>)> callback)
+    : is_decoupled_(is_decoupled), is_promise_set_(false), callback_(callback)
+{
+  promise_.reset(new std::promise<std::unique_ptr<InferResponse>>());
+}
 
-bool FileExists(std::string& path);
+void
+InferPayload::SetValue(std::unique_ptr<InferResponse> infer_response)
+{
+  {
+    // Only set value to the promise with the first response. Call the callback
+    // function to send decoupled response to the stub.
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!is_promise_set_) {
+      is_promise_set_ = true;
+      promise_->set_value(std::move(infer_response));
+      return;
+    }
+  }
+  Callback(std::move(infer_response));
+}
 
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
+void
+InferPayload::SetFuture(
+    std::future<std::unique_ptr<InferResponse>>& response_future)
+{
+  response_future = promise_->get_future();
+}
 
- public:
-  EnvironmentManager();
+bool
+InferPayload::IsDecoupled()
+{
+  return is_decoupled_;
+}
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
-};
+bool
+InferPayload::IsPromiseSet()
+{
+  return is_promise_set_;
+}
+
+void
+InferPayload::Callback(std::unique_ptr<InferResponse> infer_response)
+{
+  return callback_(std::move(infer_response));
+}
+
+void
+InferPayload::SetResponseAllocUserp(
+    const ResponseAllocatorUserp& response_alloc_userp)
+{
+  response_alloc_userp_ =
+      std::make_shared<ResponseAllocatorUserp>(response_alloc_userp);
+}
+
+std::shared_ptr<ResponseAllocatorUserp>
+InferPayload::ResponseAllocUserp()
+{
+  return response_alloc_userp_;
+}
 
 }}}  // namespace triton::backend::python

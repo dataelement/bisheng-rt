@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -30,6 +30,7 @@
 #include <cuda.h>
 #endif  // TRITON_ENABLE_GPU
 #include <pthread.h>
+
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
 #include <climits>
@@ -38,6 +39,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
 #include "pb_exception.h"
 #include "shm_manager.h"
 #include "triton/backend/backend_common.h"
@@ -71,12 +73,14 @@ namespace bi = boost::interprocess;
     }                                                              \
     while (false)
 
-#define THROW_IF_TRITON_ERROR(X)                                          \
-  do {                                                                    \
-    TRITONSERVER_Error* tie_err__ = (X);                                  \
-    if (tie_err__ != nullptr) {                                           \
-      throw PythonBackendException(TRITONSERVER_ErrorMessage(tie_err__)); \
-    }                                                                     \
+#define THROW_IF_TRITON_ERROR(X)                                              \
+  do {                                                                        \
+    TRITONSERVER_Error* tie_err__ = (X);                                      \
+    if (tie_err__ != nullptr) {                                               \
+      auto error_message = std::string(TRITONSERVER_ErrorMessage(tie_err__)); \
+      TRITONSERVER_ErrorDelete(tie_err__);                                    \
+      throw PythonBackendException(error_message);                            \
+    }                                                                         \
   } while (false)
 
 #define THROW_IF_CUDA_ERROR(X)                          \
@@ -137,10 +141,18 @@ struct IPCControlShm {
   bi::interprocess_mutex stub_health_mutex;
   bi::managed_external_buffer::handle_t stub_message_queue;
   bi::managed_external_buffer::handle_t parent_message_queue;
+  bi::managed_external_buffer::handle_t stub_to_parent_mq;
+  bi::managed_external_buffer::handle_t parent_to_stub_mq;
   bi::managed_external_buffer::handle_t memory_manager_message_queue;
 };
 
-struct ResponseBatch {
+struct SendMessageBase {
+  bi::interprocess_mutex mu;
+  bi::interprocess_condition cv;
+  bool waiting_on_stub;
+};
+
+struct ResponseBatch : SendMessageBase {
   uint32_t batch_size;
   bi::managed_external_buffer::handle_t error;
   bool has_error;
@@ -151,6 +163,55 @@ struct ResponseBatch {
 
   // Indicates whether this error has a message or not.
   bool is_error_set;
+
+  uint32_t response_size;
+};
+
+enum LogLevel { INFO = 0, WARNING, ERROR, VERBOSE };
+
+enum MetricKind { COUNTER, GAUGE };
+
+struct LogSendMessage : SendMessageBase {
+  bi::managed_external_buffer::handle_t filename;
+  int32_t line;
+  bi::managed_external_buffer::handle_t log_message;
+  LogLevel level;
+};
+
+struct CleanupMessage : SendMessageBase {
+  void* id;
+};
+
+struct IsCancelledMessage : SendMessageBase {
+  intptr_t response_factory_address;
+  intptr_t request_address;
+  bool is_cancelled;
+};
+
+struct CustomMetricsMessage : SendMessageBase {
+  bi::managed_external_buffer::handle_t message;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  // This field is specifically utilized when making the
+  // 'PYTHONSTUB_MetricRequestValue' request. It is used to hold the metric
+  // value after the Python backend calls the Triton C API to retrieve the
+  // metric value and pass it back to the stub process.
+  double value;
+  // This field is specifically utilized when making the
+  // 'PYTHONSTUB_MetricFamilyRequestNew' or 'PYTHONSTUB_MetricRequestNew'
+  // requests. It is used to hold the memory address of
+  // TRITONSERVER_MetricFamily' or 'TRITONSERVER_Metric' objects created in the
+  // Python backend and pass back to the stub process.
+  void* address;
+};
+
+struct ModelLoaderMessage : SendMessageBase {
+  bi::managed_external_buffer::handle_t message;
+  bool has_error;
+  bool is_error_set;
+  bi::managed_external_buffer::handle_t error;
+  bool is_model_ready;
 };
 
 struct ResponseSenderBase {
@@ -167,11 +228,8 @@ struct ResponseSenderBase {
 struct ResponseSendMessage : ResponseSenderBase {
   bi::managed_external_buffer::handle_t response;
 
-  // GPU Buffers handle
+  // A shm handle to a GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
-
-  // GPU buffers count
-  uint32_t gpu_buffers_count;
 
   uint32_t flags;
 };
@@ -179,11 +237,8 @@ struct ResponseSendMessage : ResponseSenderBase {
 struct RequestBatch {
   uint32_t batch_size;
 
-  // GPU Buffers handle
+  // A shm handle to a GPUBuffersShm object.
   bi::managed_external_buffer::handle_t gpu_buffers_handle;
-
-  // GPU buffers count
-  uint32_t gpu_buffers_count;
 };
 
 #ifdef TRITON_ENABLE_GPU
@@ -198,16 +253,25 @@ class CUDAHandler {
  private:
   std::mutex mu_;
   void* dl_open_handle_ = nullptr;
+  std::string error_str_;
   CUresult (*cu_pointer_get_attribute_fn_)(
       CUdeviceptr*, CUpointer_attribute, CUdeviceptr) = nullptr;
   CUresult (*cu_get_error_string_fn_)(CUresult, const char**) = nullptr;
+  CUresult (*cu_init_fn_)(unsigned int) = nullptr;
+  CUresult (*cu_device_primary_ctx_get_state_fn_)(
+      CUdevice, unsigned int*, int*) = nullptr;
   CUDAHandler();
+
+  /// Check if a primary context has already been created for a device.
+  bool HasPrimaryContext(int device);
   ~CUDAHandler() noexcept(false);
 
  public:
   CUDAHandler(CUDAHandler const&) = delete;
   void operator=(CUDAHandler const&) = delete;
   bool IsAvailable();
+  const std::string& GetErrorString() const { return error_str_; }
+  void ClearErrorString() { return error_str_.clear(); }
   void PointerGetAttribute(
       CUdeviceptr* start_address, CUpointer_attribute attr,
       CUdeviceptr device_ptr);
@@ -215,7 +279,28 @@ class CUDAHandler {
       int64_t memory_type_id, cudaIpcMemHandle_t* cuda_mem_handle,
       void** data_ptr);
   void CloseCudaHandle(int64_t memory_type_id, void* data_ptr);
+
+  /// Set the device only if the primary context has already been created for
+  /// this device. Inspired from PyTorch's MaybeSetDevice.
+  /// \param device The cuda device index.
+  void MaybeSetDevice(int device);
 };
+
+
+/// A helper class to change the current device and restore the old context. The
+/// old context will be restored only if the primary context for that device is
+/// already created, otherwise the CUDA context will remain as the primary
+/// context of 'device'.
+class ScopedSetDevice {
+ public:
+  ScopedSetDevice(int device);
+  ~ScopedSetDevice();
+
+ private:
+  int device_;
+  int current_device_;
+};
+
 #endif  // TRITON_ENABLE_GPU
 
 #ifndef TRITON_PB_STUB

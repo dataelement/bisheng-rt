@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 namespace py = pybind11;
 #endif
 #include <algorithm>
+
 #include "scoped_defer.h"
 
 
@@ -38,8 +39,8 @@ namespace triton { namespace backend { namespace python {
 
 InferResponse::InferResponse(
     const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError> error)
-    : error_(error)
+    std::shared_ptr<PbError> error, const bool is_last_response, void* id)
+    : error_(error), is_last_response_(is_last_response), id_(id)
 {
   for (auto& output : output_tensors) {
     if (!output) {
@@ -81,6 +82,7 @@ InferResponse::SaveToSharedMemory(
   response_shm_ptr->has_error = false;
   response_shm_ptr->is_error_set = false;
   shm_handle_ = response_shm_.handle_;
+  response_shm_ptr->is_last_response = is_last_response_;
 
   // Only save the output tensors to shared memory when the inference response
   // doesn't have error.
@@ -103,6 +105,7 @@ InferResponse::SaveToSharedMemory(
       tensor_handle_shm_ptr[j] = output_tensor->ShmHandle();
       j++;
     }
+    response_shm_ptr->id = id_;
   }
 }
 
@@ -151,6 +154,10 @@ InferResponse::LoadFromSharedMemory(
     bi::managed_external_buffer::handle_t* tensor_handle_shm =
         reinterpret_cast<bi::managed_external_buffer::handle_t*>(
             response_shm.data_.get() + sizeof(ResponseShm));
+#ifdef TRITON_PB_STUB
+    // Need to acquire the GIL to avoid hangs.
+    py::gil_scoped_acquire acquire;
+#endif
     for (size_t idx = 0; idx < requested_output_count; ++idx) {
       std::shared_ptr<PbTensor> pb_tensor = PbTensor::LoadFromSharedMemory(
           shm_pool, tensor_handle_shm[idx], open_cuda_handle);
@@ -158,19 +165,22 @@ InferResponse::LoadFromSharedMemory(
     }
   }
 
-  return std::unique_ptr<InferResponse>(
-      new InferResponse(response_shm, output_tensors, pb_error));
+  return std::unique_ptr<InferResponse>(new InferResponse(
+      response_shm, output_tensors, pb_error,
+      response_shm_ptr->is_last_response, response_shm_ptr->id));
 }
 
 InferResponse::InferResponse(
     AllocatedSharedMemory<char>& response_shm,
     std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-    std::shared_ptr<PbError>& pb_error)
+    std::shared_ptr<PbError>& pb_error, const bool is_last_response, void* id)
 {
   response_shm_ = std::move(response_shm);
   output_tensors_ = std::move(output_tensors);
   error_ = std::move(pb_error);
   shm_handle_ = response_shm_.handle_;
+  id_ = id;
+  is_last_response_ = is_last_response;
 }
 
 std::shared_ptr<PbError>&
@@ -179,65 +189,63 @@ InferResponse::Error()
   return error_;
 }
 
+void*
+InferResponse::Id()
+{
+  return id_;
+}
+
+bool
+InferResponse::IsLastResponse()
+{
+  return is_last_response_;
+}
+
 #ifndef TRITON_PB_STUB
-std::shared_ptr<TRITONSERVER_Error*>
+void
 InferResponse::Send(
-    TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
+    TRITONBACKEND_Response* response, void* cuda_stream,
     bool& requires_deferred_callback, const uint32_t flags,
     std::unique_ptr<SharedMemoryManager>& shm_pool,
+    GPUBuffersHelper& gpu_buffer_helper,
     std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
-    const std::set<std::string>& requested_output_names,
-    TRITONBACKEND_Response* response)
+    const std::set<std::string>& requested_output_names)
 {
   std::shared_ptr<TRITONSERVER_Error*> response_error =
       WrapTritonErrorInSharedPtr(nullptr);
   std::unique_ptr<ScopedDefer> response_error_handling;
   requires_deferred_callback = false;
 
-  // Should only destruct the response factory whenever a response factory is
-  // being created.
-  bool destruct_response_factor = (response == nullptr);
-
-  if (response == nullptr) {
-    SET_ERROR_AND_RETURN(
-        response_error,
-        TRITONBACKEND_ResponseNewFromFactory(&response, response_factory));
-  }
-
   // This lambda expression will be called when this function exits, if the
   // inference response doesn't have any GPU tensors. Otherwise, it will be
   // called when the object is destructed or DeferredSendCallback is called.
-  response_error_handling = std::make_unique<ScopedDefer>(
-      [response, response_error, flags, response_factory,
-       destruct_response_factor] {
+  response_error_handling =
+      std::make_unique<ScopedDefer>([response, response_error, flags] {
         if (response != nullptr) {
           LOG_IF_ERROR(
               TRITONBACKEND_ResponseSend(response, flags, *response_error),
               "failed to send the response.");
-          if (flags == TRITONSERVER_RESPONSE_COMPLETE_FINAL &&
-              destruct_response_factor) {
-            std::unique_ptr<
-                TRITONBACKEND_ResponseFactory, backend::ResponseFactoryDeleter>
-            response_factory_ptr(
-                reinterpret_cast<TRITONBACKEND_ResponseFactory*>(
-                    response_factory));
-          }
         }
       });
 
   // Moves the response sending callback so that it is not called until the stub
   // process fills in the GPU buffers.
-  ScopedDefer deferred_task(
-      [this, &requires_deferred_callback, &response_error_handling] {
-        if (requires_deferred_callback) {
-          deferred_send_callback_ = std::move(response_error_handling);
-        }
-      });
+  ScopedDefer deferred_task([this, &requires_deferred_callback,
+                             &response_error_handling, &gpu_buffer_helper,
+                             response_error, &shm_pool] {
+    if (*response_error != nullptr) {
+      gpu_buffer_helper.SetError(
+          shm_pool, TRITONSERVER_ErrorMessage(*response_error));
+    }
+    if (requires_deferred_callback) {
+      deferred_send_callback_ = std::move(response_error_handling);
+    }
+  });
 
   if (HasError()) {
-    *response_error = TRITONSERVER_ErrorNew(
-        TRITONSERVER_ERROR_INTERNAL, Error()->Message().c_str());
-    return nullptr;
+    *response_error =
+        TRITONSERVER_ErrorNew(Error()->Code(), Error()->Message().c_str());
+    return;
   }
 
   bool cuda_copy = false;
@@ -301,6 +309,7 @@ InferResponse::Send(
                 output_tensor->ByteSize(), reinterpret_cast<char*>(buffer),
                 true /* copy_gpu */));
       }
+      gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
 #endif
     }
@@ -315,6 +324,7 @@ InferResponse::Send(
               shm_pool, actual_memory_type, actual_memory_type_id,
               output_tensor->ByteSize(), nullptr /* data ptr */));
 
+      gpu_buffer_helper.AddBuffer(output_buffer->ShmHandle());
       output_buffers.push_back({std::move(output_buffer), buffer});
     }
 
@@ -336,8 +346,6 @@ InferResponse::Send(
     cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(cuda_stream));
   }
 #endif  // TRITON_ENABLE_GPU
-
-  return response_error;
 }
 #endif
 

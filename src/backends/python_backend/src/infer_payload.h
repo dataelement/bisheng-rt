@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,62 +24,52 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "pb_error.h"
+#pragma once
+
+#include <functional>
+#include <queue>
+
+#include "infer_response.h"
+#include "pb_preferred_memory.h"
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error_Code
-PbError::Code()
-{
-  return code_;
-}
+struct ResponseAllocatorUserp {
+  ResponseAllocatorUserp(
+      void* shm_pool, const PreferredMemory& preferred_memory)
+      : shm_pool(shm_pool), preferred_memory(preferred_memory)
+  {
+  }
+  void* shm_pool;
+  PreferredMemory preferred_memory;
+};
 
-const std::string&
-PbError::Message()
-{
-  return message_;
-}
+class InferPayload : public std::enable_shared_from_this<InferPayload> {
+ public:
+  InferPayload(
+      const bool is_decouple,
+      std::function<void(std::unique_ptr<InferResponse>)> callback);
 
-bi::managed_external_buffer::handle_t
-PbError::ShmHandle()
-{
-  return shm_handle_;
-}
+  /// GetPtr should be only called when the InferPayload object is constructed
+  /// using a shared pointer. Calling this function in any other circumstance
+  /// is undefined behaviour until C++17.
+  std::shared_ptr<InferPayload> GetPtr() { return shared_from_this(); }
+  void SetValue(std::unique_ptr<InferResponse> infer_response);
+  void SetFuture(std::future<std::unique_ptr<InferResponse>>& response_future);
+  bool IsDecoupled();
+  bool IsPromiseSet();
+  void Callback(std::unique_ptr<InferResponse> infer_response);
+  void SetResponseAllocUserp(
+      const ResponseAllocatorUserp& response_alloc_userp);
+  std::shared_ptr<ResponseAllocatorUserp> ResponseAllocUserp();
 
-void
-PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
-{
-  message_shm_ = PbString::Create(shm_pool, message_);
-  error_shm_ = shm_pool->Construct<PbErrorShm>();
-  error_shm_.data_->code = code_;
-  error_shm_.data_->message_shm_handle = message_shm_->ShmHandle();
-  shm_handle_ = error_shm_.handle_;
-}
-
-std::shared_ptr<PbError>
-PbError::LoadFromSharedMemory(
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t shm_handle)
-{
-  AllocatedSharedMemory<PbErrorShm> error_shm =
-      shm_pool->Load<PbErrorShm>(shm_handle);
-  std::unique_ptr<PbString> message_shm = PbString::LoadFromSharedMemory(
-      shm_pool, error_shm.data_->message_shm_handle);
-
-  TRITONSERVER_Error_Code code = error_shm.data_->code;
-  std::string message = message_shm->String();
-
-  return std::shared_ptr<PbError>(new PbError(
-      std::move(message_shm), std::move(error_shm), code, std::move(message)));
-}
-
-PbError::PbError(
-    std::shared_ptr<PbString>&& message_shm,
-    AllocatedSharedMemory<PbErrorShm>&& error_shm, TRITONSERVER_Error_Code code,
-    std::string&& message)
-    : message_shm_(std::move(message_shm)), error_shm_(std::move(error_shm)),
-      code_(code), message_(std::move(message))
-{
-}
+ private:
+  std::unique_ptr<std::promise<std::unique_ptr<InferResponse>>> promise_;
+  bool is_decoupled_;
+  std::mutex mutex_;
+  bool is_promise_set_;
+  std::function<void(std::unique_ptr<InferResponse>)> callback_;
+  std::shared_ptr<ResponseAllocatorUserp> response_alloc_userp_;
+};
 
 }}}  // namespace triton::backend::python

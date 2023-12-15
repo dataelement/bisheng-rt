@@ -1,3 +1,4 @@
+ # flake8: noqa
 # Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -24,9 +25,10 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
-import struct
 import json
+import struct
+
+import numpy as np
 
 TRITON_STRING_TO_NUMPY = {
     'TYPE_BOOL': bool,
@@ -41,7 +43,7 @@ TRITON_STRING_TO_NUMPY = {
     'TYPE_FP16': np.float16,
     'TYPE_FP32': np.float32,
     'TYPE_FP64': np.float64,
-    'TYPE_STRING': np.object_
+    'TYPE_STRING': np.object_,
 }
 
 
@@ -71,10 +73,9 @@ def serialize_byte_tensor(input_tensor):
     # If the input is a tensor of string/bytes objects, then must flatten those
     # into a 1-dimensional array containing the 4-byte byte size followed by the
     # actual element bytes. All elements are concatenated together in "C" order.
-    if (input_tensor.dtype == np.object_) or (input_tensor.dtype.type
-                                              == np.bytes_):
+    if (input_tensor.dtype == np.object_) or (input_tensor.dtype.type == np.bytes_):
         flattened_ls = []
-        for obj in np.nditer(input_tensor, flags=["refs_ok"], order='C'):
+        for obj in np.nditer(input_tensor, flags=['refs_ok'], order='C'):
             # If directly passing bytes to BYTES type,
             # don't convert it to str as Python will encode the
             # bytes which may distort the meaning
@@ -85,7 +86,7 @@ def serialize_byte_tensor(input_tensor):
                     s = str(obj.item()).encode('utf-8')
             else:
                 s = obj.item()
-            flattened_ls.append(struct.pack("<I", len(s)))
+            flattened_ls.append(struct.pack('<I', len(s)))
             flattened_ls.append(s)
         flattened = b''.join(flattened_ls)
         return flattened
@@ -112,12 +113,12 @@ def deserialize_bytes_tensor(encoded_tensor):
     offset = 0
     val_buf = encoded_tensor
     while offset < len(val_buf):
-        l = struct.unpack_from("<I", val_buf, offset)[0]
+        l = struct.unpack_from('<I', val_buf, offset)[0]
         offset += 4
-        sb = struct.unpack_from("<{}s".format(l), val_buf, offset)[0]
+        sb = struct.unpack_from('<{}s'.format(l), val_buf, offset)[0]
         offset += l
         strs.append(sb)
-    return (np.array(strs, dtype=np.object_))
+    return np.array(strs, dtype=np.object_)
 
 
 def get_input_tensor_by_name(inference_request, name):
@@ -331,41 +332,46 @@ class ModelConfig:
             If configuration has specified max_batch_size non-zero value which
             is larger than the max_batch_size to be set for the model.
         """
-        if self._model_config["max_batch_size"] > max_batch_size:
+        if self._model_config['max_batch_size'] > max_batch_size:
             raise ValueError(
-                "configuration specified max_batch_size " +
-                str(self._model_config["max_batch_size"]) +
-                ", but in auto-complete-config function for model '" +
-                self._model_config["name"] + "' specified max_batch_size " +
-                str(max_batch_size))
+                'configuration specified max_batch_size '
+                + str(self._model_config['max_batch_size'])
+                + ", but in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' specified max_batch_size "
+                + str(max_batch_size)
+            )
         else:
-            self._model_config["max_batch_size"] = max_batch_size
+            self._model_config['max_batch_size'] = max_batch_size
 
     def set_dynamic_batching(self):
-        """Set dynamic_batching as the scheduler for the model if no scheduler 
-        is set. If dynamic_batching is set in the model configuration, then no 
+        """Set dynamic_batching as the scheduler for the model if no scheduler
+        is set. If dynamic_batching is set in the model configuration, then no
         action is taken and return success.
         Raises
         ------
         ValueError
-            If the 'sequence_batching' or 'ensemble_scheduling' scheduler is 
+            If the 'sequence_batching' or 'ensemble_scheduling' scheduler is
             set for this model configuration.
         """
         found_scheduler = None
-        if "sequence_batching" in self._model_config:
-            found_scheduler = "sequence_batching"
-        elif "ensemble_scheduling" in self._model_config:
-            found_scheduler = "ensemble_scheduling"
+        if 'sequence_batching' in self._model_config:
+            found_scheduler = 'sequence_batching'
+        elif 'ensemble_scheduling' in self._model_config:
+            found_scheduler = 'ensemble_scheduling'
 
         if found_scheduler != None:
             raise ValueError(
-                "Configuration specified scheduling_choice as '" \
-                + found_scheduler + "', but auto-complete-config " \
-                "function for model '" + self._model_config["name"] 
-                + "' tries to set scheduling_choice as 'dynamic_batching'")
+                "Configuration specified scheduling_choice as '"
+                + found_scheduler
+                + "', but auto-complete-config "
+                "function for model '"
+                + self._model_config['name']
+                + "' tries to set scheduling_choice as 'dynamic_batching'"
+            )
 
-        if "dynamic_batching" not in self._model_config:
-            self._model_config["dynamic_batching"] = {}
+        if 'dynamic_batching' not in self._model_config:
+            self._model_config['dynamic_batching'] = {}
 
     def add_input(self, input):
         """Add the input for the model.
@@ -385,52 +391,69 @@ class ModelConfig:
         for current_property in input:
             if current_property not in valid_properties:
                 raise ValueError(
-                    "input '" + input['name'] +
-                    "' in auto-complete-config function for model '" +
-                    self._model_config["name"] +
-                    "' contains property other than 'name', 'data_type' and 'dims'."
+                    "input '"
+                    + input['name']
+                    + "' in auto-complete-config function for model '"
+                    + self._model_config['name']
+                    + "' contains property other than 'name', 'data_type' and 'dims'."
                 )
 
         if 'name' not in input:
             raise ValueError(
-                "input in auto-complete-config function for model '" +
-                self._model_config["name"] + "' is missing 'name' property.")
+                "input in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' is missing 'name' property."
+            )
         elif 'data_type' not in input:
-            raise ValueError("input '" + input['name'] +
-                             "' in auto-complete-config function for model '" +
-                             self._model_config["name"] +
-                             "' is missing 'data_type' property.")
+            raise ValueError(
+                "input '"
+                + input['name']
+                + "' in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' is missing 'data_type' property."
+            )
         elif 'dims' not in input:
-            raise ValueError("input '" + input['name'] +
-                             "' in auto-complete-config function for model '" +
-                             self._model_config["name"] +
-                             "' is missing 'dims' property.")
+            raise ValueError(
+                "input '"
+                + input['name']
+                + "' in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' is missing 'dims' property."
+            )
 
-        for current_input in self._model_config["input"]:
+        for current_input in self._model_config['input']:
             if input['name'] == current_input['name']:
-                if current_input[
-                        'data_type'] != "TYPE_INVALID" and current_input[
-                            'data_type'] != input['data_type']:
-                    raise ValueError("unable to load model '" +
-                                     self._model_config["name"] +
-                                     "', configuration expects datatype " +
-                                     current_input['data_type'] +
-                                     " for input '" + input['name'] +
-                                     "', model provides " + input['data_type'])
-                elif current_input[
-                        'dims'] and current_input['dims'] != input['dims']:
+                if (
+                    current_input['data_type'] != 'TYPE_INVALID'
+                    and current_input['data_type'] != input['data_type']
+                ):
                     raise ValueError(
-                        "model '" + self._model_config["name"] + "', tensor '" +
-                        input['name'] + "': the model expects dims " +
-                        str(input['dims']) +
-                        " but the model configuration specifies dims " +
-                        str(current_input['dims']))
+                        "unable to load model '"
+                        + self._model_config['name']
+                        + "', configuration expects datatype "
+                        + current_input['data_type']
+                        + " for input '"
+                        + input['name']
+                        + "', model provides "
+                        + input['data_type']
+                    )
+                elif current_input['dims'] and current_input['dims'] != input['dims']:
+                    raise ValueError(
+                        "model '"
+                        + self._model_config['name']
+                        + "', tensor '"
+                        + input['name']
+                        + "': the model expects dims "
+                        + str(input['dims'])
+                        + ' but the model configuration specifies dims '
+                        + str(current_input['dims'])
+                    )
                 else:
                     current_input['data_type'] = input['data_type']
                     current_input['dims'] = input['dims']
                     return
 
-        self._model_config["input"].append(input)
+        self._model_config['input'].append(input)
 
     def add_output(self, output):
         """Add the output for the model.
@@ -450,52 +473,71 @@ class ModelConfig:
         for current_property in output:
             if current_property not in valid_properties:
                 raise ValueError(
-                    "output '" + output['name'] +
-                    "' in auto-complete-config function for model '" +
-                    self._model_config["name"] +
-                    "' contains property other than 'name', 'data_type' and 'dims'."
+                    "output '"
+                    + output['name']
+                    + "' in auto-complete-config function for model '"
+                    + self._model_config['name']
+                    + "' contains property other than 'name', 'data_type' and 'dims'."
                 )
 
         if 'name' not in output:
             raise ValueError(
-                "output in auto-complete-config function for model '" +
-                self._model_config["name"] + "' is missing 'name' property.")
+                "output in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' is missing 'name' property."
+            )
         elif 'data_type' not in output:
-            raise ValueError("output '" + output['name'] +
-                             "' in auto-complete-config function for model '" +
-                             self._model_config["name"] +
-                             "' is missing 'data_type' property.")
+            raise ValueError(
+                "output '"
+                + output['name']
+                + "' in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' is missing 'data_type' property."
+            )
         elif 'dims' not in output:
-            raise ValueError("output '" + output['name'] +
-                             "' in auto-complete-config function for model '" +
-                             self._model_config["name"] +
-                             "' is missing 'dims' property.")
+            raise ValueError(
+                "output '"
+                + output['name']
+                + "' in auto-complete-config function for model '"
+                + self._model_config['name']
+                + "' is missing 'dims' property."
+            )
 
-        for current_output in self._model_config["output"]:
+        for current_output in self._model_config['output']:
             if output['name'] == current_output['name']:
-                if current_output[
-                        'data_type'] != "TYPE_INVALID" and current_output[
-                            'data_type'] != output['data_type']:
-                    raise ValueError("unable to load model '" +
-                                     self._model_config["name"] +
-                                     "', configuration expects datatype " +
-                                     current_output['data_type'] +
-                                     " for output '" + output['name'] +
-                                     "', model provides " + output['data_type'])
-                elif current_output[
-                        'dims'] and current_output['dims'] != output['dims']:
+                if (
+                    current_output['data_type'] != 'TYPE_INVALID'
+                    and current_output['data_type'] != output['data_type']
+                ):
                     raise ValueError(
-                        "model '" + self._model_config["name"] + "', tensor '" +
-                        output['name'] + "': the model expects dims " +
-                        str(output['dims']) +
-                        " but the model configuration specifies dims " +
-                        str(current_output['dims']))
+                        "unable to load model '"
+                        + self._model_config['name']
+                        + "', configuration expects datatype "
+                        + current_output['data_type']
+                        + " for output '"
+                        + output['name']
+                        + "', model provides "
+                        + output['data_type']
+                    )
+                elif (
+                    current_output['dims'] and current_output['dims'] != output['dims']
+                ):
+                    raise ValueError(
+                        "model '"
+                        + self._model_config['name']
+                        + "', tensor '"
+                        + output['name']
+                        + "': the model expects dims "
+                        + str(output['dims'])
+                        + ' but the model configuration specifies dims '
+                        + str(current_output['dims'])
+                    )
                 else:
                     current_output['data_type'] = output['data_type']
                     current_output['dims'] = output['dims']
                     return
 
-        self._model_config["output"].append(output)
+        self._model_config['output'].append(output)
 
 
 TRITONSERVER_REQUEST_FLAG_SEQUENCE_START = 1

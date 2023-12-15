@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,32 +25,33 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
 
 namespace triton { namespace backend { namespace python {
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
-
+class PreferredMemory {
  public:
-  EnvironmentManager();
+  enum MemoryType { GPU, CPU, DEFAULT };
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+  PreferredMemory()
+      : preferred_memory_type_(MemoryType::DEFAULT), preferred_device_id_(0)
+  {
+  }
+
+  PreferredMemory(
+      const MemoryType& preferred_memory_type,
+      const int64_t& preferred_device_id)
+      : preferred_memory_type_(preferred_memory_type),
+        preferred_device_id_(preferred_device_id)
+  {
+  }
+
+  MemoryType PreferredMemoryType() { return preferred_memory_type_; }
+
+  int64_t PreferredDeviceId() { return preferred_device_id_; }
+
+ private:
+  MemoryType preferred_memory_type_;
+  int64_t preferred_device_id_;
 };
 
 }}}  // namespace triton::backend::python

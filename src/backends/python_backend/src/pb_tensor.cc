@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 #endif  // TRITON_ENABLE_GPU
 
 #ifdef TRITON_PB_STUB
+#include "pb_stub.h"
 #include "pb_stub_utils.h"
 namespace py = pybind11;
 #endif
@@ -231,6 +232,36 @@ PbTensor::FromNumpy(const std::string& name, py::array& numpy_array)
   return std::make_shared<PbTensor>(name, numpy_array);
 }
 
+DLDeviceType
+PbTensor::DeviceType()
+{
+  DLDeviceType device_type{};
+
+  switch (memory_type_) {
+    case TRITONSERVER_MEMORY_GPU:
+      device_type = DLDeviceType::kDLCUDA;
+      break;
+    case TRITONSERVER_MEMORY_CPU:
+      device_type = DLDeviceType::kDLCPU;
+      break;
+    case TRITONSERVER_MEMORY_CPU_PINNED:
+      device_type = DLDeviceType::kDLCUDAHost;
+      break;
+  }
+
+  return device_type;
+}
+
+py::capsule
+PbTensor::DLPack(const py::object& stream)
+{
+  // Here external tensor requests PbTensor's `__dlpack__` method to provide
+  // a PyCapsule. By the design of PbTensor, in a GPU case no pending work
+  // is scheduled to work with PbTensor's data and we can simply pass
+  // the capsule without a synchronization.
+  return this->ToDLPack();
+}
+
 py::capsule
 PbTensor::ToDLPack()
 {
@@ -247,6 +278,9 @@ PbTensor::ToDLPack()
   dlpack_tensor->dl_tensor.strides = nullptr;
   dlpack_tensor->manager_ctx = this;
   dlpack_tensor->deleter = [](DLManagedTensor* m) {
+    // We need to acquire GIL since the framework that deleted the dlpack tensor
+    // may not have acquired GIL when calling this function.
+    py::gil_scoped_acquire gil;
     if (m->manager_ctx == nullptr) {
       return;
     }
@@ -261,28 +295,24 @@ PbTensor::ToDLPack()
   py::handle tensor_handle = py::cast(tensor);
 
   // Increase the reference count by one to make sure that the DLPack
-  // represenation doesn't become invalid when the tensor object goes out of
+  // representation doesn't become invalid when the tensor object goes out of
   // scope.
   tensor_handle.inc_ref();
 
   dlpack_tensor->dl_tensor.device.device_id = memory_type_id_;
+  dlpack_tensor->dl_tensor.device.device_type = this->DeviceType();
   dlpack_tensor->dl_tensor.dtype = triton_to_dlpack_type(dtype_);
-
-  switch (memory_type_) {
-    case TRITONSERVER_MEMORY_GPU:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDA;
-      break;
-    case TRITONSERVER_MEMORY_CPU:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCPU;
-      break;
-    case TRITONSERVER_MEMORY_CPU_PINNED:
-      dlpack_tensor->dl_tensor.device.device_type = DLDeviceType::kDLCUDAHost;
-      break;
-  }
 
   return py::capsule(
       static_cast<void*>(dlpack_tensor), "dltensor", &delete_unused_dltensor);
 }
+
+std::pair<int32_t, int64_t>
+PbTensor::DLPackDevice()
+{
+  return std::pair<int32_t, int64_t>(this->DeviceType(), memory_type_id_);
+}
+
 #endif  // TRITON_PB_STUB
 
 void
@@ -302,12 +332,88 @@ PbTensor::Memory()
 
 #ifdef TRITON_PB_STUB
 std::shared_ptr<PbTensor>
-PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
+PbTensor::FromDLPack(const std::string& name, const py::object& tensor)
 {
   if (name == "") {
     throw PythonBackendException("Tensor name cannot be an empty string.");
   }
+  if (py::isinstance<py::capsule>(tensor)) {
+    return FromDLPackCapsule(name, tensor);
+  }
 
+  if (!py::hasattr(tensor, "__dlpack__") ||
+      !py::hasattr(tensor, "__dlpack_device__")) {
+    throw PythonBackendException(
+        "Provided tensor is not supported. Tensor must be a DLPack capsule \
+        or have `__dlpack__` and `__dlpack_device__` attributes");
+  }
+
+  auto capsule_device_info =
+      tensor.attr("__dlpack_device__")().cast<std::pair<int32_t, int64_t>>();
+  if (capsule_device_info.first == DLDeviceType::kDLCUDA) {
+#ifdef TRITON_ENABLE_GPU
+    int current_device;
+    cudaError_t err = cudaGetDevice(&current_device);
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    if (err != cudaSuccess) {
+      throw PythonBackendException("Failed to get current CUDA device id.");
+    }
+    ScopedSetDevice scoped_set_device(capsule_device_info.second);
+
+    bool overridden = (current_device != capsule_device_info.second);
+    cudaStream_t proxy_stream = stub->GetProxyStream(current_device);
+
+    // Array API requirements for the stream argument:
+    // stream = 1 the legacy default stream (in this case should
+    // synchronize on CUDA stream 0)
+    // For CPU, `stream=None` is the only accepted argument
+    // according to array API. For GPU, when `stream=None`  producer
+    // must assume the legacy default stream. Reference:
+    // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
+    auto ptr_to_tensor = FromDLPackCapsule(
+        name, tensor.attr("__dlpack__")(
+                  py::arg("stream") =
+                      py::int_(reinterpret_cast<int64_t>(proxy_stream))));
+
+    // In case there is a pending job on the data, where this capsule
+    // is pointing to, we need to wait for it to finish before returning
+    // capsule.
+    // We synchronize on the proxy stream explicitly since that what we
+    // pass to external tensor's `__dlpack__` method.
+    err = cudaStreamSynchronize(proxy_stream);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          "Failed to synchronize CUDA device with id " +
+          std::to_string(
+              overridden ? capsule_device_info.second : current_device));
+    }
+
+    return ptr_to_tensor;
+#else
+    throw PythonBackendException(
+        "DLPack capsule passed pointer to memory allocated on GPU device, \
+          when GPU is not available");
+#endif
+  } else if (
+      capsule_device_info.first != DLDeviceType::kDLCPU &&
+      capsule_device_info.first != DLDeviceType::kDLCUDAHost) {
+    throw PythonBackendException(
+        "DLDevice type " + std::to_string(capsule_device_info.first) +
+        " is not support by Python backend.");
+  }
+
+  // If data is located on a CPU, `stream=None` is the only accepted argument
+  // according to array API.
+  // Reference:
+  // https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html
+  return FromDLPackCapsule(
+      name, tensor.attr("__dlpack__")(py::arg("stream") = py::none()));
+}
+
+std::shared_ptr<PbTensor>
+PbTensor::FromDLPackCapsule(
+    const std::string& name, const py::capsule& dlpack_tensor)
+{
   DLManagedTensor* dl_managed_tensor =
       static_cast<DLManagedTensor*>(dlpack_tensor.get_pointer());
 
@@ -327,12 +433,14 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
     int64_t calculated_stride{1};
     bool is_contiguous_c_order = true;
     for (size_t i = 1; i < dims.size(); i++) {
-      if (strides[ndim - i] != calculated_stride) {
-        is_contiguous_c_order = false;
-        break;
-      }
+      if (dims[ndim - i] != 1) {
+        if (strides[ndim - i] != calculated_stride) {
+          is_contiguous_c_order = false;
+          break;
+        }
 
-      calculated_stride *= dims[ndim - i];
+        calculated_stride *= dims[ndim - i];
+      }
     }
 
     if (!is_contiguous_c_order) {
@@ -385,6 +493,7 @@ PbTensor::FromDLPack(const std::string& name, const py::capsule& dlpack_tensor)
 
 PbTensor::~PbTensor() noexcept(false)
 {
+  pb_memory_.reset();
   DeleteDLPack();
 }
 

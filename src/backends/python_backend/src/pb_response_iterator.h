@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2022, NVIDIA CORPORATION. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,32 +25,34 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
-#include <climits>
-#include <map>
-#include <mutex>
-#include <string>
+
+#include <queue>
+
+#include "infer_response.h"
 
 namespace triton { namespace backend { namespace python {
 
-void ExtractTarFile(std::string& archive_path, std::string& dst_path);
-
-bool FileExists(std::string& path);
-
-//
-// A class that manages Python environments
-//
-class EnvironmentManager {
-  std::map<std::string, std::pair<std::string, time_t>> env_map_;
-  char base_path_[PATH_MAX + 1];
-  std::mutex mutex_;
-
+class ResponseIterator {
  public:
-  EnvironmentManager();
+  ResponseIterator(const std::shared_ptr<InferResponse>& response);
+  ~ResponseIterator();
 
-  // Extracts the tar.gz file in the 'env_path' if it has not been
-  // already extracted.
-  std::string ExtractIfNotExtracted(std::string env_path);
-  ~EnvironmentManager();
+  std::shared_ptr<InferResponse> Next();
+  void Iter();
+  void EnqueueResponse(std::shared_ptr<InferResponse> infer_response);
+  void* Id();
+  void Clear();
+  std::vector<std::shared_ptr<InferResponse>> GetExistingResponses();
+
+ private:
+  std::vector<std::shared_ptr<InferResponse>> responses_;
+  std::queue<std::shared_ptr<InferResponse>> response_buffer_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  void* id_;
+  bool is_finished_;
+  bool is_cleared_;
+  size_t idx_;
 };
 
 }}}  // namespace triton::backend::python

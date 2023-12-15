@@ -1,4 +1,4 @@
-// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,62 +24,67 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "pb_error.h"
+#include "pb_cancel.h"
+
+#include "pb_stub.h"
 
 namespace triton { namespace backend { namespace python {
 
-TRITONSERVER_Error_Code
-PbError::Code()
+void
+PbCancel::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
-  return code_;
-}
-
-const std::string&
-PbError::Message()
-{
-  return message_;
+  cancel_shm_ = shm_pool->Construct<IsCancelledMessage>();
+  new (&(cancel_shm_.data_->mu)) bi::interprocess_mutex;
+  new (&(cancel_shm_.data_->cv)) bi::interprocess_condition;
+  cancel_shm_.data_->waiting_on_stub = false;
+  cancel_shm_.data_->response_factory_address = response_factory_address_;
+  cancel_shm_.data_->request_address = request_address_;
+  cancel_shm_.data_->is_cancelled = is_cancelled_;
 }
 
 bi::managed_external_buffer::handle_t
-PbError::ShmHandle()
+PbCancel::ShmHandle()
 {
-  return shm_handle_;
+  return cancel_shm_.handle_;
+}
+
+IsCancelledMessage*
+PbCancel::ShmPayload()
+{
+  return cancel_shm_.data_.get();
+}
+
+bool
+PbCancel::IsCancelled()
+{
+  std::unique_lock<std::mutex> lk(mu_);
+  // The cancelled flag can only move from false to true, not the other way, so
+  // it is checked on each query until cancelled and then implicitly cached.
+  if (is_cancelled_) {
+    return is_cancelled_;
+  }
+  if (!updating_) {
+    std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+    if (!stub->StubToParentServiceActive()) {
+      LOG_ERROR << "Cannot communicate with parent service";
+      return false;
+    }
+    stub->EnqueueIsCancelled(this);
+    updating_ = true;
+  }
+  cv_.wait(lk, [this] { return !updating_; });
+  return is_cancelled_;
 }
 
 void
-PbError::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
+PbCancel::ReportIsCancelled(bool is_cancelled)
 {
-  message_shm_ = PbString::Create(shm_pool, message_);
-  error_shm_ = shm_pool->Construct<PbErrorShm>();
-  error_shm_.data_->code = code_;
-  error_shm_.data_->message_shm_handle = message_shm_->ShmHandle();
-  shm_handle_ = error_shm_.handle_;
-}
-
-std::shared_ptr<PbError>
-PbError::LoadFromSharedMemory(
-    std::unique_ptr<SharedMemoryManager>& shm_pool,
-    bi::managed_external_buffer::handle_t shm_handle)
-{
-  AllocatedSharedMemory<PbErrorShm> error_shm =
-      shm_pool->Load<PbErrorShm>(shm_handle);
-  std::unique_ptr<PbString> message_shm = PbString::LoadFromSharedMemory(
-      shm_pool, error_shm.data_->message_shm_handle);
-
-  TRITONSERVER_Error_Code code = error_shm.data_->code;
-  std::string message = message_shm->String();
-
-  return std::shared_ptr<PbError>(new PbError(
-      std::move(message_shm), std::move(error_shm), code, std::move(message)));
-}
-
-PbError::PbError(
-    std::shared_ptr<PbString>&& message_shm,
-    AllocatedSharedMemory<PbErrorShm>&& error_shm, TRITONSERVER_Error_Code code,
-    std::string&& message)
-    : message_shm_(std::move(message_shm)), error_shm_(std::move(error_shm)),
-      code_(code), message_(std::move(message))
-{
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    is_cancelled_ = is_cancelled;
+    updating_ = false;
+  }
+  cv_.notify_all();
 }
 
 }}}  // namespace triton::backend::python

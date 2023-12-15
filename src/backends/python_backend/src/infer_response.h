@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include <future>
+
+#include "gpu_buffers.h"
 #include "pb_error.h"
 #include "pb_tensor.h"
 #include "pb_utils.h"
@@ -39,6 +42,8 @@ struct ResponseShm {
   bool has_error;
   // Indicates whether this error has a message or not.
   bool is_error_set;
+  void* id;
+  bool is_last_response;
 };
 
 #define SET_ERROR_AND_RETURN(E, X)           \
@@ -46,7 +51,7 @@ struct ResponseShm {
     TRITONSERVER_Error* raasnie_err__ = (X); \
     if (raasnie_err__ != nullptr) {          \
       *E = raasnie_err__;                    \
-      return E;                              \
+      return;                                \
     }                                        \
   } while (false)
 
@@ -59,7 +64,7 @@ struct ResponseShm {
       TRITONSERVER_Error* rarie_err__ = TRITONSERVER_ErrorNew( \
           TRITONSERVER_ERROR_INTERNAL, pb_exception.what());   \
       *E = rarie_err__;                                        \
-      return E;                                                \
+      return;                                                  \
     }                                                          \
   } while (false)
 
@@ -67,7 +72,8 @@ class InferResponse {
  public:
   InferResponse(
       const std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError> error = nullptr);
+      std::shared_ptr<PbError> error = nullptr,
+      const bool is_last_response = true, void* id = nullptr);
   std::vector<std::shared_ptr<PbTensor>>& OutputTensors();
   void SaveToSharedMemory(
       std::unique_ptr<SharedMemoryManager>& shm_pool, bool copy_gpu = true);
@@ -79,19 +85,26 @@ class InferResponse {
   std::shared_ptr<PbError>& Error();
   bi::managed_external_buffer::handle_t ShmHandle();
   void PruneOutputTensors(const std::set<std::string>& requested_output_names);
+  std::unique_ptr<std::future<std::unique_ptr<InferResponse>>>
+  GetNextResponse();
+  void SetNextResponseHandle(
+      bi::managed_external_buffer::handle_t next_response_handle);
+  bi::managed_external_buffer::handle_t NextResponseHandle();
+  void* Id();
+  bool IsLastResponse();
 
 #ifndef TRITON_PB_STUB
   /// Send an inference response. If the response has a GPU tensor, sending the
   /// response needs to be done in two step. The boolean
   /// 'requires_deferred_callback' indicates whether DeferredSendCallback method
   /// should be called or not.
-  std::shared_ptr<TRITONSERVER_Error*> Send(
-      TRITONBACKEND_ResponseFactory* response_factory, void* cuda_stream,
+  void Send(
+      TRITONBACKEND_Response* response, void* cuda_stream,
       bool& requires_deferred_callback, const uint32_t flags,
       std::unique_ptr<SharedMemoryManager>& shm_pool,
+      GPUBuffersHelper& gpu_buffer_helper,
       std::vector<std::pair<std::unique_ptr<PbMemory>, void*>>& output_buffers,
-      const std::set<std::string>& requested_output_names = {},
-      TRITONBACKEND_Response* response = nullptr);
+      const std::set<std::string>& requested_output_names = {});
 
   void DeferredSendCallback();
 #endif
@@ -103,12 +116,18 @@ class InferResponse {
   InferResponse(
       AllocatedSharedMemory<char>& response_shm,
       std::vector<std::shared_ptr<PbTensor>>& output_tensors,
-      std::shared_ptr<PbError>& pb_error);
+      std::shared_ptr<PbError>& pb_error, const bool is_last_response,
+      void* id);
   std::vector<std::shared_ptr<PbTensor>> output_tensors_;
+
   std::shared_ptr<PbError> error_;
   bi::managed_external_buffer::handle_t shm_handle_;
   AllocatedSharedMemory<char> response_shm_;
   std::vector<std::pair<std::unique_ptr<PbMemory>, void*>> gpu_output_buffers_;
   std::unique_ptr<ScopedDefer> deferred_send_callback_;
+  bool is_last_response_;
+  // Representing the request id that the response was created from.
+  void* id_;
 };
+
 }}}  // namespace triton::backend::python

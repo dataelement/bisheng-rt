@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,6 +27,8 @@
 #include "infer_request.h"
 
 #include <boost/interprocess/sync/scoped_lock.hpp>
+
+#include "gpu_buffers.h"
 #include "pb_utils.h"
 #include "scoped_defer.h"
 #ifdef TRITON_PB_STUB
@@ -40,13 +42,15 @@ InferRequest::InferRequest(
     const std::vector<std::shared_ptr<PbTensor>>& inputs,
     const std::set<std::string>& requested_output_names,
     const std::string& model_name, const int64_t model_version,
-    const uint32_t flags, const intptr_t response_factory_address,
-    const intptr_t request_address)
+    const std::string& parameters, const uint32_t flags, const int32_t timeout,
+    const intptr_t response_factory_address, const intptr_t request_address,
+    const PreferredMemory& preferred_memory, const InferenceTrace& trace)
     : request_id_(request_id), correlation_id_(correlation_id), inputs_(inputs),
       requested_output_names_(requested_output_names), model_name_(model_name),
-      model_version_(model_version), flags_(flags),
-      response_factory_address_(response_factory_address),
-      request_address_(request_address)
+      model_version_(model_version), parameters_(parameters), flags_(flags),
+      timeout_(timeout), response_factory_address_(response_factory_address),
+      request_address_(request_address), preferred_memory_(preferred_memory),
+      trace_(trace)
 {
   for (auto& input : inputs) {
     if (!input) {
@@ -67,9 +71,11 @@ InferRequest::InferRequest(
   inputs_ = inputs;
   requested_output_names_ = requested_output_names;
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -77,6 +83,12 @@ const std::vector<std::shared_ptr<PbTensor>>&
 InferRequest::Inputs()
 {
   return inputs_;
+}
+
+const std::string&
+InferRequest::Parameters()
+{
+  return parameters_;
 }
 
 const std::string&
@@ -133,6 +145,36 @@ InferRequest::ShmHandle()
   return shm_handle_;
 }
 
+int32_t
+InferRequest::Timeout()
+{
+  return timeout_;
+}
+
+void
+InferRequest::SetIsDecoupled(const bool is_decoupled)
+{
+  is_decoupled_ = is_decoupled;
+}
+
+bool
+InferRequest::IsDecoupled()
+{
+  return is_decoupled_;
+}
+
+PreferredMemory&
+InferRequest::GetPreferredMemory()
+{
+  return preferred_memory_;
+}
+
+InferenceTrace&
+InferRequest::Trace()
+{
+  return trace_;
+}
+
 void
 InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
 {
@@ -142,7 +184,8 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
        sizeof(bi::managed_external_buffer::handle_t)) +
       (Inputs().size() * sizeof(bi::managed_external_buffer::handle_t)) +
       PbString::ShmStructSize(ModelName()) +
-      PbString::ShmStructSize(RequestId()));
+      PbString::ShmStructSize(RequestId()) +
+      PbString::ShmStructSize(Parameters()));
 
   infer_request_shm_ptr_ =
       reinterpret_cast<InferRequestShm*>(infer_request_shm.data_.get());
@@ -154,6 +197,10 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
   infer_request_shm_ptr_->flags = Flags();
   infer_request_shm_ptr_->address = request_address_;
   infer_request_shm_ptr_->response_factory_address = response_factory_address_;
+  infer_request_shm_ptr_->is_decoupled = is_decoupled_;
+  infer_request_shm_ptr_->timeout = timeout_;
+  infer_request_shm_ptr_->preferred_memory = preferred_memory_;
+  infer_request_shm_ptr_->trace = trace_;
 
   output_names_handle_shm_ptr_ =
       reinterpret_cast<bi::managed_external_buffer::handle_t*>(
@@ -202,10 +249,18 @@ InferRequest::SaveToSharedMemory(std::unique_ptr<SharedMemoryManager>& shm_pool)
       reinterpret_cast<char*>(infer_request_shm_ptr_) + request_id_offset,
       infer_request_shm.handle_ + request_id_offset);
 
+  size_t parameters_offset =
+      request_id_offset + PbString::ShmStructSize(RequestId());
+  std::unique_ptr<PbString> parameters_shm = PbString::Create(
+      Parameters(),
+      reinterpret_cast<char*>(infer_request_shm_ptr_) + parameters_offset,
+      infer_request_shm.handle_ + parameters_offset);
+
   // Save the references to shared memory.
   infer_request_shm_ = std::move(infer_request_shm);
   request_id_shm_ = std::move(request_id_shm);
   model_name_shm_ = std::move(model_name_shm);
+  parameters_shm_ = std::move(parameters_shm);
   shm_handle_ = infer_request_shm_.handle_;
   requested_output_names_shm_ = std::move(requested_output_names_shm);
 }
@@ -266,9 +321,14 @@ InferRequest::LoadFromSharedMemory(
       request_handle + request_id_offset,
       reinterpret_cast<char*>(infer_request_shm_ptr) + request_id_offset);
 
+  size_t parameters_offset = request_id_offset + request_id_shm->Size();
+  std::unique_ptr<PbString> parameters_shm = PbString::LoadFromSharedMemory(
+      request_handle + request_id_offset,
+      reinterpret_cast<char*>(infer_request_shm_ptr) + parameters_offset);
+
   return std::unique_ptr<InferRequest>(new InferRequest(
       infer_request_shm, request_id_shm, requested_output_names_shm,
-      model_name_shm, input_tensors));
+      model_name_shm, input_tensors, parameters_shm));
 }
 
 InferRequest::InferRequest(
@@ -276,11 +336,13 @@ InferRequest::InferRequest(
     std::unique_ptr<PbString>& request_id_shm,
     std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
     std::unique_ptr<PbString>& model_name_shm,
-    std::vector<std::shared_ptr<PbTensor>>& input_tensors)
+    std::vector<std::shared_ptr<PbTensor>>& input_tensors,
+    std::unique_ptr<PbString>& parameters_shm)
     : infer_request_shm_(std::move(infer_request_shm)),
       request_id_shm_(std::move(request_id_shm)),
       requested_output_names_shm_(std::move(requested_output_names_shm)),
-      model_name_shm_(std::move(model_name_shm))
+      model_name_shm_(std::move(model_name_shm)),
+      parameters_shm_(std::move(parameters_shm))
 {
   infer_request_shm_ptr_ =
       reinterpret_cast<InferRequestShm*>(infer_request_shm_.data_.get());
@@ -305,6 +367,7 @@ InferRequest::InferRequest(
   }
 
   request_id_ = request_id_shm_->String();
+  parameters_ = parameters_shm_->String();
   requested_output_names_ = std::move(requested_output_names);
   model_name_ = model_name_shm_->String();
   flags_ = infer_request_shm_ptr_->flags;
@@ -312,11 +375,17 @@ InferRequest::InferRequest(
   correlation_id_ = infer_request_shm_ptr_->correlation_id;
   request_address_ = infer_request_shm_ptr_->address;
   response_factory_address_ = infer_request_shm_ptr_->response_factory_address;
+  is_decoupled_ = infer_request_shm_ptr_->is_decoupled;
+  timeout_ = infer_request_shm_ptr_->timeout;
+  preferred_memory_ = infer_request_shm_ptr_->preferred_memory;
+  trace_ = infer_request_shm_ptr_->trace;
 
 #ifdef TRITON_PB_STUB
+  pb_cancel_ =
+      std::make_shared<PbCancel>(response_factory_address_, request_address_);
   response_sender_ = std::make_shared<ResponseSender>(
       request_address_, response_factory_address_,
-      Stub::GetOrCreateInstance()->SharedMemory());
+      Stub::GetOrCreateInstance()->SharedMemory(), pb_cancel_);
 #endif
 }
 
@@ -335,6 +404,12 @@ InferRequest::DeleteResponseFactory()
 #endif
 
 #ifdef TRITON_PB_STUB
+bool
+InferRequest::IsCancelled()
+{
+  return pb_cancel_->IsCancelled();
+}
+
 std::shared_ptr<ResponseSender>
 InferRequest::GetResponseSender()
 {
@@ -348,13 +423,18 @@ InferRequest::GetResponseSender()
   return response_sender_;
 }
 
-
 std::shared_ptr<InferResponse>
-InferRequest::Exec()
+InferRequest::Exec(const bool is_decoupled)
 {
+  // BLS should not be used in "initialize" or "finalize" function.
+  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
+  if (!stub->IsInitialized() || stub->IsFinalizing()) {
+    throw PythonBackendException(
+        "BLS is only supported during the 'execute' function.");
+  }
+
   ResponseBatch* response_batch = nullptr;
   bool responses_is_set = false;
-  std::unique_ptr<Stub>& stub = Stub::GetOrCreateInstance();
   std::unique_ptr<SharedMemoryManager>& shm_pool = stub->SharedMemory();
   bi::managed_external_buffer::handle_t* response_handle = nullptr;
 
@@ -374,8 +454,13 @@ InferRequest::Exec()
     bool has_exception = false;
     PythonBackendException pb_exception(std::string{});
 
-    ipc_message->Command() =
-        PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
+    if (is_decoupled) {
+      ipc_message->Command() =
+          PYTHONSTUB_CommandType::PYTHONSTUB_InferStreamExecRequest;
+    } else {
+      ipc_message->Command() =
+          PYTHONSTUB_CommandType::PYTHONSTUB_InferExecRequest;
+    }
 
     request_batch = shm_pool->Construct<char>(
         sizeof(RequestBatch) + sizeof(bi::managed_external_buffer::handle_t));
@@ -416,11 +501,19 @@ InferRequest::Exec()
     // Additional round trip required for asking the stub process
     // to fill in the GPU tensor buffers
     if (has_gpu_tensor) {
+      AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_shm =
+          shm_pool->Load<GPUBuffersShm>(
+              request_batch_shm_ptr->gpu_buffers_handle);
       AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
           gpu_buffers_handle =
               shm_pool->Load<bi::managed_external_buffer::handle_t>(
-                  request_batch_shm_ptr->gpu_buffers_handle);
+                  gpu_buffers_shm.data_->buffers);
       try {
+        if (!gpu_buffers_shm.data_->success) {
+          std::unique_ptr<PbString> error = PbString::LoadFromSharedMemory(
+              shm_pool, gpu_buffers_shm.data_->error);
+          throw PythonBackendException(error->String());
+        }
 #ifdef TRITON_ENABLE_GPU
         size_t i = 0;
         for (auto& input_tensor : this->Inputs()) {
@@ -472,30 +565,36 @@ InferRequest::Exec()
       if (response_batch->is_error_set) {
         std::unique_ptr<PbString> pb_string =
             PbString::LoadFromSharedMemory(shm_pool, response_batch->error);
-        return std::make_unique<InferResponse>(
+        auto error_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
             std::make_shared<PbError>(pb_string->String()));
+
+        return error_response;
       } else {
-        return std::make_unique<InferResponse>(
+        auto error_response = std::make_unique<InferResponse>(
             std::vector<std::shared_ptr<PbTensor>>{},
             std::make_shared<PbError>(
                 "An error occurred while performing BLS request."));
+
+        return error_response;
       }
     }
   }
   catch (const PythonBackendException& pb_exception) {
-    return std::make_unique<InferResponse>(
+    auto error_response = std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
         std::make_shared<PbError>(pb_exception.what()));
+
+    return error_response;
   }
 
   if (responses_is_set) {
-    std::unique_ptr<InferResponse> infer_response =
+    auto& memory_manager_message_queue = stub->MemoryManagerQueue();
+    std::unique_ptr<InferResponse> return_response =
         InferResponse::LoadFromSharedMemory(
             shm_pool, *response_handle, true /* open cuda handle */);
-    auto& memory_manager_message_queue = stub->MemoryManagerQueue();
 
-    for (auto& output_tensor : infer_response->OutputTensors()) {
+    for (auto& output_tensor : return_response->OutputTensors()) {
       if (!output_tensor->IsCPU()) {
         uint64_t memory_release_id = output_tensor->Memory()->MemoryReleaseId();
         output_tensor->Memory()->SetMemoryReleaseCallback(
@@ -505,12 +604,14 @@ InferRequest::Exec()
       }
     }
 
-    return infer_response;
+    return return_response;
   } else {
-    return std::make_unique<InferResponse>(
+    auto error_response = std::make_unique<InferResponse>(
         std::vector<std::shared_ptr<PbTensor>>{},
         std::make_shared<PbError>(
             "An error occurred while performing BLS request."));
+
+    return error_response;
   }
 }
 

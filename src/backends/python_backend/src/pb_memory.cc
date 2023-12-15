@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -141,14 +141,35 @@ PbMemory::CopyBuffer(
     kind = cudaMemcpyDeviceToDevice;
   }
 
-  cudaError_t err =
-      cudaMemcpy(dst->DataPtr(), src->DataPtr(), src->ByteSize(), kind);
+  cudaError_t err;
+  if ((kind == cudaMemcpyDeviceToDevice) &&
+      (src->MemoryTypeId() != dst->MemoryTypeId())) {
+    err = cudaMemcpyPeer(
+        dst->DataPtr(), dst->MemoryTypeId(), src->DataPtr(),
+        src->MemoryTypeId(), src->ByteSize());
+
+  } else {
+    err = cudaMemcpy(dst->DataPtr(), src->DataPtr(), src->ByteSize(), kind);
+  }
 
   if (err != cudaSuccess) {
     throw PythonBackendException(
         std::string(
             "failed to copy data: " + std::string(cudaGetErrorString(err)))
             .c_str());
+  }
+
+  if (kind == cudaMemcpyDeviceToDevice) {
+    // Synchronize the default stream for d2d copies.
+    // https://docs.nvidia.com/cuda/cuda-runtime-api/api-sync-behavior.html#api-sync-behavior__memcpy-sync
+    err = cudaStreamSynchronize(0);
+    if (err != cudaSuccess) {
+      throw PythonBackendException(
+          std::string(
+              "failed to synchronize the default CUDA stream. error: " +
+              std::string(cudaGetErrorString(err)))
+              .c_str());
+    }
   }
 #endif
 }
@@ -168,8 +189,7 @@ PbMemory::FillShmData(
 #ifdef TRITON_ENABLE_GPU
     if (data != nullptr) {
       if (copy_gpu) {
-        // [FIXME] Restore the previous device
-        THROW_IF_CUDA_ERROR(cudaSetDevice(memory_type_id));
+        ScopedSetDevice scoped_set_device(memory_type_id);
         THROW_IF_CUDA_ERROR(cudaIpcGetMemHandle(
             reinterpret_cast<cudaIpcMemHandle_t*>(memory_data_shm), data));
       }
@@ -295,11 +315,15 @@ PbMemory::GetGPUStartAddress()
 {
   if (memory_shm_ptr_->memory_type == TRITONSERVER_MEMORY_GPU) {
     CUDAHandler& cuda_api = CUDAHandler::getInstance();
-    CUdeviceptr start_address;
+    CUdeviceptr start_address = 0;
 
-    cuda_api.PointerGetAttribute(
-        &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
-        reinterpret_cast<CUdeviceptr>(data_ptr_));
+    // Skip this step for empty tensor as the CUDA API 'cuPointerGetAttribute'
+    // we use in this function does not accept nullptr.
+    if (data_ptr_) {
+      cuda_api.PointerGetAttribute(
+          &start_address, CU_POINTER_ATTRIBUTE_RANGE_START_ADDR,
+          reinterpret_cast<CUdeviceptr>(data_ptr_));
+    }
 
     return reinterpret_cast<void*>(start_address);
   }

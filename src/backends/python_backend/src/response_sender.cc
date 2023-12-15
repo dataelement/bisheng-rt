@@ -1,4 +1,4 @@
-// Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -25,8 +25,10 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "response_sender.h"
+
 #include <boost/interprocess/sync/interprocess_condition.hpp>
 #include <boost/interprocess/sync/interprocess_mutex.hpp>
+
 #include "pb_stub.h"
 #include "pb_stub_utils.h"
 #include "scoped_defer.h"
@@ -35,10 +37,11 @@ namespace triton { namespace backend { namespace python {
 
 ResponseSender::ResponseSender(
     intptr_t request_address, intptr_t response_factory_address,
-    std::unique_ptr<SharedMemoryManager>& shm_pool)
+    std::unique_ptr<SharedMemoryManager>& shm_pool,
+    const std::shared_ptr<PbCancel>& pb_cancel)
     : request_address_(request_address),
       response_factory_address_(response_factory_address), shm_pool_(shm_pool),
-      closed_(false)
+      closed_(false), pb_cancel_(pb_cancel)
 {
 }
 
@@ -130,20 +133,21 @@ ResponseSender::Send(
   }
 
   if (has_gpu_output) {
-    AllocatedSharedMemory<char> gpu_buffers_handle =
-        shm_pool_->Load<char>(send_message_payload->gpu_buffers_handle);
+    AllocatedSharedMemory<GPUBuffersShm> gpu_buffers_handle =
+        shm_pool_->Load<GPUBuffersShm>(
+            send_message_payload->gpu_buffers_handle);
 
-    bi::managed_external_buffer::handle_t* gpu_buffers_handle_shm =
-        reinterpret_cast<bi::managed_external_buffer::handle_t*>(
-            gpu_buffers_handle.data_.get() + sizeof(uint64_t));
-    uint64_t* gpu_buffer_count =
-        reinterpret_cast<uint64_t*>(gpu_buffers_handle.data_.get());
-    if (gpu_tensors.size() != *gpu_buffer_count) {
-      LOG_INFO
+    AllocatedSharedMemory<bi::managed_external_buffer::handle_t>
+        gpu_buffers_handle_shm =
+            shm_pool_->Load<bi::managed_external_buffer::handle_t>(
+                gpu_buffers_handle.data_->buffers);
+    uint64_t gpu_buffer_count = gpu_buffers_handle.data_->buffer_count;
+    if (gpu_tensors.size() != gpu_buffer_count) {
+      LOG_ERROR
           << (std::string(
                   "GPU buffers size does not match the provided buffers: ") +
               std::to_string(gpu_tensors.size()) +
-              " != " + std::to_string(*gpu_buffer_count));
+              " != " + std::to_string(gpu_buffer_count));
       return;
     }
 
@@ -151,7 +155,8 @@ ResponseSender::Send(
 
     for (size_t i = 0; i < gpu_tensors.size(); i++) {
       std::unique_ptr<PbMemory> dst_buffer = PbMemory::LoadFromSharedMemory(
-          shm_pool_, gpu_buffers_handle_shm[i], true /* open_cuda_handle */);
+          shm_pool_, gpu_buffers_handle_shm.data_.get()[i],
+          true /* open_cuda_handle */);
       dst_buffers.emplace_back(std::move(dst_buffer));
       std::shared_ptr<PbTensor>& src_buffer = gpu_tensors[i];
       PbMemory::CopyBuffer(dst_buffers[i], src_buffer->Memory());
@@ -180,4 +185,11 @@ ResponseSender::Send(
     }
   }
 }
+
+bool
+ResponseSender::IsCancelled()
+{
+  return pb_cancel_->IsCancelled();
+}
+
 }}}  // namespace triton::backend::python

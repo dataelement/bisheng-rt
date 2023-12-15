@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,15 +26,37 @@
 
 #pragma once
 
+#include <future>
 #include <string>
+
 #include "infer_response.h"
+#include "pb_preferred_memory.h"
 #include "pb_tensor.h"
 
 #ifdef TRITON_PB_STUB
+#include "pb_cancel.h"
 #include "response_sender.h"
 #endif
 
 namespace triton { namespace backend { namespace python {
+
+class Stub;
+
+//
+// Inference Trace
+//
+struct InferenceTrace {
+#ifndef TRITON_PB_STUB
+  TRITONSERVER_InferenceTrace* triton_trace_;
+  InferenceTrace(TRITONSERVER_InferenceTrace* triton_trace)
+      : triton_trace_(triton_trace)
+  {
+  }
+#else
+  void* triton_trace_;
+#endif
+  InferenceTrace() : triton_trace_(nullptr) {}
+};
 
 //
 // Inference Request
@@ -47,6 +69,10 @@ struct InferRequestShm {
   uint32_t flags;
   intptr_t address;
   intptr_t response_factory_address;
+  bool is_decoupled;
+  int32_t timeout;
+  PreferredMemory preferred_memory;
+  InferenceTrace trace;
 };
 
 class InferRequest {
@@ -56,11 +82,16 @@ class InferRequest {
       const std::vector<std::shared_ptr<PbTensor>>& inputs,
       const std::set<std::string>& requested_output_names,
       const std::string& model_name, const int64_t model_version,
-      const uint32_t flags = 0, const intptr_t response_factory_address = 0,
-      const intptr_t request_address = 0);
+      const std::string& parameters, const uint32_t flags = 0,
+      const int32_t timeout = 0, const intptr_t response_factory_address = 0,
+      const intptr_t request_address = 0,
+      const PreferredMemory& preferred_memory =
+          PreferredMemory(PreferredMemory::DEFAULT, 0),
+      const InferenceTrace& trace = InferenceTrace());
 
   const std::vector<std::shared_ptr<PbTensor>>& Inputs();
   const std::string& RequestId();
+  const std::string& Parameters();
   uint64_t CorrelationId();
   const std::string& ModelName();
   int64_t ModelVersion();
@@ -68,10 +99,16 @@ class InferRequest {
   void SetFlags(uint32_t flags);
   const std::set<std::string>& RequestedOutputNames();
   bi::managed_external_buffer::handle_t ShmHandle();
+  int32_t Timeout();
+  bool IsDecoupled();
+  void SetIsDecoupled(const bool is_decoupled);
+  PreferredMemory& GetPreferredMemory();
+  InferenceTrace& Trace();
 
 #ifdef TRITON_PB_STUB
-  std::shared_ptr<InferResponse> Exec();
+  std::shared_ptr<InferResponse> Exec(const bool is_decoupled);
   std::shared_ptr<ResponseSender> GetResponseSender();
+  bool IsCancelled();
 #endif
 
   /// Save an Inference Request to shared memory.
@@ -107,7 +144,8 @@ class InferRequest {
       std::unique_ptr<PbString>& request_id_shm,
       std::vector<std::unique_ptr<PbString>>& requested_output_names_shm,
       std::unique_ptr<PbString>& model_name_shm,
-      std::vector<std::shared_ptr<PbTensor>>& input_tensors);
+      std::vector<std::shared_ptr<PbTensor>>& input_tensors,
+      std::unique_ptr<PbString>& parameters_shm);
 
   std::string request_id_;
   uint64_t correlation_id_;
@@ -115,9 +153,14 @@ class InferRequest {
   std::set<std::string> requested_output_names_;
   std::string model_name_;
   int64_t model_version_;
+  std::string parameters_;
   uint32_t flags_;
+  int32_t timeout_;
   intptr_t response_factory_address_;
   intptr_t request_address_;
+  bool is_decoupled_;
+  PreferredMemory preferred_memory_;
+  InferenceTrace trace_;
 
   // Shared Memory Data Structures
   AllocatedSharedMemory<char> infer_request_shm_;
@@ -129,8 +172,10 @@ class InferRequest {
   bi::managed_external_buffer::handle_t* output_names_handle_shm_ptr_;
   bi::managed_external_buffer::handle_t* input_tensors_handle_ptr_;
   bi::managed_external_buffer::handle_t shm_handle_;
+  std::unique_ptr<PbString> parameters_shm_;
 
 #ifdef TRITON_PB_STUB
+  std::shared_ptr<PbCancel> pb_cancel_;
   std::shared_ptr<ResponseSender> response_sender_;
 #endif
 };

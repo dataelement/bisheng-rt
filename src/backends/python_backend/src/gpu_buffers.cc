@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -24,49 +24,66 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#pragma once
-
-#include <unordered_map>
+#include "gpu_buffers.h"
 
 #include "pb_string.h"
-#include "shm_manager.h"
 
 namespace triton { namespace backend { namespace python {
+GPUBuffersHelper::GPUBuffersHelper()
+{
+  completed_ = false;
+}
 
-struct PairShm {
-  bi::managed_external_buffer::handle_t key;
-  bi::managed_external_buffer::handle_t value;
-};
+void
+GPUBuffersHelper::AddBuffer(const bi::managed_external_buffer::handle_t& handle)
+{
+  if (completed_) {
+    throw PythonBackendException(
+        "It is not possible to add buffers after 'Complete' has been called on "
+        "a GPUBuffersHelper.");
+  }
 
-struct DictShm {
-  uint32_t length;
-  // `values` point to the location where there are `length` of Pair objects.
-  bi::managed_external_buffer::handle_t values;
-};
+  buffers_.emplace_back(handle);
+}
+
+void
+GPUBuffersHelper::SetError(
+    std::unique_ptr<SharedMemoryManager>& shm_pool, const std::string& error)
+{
+  error_shm_ = PbString::Create(shm_pool, error);
+}
+
+void
+GPUBuffersHelper::Complete(std::unique_ptr<SharedMemoryManager>& shm_pool)
+{
+  if (completed_) {
+    throw PythonBackendException(
+        "Complete has already been called. Complete should only be called "
+        "once.");
+  }
+  gpu_buffers_shm_ = shm_pool->Construct<GPUBuffersShm>();
+  if (!error_shm_) {
+    buffers_handle_shm_ =
+        shm_pool->Construct<bi::managed_external_buffer::handle_t>(
+            buffers_.size());
+    gpu_buffers_shm_.data_->buffer_count = buffers_.size();
+    gpu_buffers_shm_.data_->success = true;
+    gpu_buffers_shm_.data_->buffers = buffers_handle_shm_.handle_;
+    for (size_t i = 0; i < buffers_.size(); ++i) {
+      buffers_handle_shm_.data_.get()[i] = buffers_[i];
+    }
+  } else {
+    gpu_buffers_shm_.data_->success = false;
+    gpu_buffers_shm_.data_->error = error_shm_->ShmHandle();
+  }
+  completed_ = true;
+}
 
 
-class PbMap {
- public:
-  static std::unique_ptr<PbMap> Create(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      std::unordered_map<std::string, std::string>& map);
-  static std::unique_ptr<PbMap> LoadFromSharedMemory(
-      std::unique_ptr<SharedMemoryManager>& shm_pool,
-      bi::managed_external_buffer::handle_t handle);
-  const std::unordered_map<std::string, std::string>& UnorderedMap();
-  bi::managed_external_buffer::handle_t ShmHandle();
+bi::managed_external_buffer::handle_t
+GPUBuffersHelper::ShmHandle()
+{
+  return gpu_buffers_shm_.handle_;
+}
 
- private:
-  PbMap(
-      std::vector<std::unique_ptr<PbString>>& strings,
-      AllocatedSharedMemory<DictShm>& dict_shm,
-      AllocatedSharedMemory<PairShm>& pair_shms,
-      std::unordered_map<std::string, std::string>& map);
-
-  std::vector<std::unique_ptr<PbString>> strings_;
-  AllocatedSharedMemory<DictShm> dict_shm_;
-  AllocatedSharedMemory<PairShm> pair_shms_;
-  bi::managed_external_buffer::handle_t dict_handle_;
-  std::unordered_map<std::string, std::string> map_;
-};
 }}}  // namespace triton::backend::python
