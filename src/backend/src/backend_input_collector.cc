@@ -27,6 +27,7 @@
 #include "triton/backend/backend_input_collector.h"
 
 #include <atomic>
+
 #include "triton/backend/backend_common.h"
 #ifdef TRITON_ENABLE_GPU
 #include "kernel.h"
@@ -69,8 +70,8 @@ BackendInputCollector::InputIterator::GetNextContiguousInput(
   TRITONBACKEND_InputBufferForHostPolicy(
       curr_input_, host_policy_, curr_buffer_idx_,
       reinterpret_cast<const void**>(&input->memory_desc_.buffer_),
-      &input->memory_desc_.byte_size_, &input->memory_desc_.memory_type_,
-      &input->memory_desc_.memory_type_id_);
+      reinterpret_cast<uint64_t*>(&input->memory_desc_.byte_size_),
+      &input->memory_desc_.memory_type_, &input->memory_desc_.memory_type_id_);
   ++curr_buffer_idx_;
   input->start_request_idx_ = curr_request_idx_;
   input->end_request_idx_ = curr_request_idx_;
@@ -104,7 +105,8 @@ BackendInputCollector::InputIterator::GetNextContiguousInput(
       int64_t next_memory_type_id;
       TRITONBACKEND_InputBufferForHostPolicy(
           curr_input_, host_policy_, curr_buffer_idx_, &next_buffer,
-          &next_buffer_byte_size, &next_memory_type, &next_memory_type_id);
+          reinterpret_cast<uint64_t*>(&next_buffer_byte_size),
+          &next_memory_type, &next_memory_type_id);
       if (((input->memory_desc_.buffer_ + input->memory_desc_.byte_size_) !=
            next_buffer) ||
           (input->memory_desc_.memory_type_ != next_memory_type) ||
@@ -167,10 +169,10 @@ BackendInputCollector::GetInputBufferIfContiguous(
       int64_t src_memory_type_id;
 
       RESPOND_AND_SET_NULL_IF_ERROR(
-          &response,
-          TRITONBACKEND_InputBufferForHostPolicy(
-              input, host_policy_cstr_, idx, &src_buffer, &src_byte_size,
-              &src_memory_type, &src_memory_type_id));
+          &response, TRITONBACKEND_InputBufferForHostPolicy(
+                         input, host_policy_cstr_, idx, &src_buffer,
+                         reinterpret_cast<uint64_t*>(&src_byte_size),
+                         &src_memory_type, &src_memory_type_id));
       if (*buffer != nullptr) {
         // If have seen the second buffer while coalescing input is not
         // requested, treat the inputs are not contiguous
@@ -472,7 +474,7 @@ BackendInputCollector::SetInputTensor(
     return cuda_copy;
   }
   // [FIXME] support other direction if prove to be faster, all kernel
-  // handling code in this class asssumes the destination buffer is on device
+  // handling code in this class assumes the destination buffer is on device
   // If the request buffer and the destination buffer are accessible by all
   // GPUs (i.e. pinned, device), initiate the copy via copy CUDA kernel.
   // We only do this check for the
