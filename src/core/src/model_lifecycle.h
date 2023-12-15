@@ -1,4 +1,4 @@
-// Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -27,9 +27,12 @@
 #pragma once
 
 #include <functional>
+#include <iostream>
 #include <map>
 #include <mutex>
+
 #include "infer_parameter.h"
+#include "model.h"
 #include "model_config.pb.h"
 #include "repo_agent.h"
 #include "status.h"
@@ -37,7 +40,6 @@
 #include "triton/common/thread_pool.h"
 
 namespace triton { namespace core {
-
 struct ModelLifeCycleOptions {
   explicit ModelLifeCycleOptions(
       const double min_compute_capability,
@@ -89,7 +91,7 @@ const std::string& ModelReadyStateString(ModelReadyState state);
 
 using VersionStateMap =
     std::map<int64_t, std::pair<ModelReadyState, std::string>>;
-using ModelStateMap = std::map<std::string, VersionStateMap>;
+using ModelStateMap = std::map<ModelIdentifier, VersionStateMap>;
 
 // Helper class to manage the lifecycle of a list of associated agent models
 class TritonRepoAgentModelList {
@@ -158,7 +160,6 @@ class TritonRepoAgentModelList {
 };
 
 class InferenceServer;
-class Model;
 
 class ModelLifeCycle {
  public:
@@ -176,21 +177,22 @@ class ModelLifeCycle {
 
   // Start loading model with specified versions asynchronously.
   // All versions that are being served will be unloaded only after
-  // the load is finished sucessfully.
+  // the load is finished successfully.
   Status AsyncLoad(
-      const std::string& model_name, const std::string& model_path,
-      const inference::ModelConfig& model_config,
+      const ModelIdentifier& model_id, const std::string& model_path,
+      const inference::ModelConfig& model_config, const bool is_config_provided,
+      const bool is_model_file_updated,
       const std::shared_ptr<TritonRepoAgentModelList>& agent_model_list,
       std::function<void(Status)>&& OnComplete);
 
   // Unload model asynchronously.
-  Status AsyncUnload(const std::string& model_name);
+  Status AsyncUnload(const ModelIdentifier& model_id);
 
   // Get specified version of the model. Latest ready version will
   // be retrieved if 'version' is -1. Return error if the version specified is
   // not found or it is not ready.
   Status GetModel(
-      const std::string& model_name, const int64_t version,
+      const ModelIdentifier& model_id, const int64_t version,
       std::shared_ptr<Model>* model);
 
   // Get the ModelStateMap representation of the live models. A model is
@@ -203,11 +205,11 @@ class ModelLifeCycle {
   const ModelStateMap ModelStates();
 
   // Get the VersionStateMap representation of the specified model.
-  const VersionStateMap VersionStates(const std::string& model_name);
+  const VersionStateMap VersionStates(const ModelIdentifier& model_id);
 
   // Get the state of a specific model version.
   Status ModelState(
-      const std::string& model_name, const int64_t model_version,
+      const ModelIdentifier& model_id, const int64_t model_version,
       ModelReadyState* state);
 
   // Instruct the model to stop accepting new inference requests.
@@ -215,7 +217,7 @@ class ModelLifeCycle {
 
   // Return the number of in-flight inference if any, model versions
   // that don't have in-flight inferences will not be included.
-  const std::set<std::tuple<std::string, int64_t, size_t>> InflightStatus();
+  const std::set<std::tuple<ModelIdentifier, int64_t, size_t>> InflightStatus();
 
  private:
   struct ModelInfo {
@@ -244,7 +246,7 @@ class ModelLifeCycle {
       model_.reset();
     }
 
-    const inference::ModelConfig model_config_;
+    inference::ModelConfig model_config_;
     const std::string model_path_;
     const bool is_ensemble_;
 
@@ -290,16 +292,28 @@ class ModelLifeCycle {
         std::max(1u, options.model_load_thread_count_)));
   }
 
+  // Create a new model, the 'model_id' can either be a new or existing model.
   void CreateModel(
-      const std::string& model_name, const int64_t version,
-      ModelInfo* model_info);
-  // Callback function template for model load.
-  // 'OnComplete' needs to be passed by value for now as there can be
-  // multiple versions to be loaded and each holds a copy of
-  // the 'OnComplete' callback.
+      const ModelIdentifier& model_id, const int64_t version,
+      ModelInfo* model_info, const bool is_config_provided);
+  // Update model to the new config. It is the responsibility of the caller to
+  // ensure the model can be updated in-place without a complete reload.
+  // Currently, only model instances can be updated.
+  void UpdateModelConfig(
+      const ModelIdentifier& model_id, const int64_t version,
+      ModelInfo* model_info, const inference::ModelConfig& new_model_config);
+  // Update 'load_tracker' to the latest info in 'model_info' after loading
+  // **each** model version.
   void OnLoadComplete(
-      const std::string& model_name, const int64_t version,
-      ModelInfo* model_info, std::function<void(Status)> OnComplete,
+      const ModelIdentifier& model_id, const int64_t version,
+      ModelInfo* model_info, const bool is_update,
+      const std::function<void(Status)>& OnComplete,
+      std::shared_ptr<LoadTracker> load_tracker);
+  // Helper function for 'OnLoadComplete()' to finish final operations after
+  // loading **all** model versions.
+  void OnLoadFinal(
+      const ModelIdentifier& model_id, ModelInfo* model_info,
+      const std::function<void(Status)>& OnComplete,
       std::shared_ptr<LoadTracker> load_tracker);
 
 
@@ -307,7 +321,7 @@ class ModelLifeCycle {
   std::mutex map_mtx_;
 
   using VersionMap = std::map<int64_t, std::unique_ptr<ModelInfo>>;
-  using ModelMap = std::map<std::string, VersionMap>;
+  using ModelMap = std::map<ModelIdentifier, VersionMap>;
   ModelMap map_;
   // Models that are being loaded / unloaded in background
   std::map<uintptr_t, std::unique_ptr<ModelInfo>> background_models_;

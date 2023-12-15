@@ -23,7 +23,7 @@
 // OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#include "gtest/gtest.h"
+#include "triton/common/async_work_queue.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -33,7 +33,8 @@
 #include <random>
 #include <thread>
 #include <vector>
-#include "triton/common/async_work_queue.h"
+
+#include "gtest/gtest.h"
 
 namespace tc = triton::common;
 

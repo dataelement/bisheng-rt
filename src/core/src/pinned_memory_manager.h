@@ -30,6 +30,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+
 #include "status.h"
 #include "triton/common/model_config.h"
 
@@ -40,7 +41,7 @@ namespace triton { namespace core {
 // must be requested via functions provided by this class.
 class PinnedMemoryManager {
  public:
-  // Options to configure pinned memeory manager.
+  // Options to configure pinned memory manager.
   struct Options {
     Options(
         uint64_t b = 0,
@@ -59,6 +60,10 @@ class PinnedMemoryManager {
   // Return Status object indicating success or failure.
   static Status Create(const Options& options);
 
+  // Provide explicit control on ending the memory manager lifecycle,
+  // CUDA resource must be cleaned up before CUDA context is destroyed.
+  static void Reset();
+
   // Allocate pinned memory with the requested 'size' and return the pointer
   // in 'ptr'. If 'allow_nonpinned_fallback' is true, regular system memory
   // will be allocated as fallback in the case where pinned memory fails to
@@ -71,11 +76,6 @@ class PinnedMemoryManager {
   // Free the memory allocated by the pinned memory manager.
   // Return Status object indicating success or failure.
   static Status Free(void* ptr);
-
- protected:
-  // Provide explicit control on the lifecycle of the CUDA memory manager,
-  // for testing only.
-  static void Reset();
 
  private:
   class PinnedMemory {

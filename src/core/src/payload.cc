@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -32,7 +32,7 @@ Payload::Payload()
     : op_type_(Operation::INFER_RUN),
       requests_(std::vector<std::unique_ptr<InferenceRequest>>()),
       OnCallback_([]() {}), instance_(nullptr), state_(State::UNINITIALIZED),
-      batcher_start_ns_(0), saturated_(false)
+      batcher_start_ns_(0), saturated_(false), user_pointer_(nullptr)
 {
   exec_mu_.reset(new std::mutex());
 }
@@ -93,6 +93,7 @@ Payload::Reset(const Operation op_type, TritonModelInstance* instance)
   required_equal_inputs_ = RequiredEqualInputs();
   batcher_start_ns_ = 0;
   saturated_ = false;
+  user_pointer_ = nullptr;
 }
 
 void
@@ -107,6 +108,7 @@ Payload::Release()
   required_equal_inputs_ = RequiredEqualInputs();
   batcher_start_ns_ = 0;
   saturated_ = false;
+  user_pointer_ = nullptr;
 }
 
 size_t
@@ -197,7 +199,7 @@ Payload::Execute(bool* should_exit)
   Status status;
   switch (op_type_) {
     case Operation::INFER_RUN:
-      instance_->Schedule(std::move(requests_), OnCallback_);
+      status = instance_->Schedule(std::move(requests_));
       break;
     case Operation::INIT:
       status = instance_->Initialize();
@@ -210,6 +212,8 @@ Payload::Execute(bool* should_exit)
   }
 
   status_->set_value(status);
+  // Call specified callback, notifying that execution has completed.
+  Callback();
 }
 
 }}  // namespace triton::core

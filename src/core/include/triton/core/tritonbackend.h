@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -66,6 +66,7 @@ struct TRITONBACKEND_Backend;
 struct TRITONBACKEND_Model;
 struct TRITONBACKEND_ModelInstance;
 struct TRITONBACKEND_BackendAttribute;
+struct TRITONBACKEND_Batcher;
 
 ///
 /// TRITONBACKEND API Version
@@ -93,7 +94,7 @@ struct TRITONBACKEND_BackendAttribute;
 ///   }
 ///
 #define TRITONBACKEND_API_VERSION_MAJOR 1
-#define TRITONBACKEND_API_VERSION_MINOR 10
+#define TRITONBACKEND_API_VERSION_MINOR 16
 
 /// Get the TRITONBACKEND API version supported by Triton. This value
 /// can be compared against the TRITONBACKEND_API_VERSION_MAJOR and
@@ -106,9 +107,7 @@ struct TRITONBACKEND_BackendAttribute;
 /// by Triton.
 /// \return a TRITONSERVER_Error indicating success or failure.
 TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ApiVersion(
-    uint32_t* major, uint32_t* minor, uint32_t* patch = nullptr,
-    uint32_t* sub_patch = nullptr);
-
+    uint32_t* major, uint32_t* minor);
 
 /// TRITONBACKEND_ArtifactType
 ///
@@ -408,6 +407,36 @@ TRITONBACKEND_RequestCorrelationIdString(
 TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_RequestFlags(
     TRITONBACKEND_Request* request, uint32_t* flags);
 
+/// Get the number of parameters specified in the inference request.
+///
+/// \param request The inference request.
+/// \param count Returns the number of parameters.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_RequestParameterCount(
+    TRITONBACKEND_Request* request, uint32_t* count);
+
+/// Get a request parameters by index. The order of parameters in a given
+/// request is not necessarily consistent with other requests, even if
+/// the requests are in the same batch. As a result, you can not
+/// assume that an index obtained from one request will point to the
+/// same parameter in a different request.
+///
+/// The lifetime of the returned parameter object matches that of the
+/// request and so the parameter object should not be accessed after the
+/// request object is released.
+///
+/// \param request The inference request.
+/// \param index The index of the parameter. Must be 0 <= index <
+/// count, where count is the value returned by
+/// TRITONBACKEND_RequestParameterCount.
+/// \param key Returns the key of the parameter.
+/// \param type Returns the type of the parameter.
+/// \param vvalue Returns a pointer to the parameter value.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_RequestParameter(
+    TRITONBACKEND_Request* request, const uint32_t index, const char** key,
+    TRITONSERVER_ParameterType* type, const void** vvalue);
+
 /// Get the number of input tensors specified in the request.
 ///
 /// \param request The inference request.
@@ -532,6 +561,16 @@ TRITONBACKEND_RequestOutputBufferProperties(
 TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_RequestRelease(
     TRITONBACKEND_Request* request, uint32_t release_flags);
 
+/// Get the trace associated with a request. The returned trace is owned by the
+/// request, not the caller, and so should not be modified or freed.
+/// If the request is not being traced, then `nullptr` will be returned.
+///
+/// \param request The inference request.
+/// \param trace Returns the trace associated with the request.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_RequestTrace(
+    TRITONBACKEND_Request* request, TRITONSERVER_InferenceTrace** trace);
+
 ///
 /// TRITONBACKEND_ResponseFactory
 ///
@@ -581,7 +620,7 @@ TRITONBACKEND_ResponseFactorySendFlags(
 /// response using TRITONBACKEND_ResponseOutput and
 /// TRITONBACKEND_OutputBuffer *before* another response is created
 /// for the request. For a given response, outputs can be created in
-/// any order but they must be created sequentially/sychronously (for
+/// any order but they must be created sequentially/synchronously (for
 /// example, the backend cannot use multiple threads to simultaneously
 /// add multiple outputs to a response).
 ///
@@ -641,7 +680,7 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error*
 TRITONBACKEND_ResponseSetIntParameter(
     TRITONBACKEND_Response* response, const char* name, const int64_t value);
 
-/// Set an boolean parameter in the response.
+/// Set a boolean parameter in the response.
 ///
 /// \param response The response.
 /// \param name The name of the parameter.
@@ -713,7 +752,7 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_StateNew(
     const int64_t* shape, const uint32_t dims_count);
 
 /// Update the state for the sequence. Calling this function will replace the
-/// state stored for this seqeunce in Triton with 'state' provided in the
+/// state stored for this sequence in Triton with 'state' provided in the
 /// function argument. If this function is called when sequence batching is not
 /// enabled or there is no 'states' section in the sequence batching section of
 /// the model configuration, this call will return an error. The backend is not
@@ -862,7 +901,7 @@ TRITONBACKEND_BackendSetExecutionPolicy(
 /// communicated to Triton as indicated by 'artifact_type'.
 ///
 ///   TRITONBACKEND_ARTIFACT_FILESYSTEM: The backend artifacts are
-///     made available to Triton via the local filesytem. 'location'
+///     made available to Triton via the local filesystem. 'location'
 ///     returns the full path to the directory containing this
 ///     backend's artifacts. The returned string is owned by Triton,
 ///     not the caller, and so should not be modified or freed.
@@ -930,7 +969,7 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelVersion(
 /// communicated to Triton as indicated by 'artifact_type'.
 ///
 ///   TRITONBACKEND_ARTIFACT_FILESYSTEM: The model artifacts are made
-///     available to Triton via the local filesytem. 'location'
+///     available to Triton via the local filesystem. 'location'
 ///     returns the full path to the directory in the model repository
 ///     that contains this model's artifacts. The returned string is
 ///     owned by Triton, not the caller, and so should not be modified
@@ -949,7 +988,7 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelRepository(
 /// the object. The configuration is available via this call even
 /// before the model is loaded and so can be used in
 /// TRITONBACKEND_ModelInitialize. TRITONSERVER_ServerModelConfig
-/// returns equivalent information but is not useable until after the
+/// returns equivalent information but is not usable until after the
 /// model loads.
 ///
 /// \param model The model.
@@ -977,17 +1016,20 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error*
 TRITONBACKEND_ModelAutoCompleteConfig(
     TRITONBACKEND_Model* model, bool* auto_complete_config);
 
-/// Set the model configuration in Triton server. Only the inputs, outputs,
-/// max batch size, and scheduling choice can be changed. A caveat being
-/// scheduling choice can only be changed if none is previously set. Any other
-/// changes to the model configuration will be ignored by Triton. This function
-/// can only be called from TRITONBACKEND_ModelInitialize, calling in any other
-/// context will result in an error being returned. Additionally, Triton server
-/// can add some of the missing fields in the provided config with this call.
-/// The backend must get the complete configuration again by using
-/// TRITONBACKEND_ModelConfig. TRITONBACKEND_ModelSetConfig does not take
-/// ownership of the message object and so the caller should call
-/// TRITONSERVER_MessageDelete to release the object once the function returns.
+/// Set the model configuration in Triton server. This API should only be called
+/// when the backend implements the auto-completion of model configuration
+/// and TRITONBACKEND_ModelAutoCompleteConfig returns true in
+/// auto_complete_config. Only the inputs, outputs, max batch size, and
+/// scheduling choice can be changed. A caveat being scheduling choice can only
+/// be changed if none is previously set. Any other changes to the model
+/// configuration will be ignored by Triton. This function can only be called
+/// from TRITONBACKEND_ModelInitialize, calling in any other context will result
+/// in an error being returned. Additionally, Triton server can add some of the
+/// missing fields in the provided config with this call. The backend must get
+/// the complete configuration again by using TRITONBACKEND_ModelConfig.
+/// TRITONBACKEND_ModelSetConfig does not take ownership of the message object
+/// and so the caller should call TRITONSERVER_MessageDelete to release the
+/// object once the function returns.
 ///
 /// \param model The model.
 /// \param config_version The format version of the model configuration.
@@ -1033,6 +1075,27 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelState(
 /// \return a TRITONSERVER_Error indicating success or failure.
 TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelSetState(
     TRITONBACKEND_Model* model, void* state);
+
+/// Report the memory usage of the model that will be released on
+/// TRITONBACKEND_ModelFinalize. The backend may call this function within the
+/// lifecycle of the TRITONBACKEND_Model object (between
+/// TRITONBACKEND_ModelInitialize and TRITONBACKEND_ModelFinalize) to report the
+/// latest usage. To report the memory usage of a model instance,
+/// see TRITONBACKEND_ModelInstanceReportMemoryUsage.
+///
+/// \param model The model.
+/// \param usage The list of buffer attributes that records the memory usage,
+/// each entry should record the total memory usage of a given memory type and
+/// id. For example, if the model itself occupies 64 bytes on each of
+/// CUDA device 0 and CUDA device 1. Then 'usage' should have first two entries
+/// set, one has the buffer attributes of "type GPU, id 0, 64 bytes" and the
+/// other has "type GPU, id 1, 64 bytes". 'usage' is owned by the backend and
+/// may be released after the function returns.
+/// \param usage_size The number of entries in 'usage'.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelReportMemoryUsage(
+    TRITONBACKEND_Model* model, TRITONSERVER_BufferAttributes** usage,
+    uint32_t usage_size);
 
 ///
 /// TRITONBACKEND_ModelInstance
@@ -1173,6 +1236,28 @@ TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelInstanceState(
 /// \return a TRITONSERVER_Error indicating success or failure.
 TRITONBACKEND_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_ModelInstanceSetState(
     TRITONBACKEND_ModelInstance* instance, void* state);
+
+/// Report the memory usage of the model instance that will be released on
+/// TRITONBACKEND_ModelInstanceFinalize. The backend may call this function
+/// within the lifecycle of the TRITONBACKEND_Model object (between
+/// TRITONBACKEND_ModelInstanceInitialize and
+/// TRITONBACKEND_ModelInstanceFinalize) to report the latest usage. To report
+/// the memory usage of the model, see TRITONBACKEND_ModelReportMemoryUsage.
+///
+/// \param instance The model instance.
+/// \param usage The list of buffer attributes that records the memory usage,
+/// each entry should record the total memory usage of a given memory type and
+/// id. For example, if the instance itself occupies 64 bytes on each of
+/// CUDA device 0 and CUDA device 1. Then 'usage' should have first two entries
+/// set, one has the buffer attributes of "type GPU, id 0, 64 bytes" and the
+/// other has "type GPU, id 1, 64 bytes". 'usage' is owned by the backend and
+/// may be released after the function returns.
+/// \param usage_size The number of entries in 'usage'.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_ModelInstanceReportMemoryUsage(
+    TRITONBACKEND_ModelInstance* instance,
+    TRITONSERVER_BufferAttributes** usage, uint32_t usage_size);
 
 /// Record statistics for an inference request.
 ///
@@ -1404,6 +1489,123 @@ TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(
     TRITONBACKEND_BackendAttribute* backend_attributes,
     const TRITONSERVER_InstanceGroupKind kind, const uint64_t count,
     const uint64_t* device_ids, const uint64_t id_count);
+
+/// Sets whether or not the backend supports concurrently loading multiple
+/// TRITONBACKEND_ModelInstances in a thread-safe manner.
+///
+/// Most backends are thread-safe for parallel execution of model instances as
+/// that is the primary use of concurrency in backends. However, not all
+/// backends are thread-safe when initializing or finalizing model instances. In
+/// order for Triton to know that it can safely load instances concurrently, the
+/// backend needs to opt-in by setting this backend attribute to true. By
+/// default, this attribute is false and calls to the
+/// TRITONBACKEND_ModelInstanceInitialize function will be made serially. If
+/// this attribute is set to true, then Triton will make calls to
+/// TRITONBACKEND_ModelInstanceInitialize concurrently.
+///
+/// \param backend_attributes The backend attributes object.
+/// \param enabled Whether or not the backend supports loading model instances
+/// in parallel.
+TRITONSERVER_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_BackendAttributeSetParallelModelInstanceLoading(
+    TRITONBACKEND_BackendAttribute* backend_attributes, bool enabled);
+
+/// TRITONBACKEND Batching
+///
+/// API to add custom batching strategy
+///
+/// The following functions can be implemented by a backend to add custom
+/// batching conditionals on top of the existing Triton batching strategy. The
+/// functions are optional but all or none must be implemented.
+///
+
+/// Create a new batcher for use with custom batching. This is called during
+/// model loading. The batcher will point to a user-defined data structure that
+/// holds read-only data used for custom batching.
+///
+/// \param batcher User-defined placeholder for backend to store and
+/// retrieve information about the batching strategy for this
+/// model.RITONBACKEND_ISPEC return a TRITONSERVER_Error indicating success or
+/// failure. \param model The backend model for which Triton is forming a batch.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_ISPEC TRITONSERVER_Error* TRITONBACKEND_ModelBatcherInitialize(
+    TRITONBACKEND_Batcher** batcher, TRITONBACKEND_Model* model);
+
+/// Free memory associated with batcher. This is called during model unloading.
+///
+/// \param batcher User-defined placeholder for backend to store and
+/// retrieve information about the batching strategy for this model.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_ISPEC TRITONSERVER_Error* TRITONBACKEND_ModelBatcherFinalize(
+    TRITONBACKEND_Batcher* batcher);
+
+/// Check whether a request should be added to the pending model batch.
+///
+/// \param request The request to be added to the pending batch.
+/// \param userp The placeholder for backend to store and retrieve information
+/// about this pending batch. When the callback returns, this should reflect
+/// the latest batch information.
+/// \param should_include The pointer to be updated on whether the request
+/// should be included in the batch.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_ISPEC TRITONSERVER_Error* TRITONBACKEND_ModelBatchIncludeRequest(
+    TRITONBACKEND_Request* request, void* userp, bool* should_include);
+
+/// Callback to be invoked when Triton has begun forming a batch.
+///
+/// \param batcher The read-only placeholder for backend to retrieve
+// information about the batching strategy for this model.
+/// \param userp The placeholder for backend to store and retrieve information
+/// about this pending batch.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_ISPEC TRITONSERVER_Error* TRITONBACKEND_ModelBatchInitialize(
+    const TRITONBACKEND_Batcher* batcher, void** userp);
+
+/// Callback to be invoked when Triton has finishing forming a batch.
+///
+/// \param userp The placeholder for backend to store and retrieve information
+/// about this pending batch.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_ISPEC TRITONSERVER_Error* TRITONBACKEND_ModelBatchFinalize(
+    void* userp);
+
+/// Get all information about an output tensor by its name. The caller does
+/// not own any of the referenced return values and must not modify or delete
+/// them. The lifetime of all returned values extends until 'response' is
+/// deleted.
+///
+/// \param response The response object.
+/// \param name The name of the output.
+/// \param datatype Returns the type of the output.
+/// \param shape Returns the shape of the output.
+/// \param dim_count Returns the number of dimensions of the returned
+/// shape.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONBACKEND_ISPEC TRITONSERVER_Error*
+TRITONBACKEND_InferenceResponseOutputByName(
+    TRITONBACKEND_Response* response, const char* name,
+    TRITONSERVER_DataType* datatype, const int64_t** shape,
+    uint64_t* dim_count);
+
+/// Get all information about an output tensor by its index. The caller does
+/// not own any of the referenced return values and must not modify or delete
+/// them. The lifetime of all returned values extends until 'response' is
+/// deleted.
+///
+/// \param response The response object.
+/// \param index The index of the output tensor, must be 0 <= index <
+/// count, where 'count' is the value returned by
+/// TRITONSERVER_InferenceResponseOutputCount.
+/// \param name Returns the name of the output.
+/// \param datatype Returns the type of the output.
+/// \param shape Returns the shape of the output.
+/// \param dim_count Returns the number of dimensions of the returned
+/// shape.
+/// \return a TRITONSERVER_Error indicating success or failure.
+TRITONSERVER_DECLSPEC TRITONSERVER_Error* TRITONBACKEND_InferenceResponseOutput(
+    TRITONBACKEND_Response* response, const uint32_t index, const char** name,
+    TRITONSERVER_DataType* datatype, const int64_t** shape,
+    uint64_t* dim_count);
 
 #ifdef __cplusplus
 }

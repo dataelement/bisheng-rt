@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -79,7 +79,7 @@ TritonBackend::Create(
   // Backend initialization is optional... The TRITONBACKEND_Backend
   // object is this TritonBackend object. We must set set shared
   // library path to point to the backend directory in case the
-  // backend library attempts to load additional shared libaries.
+  // backend library attempts to load additional shared libraries.
   if (local_backend->backend_init_fn_ != nullptr) {
     std::unique_ptr<SharedLibrary> slib;
     RETURN_IF_ERROR(SharedLibrary::Acquire(&slib));
@@ -120,6 +120,7 @@ TritonBackend::UpdateAttributes()
   if (!latest.preferred_groups_.empty()) {
     attributes_.preferred_groups_ = latest.preferred_groups_;
   }
+  attributes_.parallel_instance_loading_ = latest.parallel_instance_loading_;
   return Status::Success;
 }
 
@@ -228,8 +229,7 @@ TritonBackend::LoadBackendLibrary()
 extern "C" {
 
 TRITONAPI_DECLSPEC TRITONSERVER_Error*
-TRITONBACKEND_ApiVersion(
-    uint32_t* major, uint32_t* minor, uint32_t* patch, uint32_t* sub_patch)
+TRITONBACKEND_ApiVersion(uint32_t* major, uint32_t* minor)
 {
   *major = TRITONBACKEND_API_VERSION_MAJOR;
   *minor = TRITONBACKEND_API_VERSION_MINOR;
@@ -338,19 +338,35 @@ Status
 TritonBackendManager::CreateBackend(
     const std::string& name, const std::string& dir, const std::string& libpath,
     const triton::common::BackendCmdlineConfig& backend_cmdline_config,
-    std::shared_ptr<TritonBackend>* backend)
+    bool is_python_based_backend, std::shared_ptr<TritonBackend>* backend)
 {
   std::lock_guard<std::mutex> lock(mu_);
 
-  const auto& itr = backend_map_.find(libpath);
-  if (itr != backend_map_.end()) {
-    *backend = itr->second;
-    return Status::Success;
+  const auto python_based_backend_path = dir + "/model.py";
+  std::vector<std::string> paths = {libpath, python_based_backend_path};
+  for (const auto& path : paths) {
+    const auto& itr = backend_map_.find(path);
+    // If backend already exists, re-use it.
+    if (itr != backend_map_.end()) {
+      *backend = itr->second;
+      // Python based backends use the same shared library as python backend.
+      // If libpath to libtriton_python.so is already found, we need to check
+      // if backend names match. If not, we create a new python based backend.
+      if ((*backend)->Name() == name) {
+        return Status::Success;
+      }
+    }
   }
 
   RETURN_IF_ERROR(TritonBackend::Create(
       name, dir, libpath, backend_cmdline_config, backend));
-  backend_map_.insert({libpath, *backend});
+
+  (*backend)->SetPythonBasedBackendFlag(is_python_based_backend);
+  if (is_python_based_backend) {
+    backend_map_.insert({python_based_backend_path, *backend});
+  } else {
+    backend_map_.insert({libpath, *backend});
+  }
 
   return Status::Success;
 }
@@ -365,15 +381,27 @@ TritonBackendManager::BackendState(
   std::unique_ptr<std::unordered_map<std::string, std::vector<std::string>>>
       backend_state_map(
           new std::unordered_map<std::string, std::vector<std::string>>);
+  std::vector<std::string> python_backend_config{};
+  bool has_python_backend = false;
   for (const auto& backend_pair : backend_map_) {
     auto& libpath = backend_pair.first;
     auto backend = backend_pair.second;
-
+    if (backend->Name() == "python") {
+      has_python_backend = true;
+    }
     const char* backend_config;
     size_t backend_config_size;
     backend->BackendConfig().Serialize(&backend_config, &backend_config_size);
     backend_state_map->insert(
         {backend->Name(), std::vector<std::string>{libpath, backend_config}});
+    if (backend->IsPythonBackendBased() && python_backend_config.empty()) {
+      python_backend_config.emplace_back(backend->LibPath());
+      python_backend_config.emplace_back(std::string(backend_config));
+    }
+  }
+
+  if (!has_python_backend && !python_backend_config.empty()) {
+    backend_state_map->insert({"python", python_backend_config});
   }
 
   *backend_state = std::move(backend_state_map);

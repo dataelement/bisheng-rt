@@ -26,8 +26,6 @@
 
 #include "cuda_utils.h"
 
-#include <sstream>
-
 #include "model_config_utils.h"
 #include "triton/common/nvtx.h"
 
@@ -257,23 +255,6 @@ SupportsIntegratedZeroCopy(const int gpu_id, bool* zero_copy_support)
     *zero_copy_support = false;
   }
 
-  return Status::Success;
-}
-
-Status
-GetGPUCompatibility(std::string& cc)
-{
-  // Query the compute capability from the device
-  cudaDeviceProp cuprops;
-  cudaError_t cuerr = cudaGetDeviceProperties(&cuprops, 0);
-  if (cuerr != cudaSuccess) {
-    return Status(
-        Status::Code::INTERNAL,
-        "unable to get CUDA device properties for GPU ID" + std::to_string(0) +
-            ": " + cudaGetErrorString(cuerr));
-  }
-
-  cc = std::to_string(cuprops.major) + std::to_string(cuprops.minor);
   return Status::Success;
 }
 

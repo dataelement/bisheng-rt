@@ -27,7 +27,8 @@
 #include "repo_agent.h"
 
 #include <string>
-#include "filesystem.h"
+
+#include "filesystem/api.h"
 #include "shared_library.h"
 #include "triton/common/logging.h"
 #include "tritonserver_apis.h"
@@ -342,7 +343,7 @@ TritonRepoAgentModel::DeleteMutableLocation()
         Status::Code::UNAVAILABLE, "No mutable location to be deleted");
   }
 
-  auto status = DeleteDirectory(acquired_location_);
+  auto status = DeletePath(acquired_location_);
   if (!status.IsOk()) {
     LOG_ERROR << "Failed to delete previously acquired location '"
               << acquired_location_ << "': " << status.AsString();

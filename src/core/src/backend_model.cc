@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,11 +26,12 @@
 
 #include "backend_model.h"
 
+#include <map>
 #include <vector>
+
 #include "backend_config.h"
-#include "backend_model_instance.h"
 #include "dynamic_batch_scheduler.h"
-#include "filesystem.h"
+#include "filesystem/api.h"
 #include "model_config_utils.h"
 #include "numa_utils.h"
 #include "sequence_batch_scheduler.h"
@@ -60,24 +61,30 @@ TritonModel::Create(
     InferenceServer* server, const std::string& model_path,
     const triton::common::BackendCmdlineConfigMap& backend_cmdline_config_map,
     const triton::common::HostPolicyCmdlineConfigMap& host_policy_map,
-    const std::string& model_name, const int64_t version,
-    inference::ModelConfig model_config, std::unique_ptr<TritonModel>* model)
+    const int64_t version, inference::ModelConfig model_config,
+    const bool is_config_provided, std::unique_ptr<TritonModel>* model)
 {
   model->reset();
 
   // The model configuration must specify a backend. The name of the
   // corresponding shared library must be libtriton_<backend>.so.
-  if (model_config.backend().empty()) {
+  std::string backend_name = model_config.backend();
+  if (backend_name.empty()) {
     return Status(
         Status::Code::INVALID_ARG,
         "must specify 'backend' for '" + model_config.name() + "'");
   }
 
   // Localize the content of the model repository corresponding to
-  // 'model_name'. This model holds a handle to the localized content
+  // 'model_path'. This model holds a handle to the localized content
   // so that it persists as long as the model is loaded.
-  std::shared_ptr<LocalizedDirectory> localized_model_dir;
-  RETURN_IF_ERROR(LocalizeDirectory(model_path, &localized_model_dir));
+  std::shared_ptr<LocalizedPath> localized_model_dir;
+  RETURN_IF_ERROR(LocalizePath(model_path, &localized_model_dir));
+
+  // Localize paths in backend model config
+  // [FIXME] Remove once a more permanent solution is implemented (DLIS-4211)
+  RETURN_IF_ERROR(LocalizePythonBackendExecutionEnvironmentPath(
+      model_path, &model_config, &localized_model_dir));
 
   // Get some internal configuration values needed for initialization.
   std::string backend_dir;
@@ -94,8 +101,7 @@ TritonModel::Create(
 
   std::string specialized_backend_name;
   RETURN_IF_ERROR(BackendConfigurationSpecializeBackendName(
-      backend_cmdline_config_map, model_config.backend(),
-      &specialized_backend_name));
+      backend_cmdline_config_map, backend_name, &specialized_backend_name));
 
   std::string backend_libname;
   RETURN_IF_ERROR(BackendConfigurationBackendLibraryName(
@@ -108,42 +114,51 @@ TritonModel::Create(
       JoinPath({localized_model_path, std::to_string(version)});
   const std::string global_path =
       JoinPath({backend_dir, specialized_backend_name});
-  const std::vector<std::string> search_paths = {
-      version_path, localized_model_path, global_path};
+  std::vector<std::string> search_paths = {version_path, localized_model_path,
+                                           global_path};
 
   std::string backend_libdir;
   std::string backend_libpath;
-  for (const auto& path : search_paths) {
-    const auto full_path = JoinPath({path, backend_libname});
-    bool exists = false;
-    RETURN_IF_ERROR(FileExists(full_path, &exists));
-    if (exists) {
-      backend_libdir = path;
-      backend_libpath = full_path;
-      break;
-    }
-  }
+  std::string python_runtime_modeldir;
 
+  RETURN_IF_ERROR(ResolveBackendPaths(
+      specialized_backend_name, backend_dir, model_config.name(), search_paths,
+      backend_libname, &backend_libdir, &backend_libpath,
+      &python_runtime_modeldir));
+
+  // `backend_libpath` always points to shared library path.
   if (backend_libpath.empty()) {
     return Status(
-        Status::Code::INVALID_ARG, "unable to find '" + backend_libname +
-                                       "' for model '" + model_config.name() +
-                                       "', searched: " + version_path + ", " +
-                                       model_path + ", " + global_path);
+        Status::Code::INVALID_ARG,
+        "unable to find '" + backend_libname + "' or '" +
+            specialized_backend_name + "/model.py' for model '" +
+            model_config.name() + "', searched: " + version_path + ", " +
+            model_path + ", " + global_path);
   }
 
   // Resolve the global backend configuration with the specific backend
   // configuration
+  bool is_python_based_backend = false;
   triton::common::BackendCmdlineConfig config;
-  RETURN_IF_ERROR(ResolveBackendConfigs(
-      backend_cmdline_config_map, model_config.backend(), config));
+  if (!python_runtime_modeldir.empty()) {
+    // `backend_libdir` points to model.py for python backend based backends.
+    backend_libdir = python_runtime_modeldir;
+    is_python_based_backend = true;
+    // Python backend based backends use configs, specified for python backend
+    // in cmdline.
+    RETURN_IF_ERROR(
+        ResolveBackendConfigs(backend_cmdline_config_map, "python", config));
+  } else {
+    RETURN_IF_ERROR(ResolveBackendConfigs(
+        backend_cmdline_config_map, backend_name, config));
+  }
 
   RETURN_IF_ERROR(SetBackendConfigDefaults(config));
 
   std::shared_ptr<TritonBackend> backend;
   RETURN_IF_ERROR(server->BackendManager()->CreateBackend(
-      model_config.backend(), backend_libdir, backend_libpath, config,
-      &backend));
+      backend_name, backend_libdir, backend_libpath, config,
+      is_python_based_backend, &backend));
 
   // Normalize backend-dependent config
   {
@@ -158,49 +173,219 @@ TritonModel::Create(
   // Create and initialize the model.
   std::unique_ptr<TritonModel> local_model(new TritonModel(
       server, localized_model_dir, backend, min_compute_capability, version,
-      model_config, auto_complete_config));
+      model_config, auto_complete_config, backend_cmdline_config_map,
+      host_policy_map));
 
   TritonModel* raw_local_model = local_model.get();
 
-  // Model initialization is optional... The TRITONBACKEND_Model
-  // object is this TritonModel object. We must set set shared library
-  // path to point to the backend directory in case the backend
-  // library attempts to load additional shared libaries.
+  // Model initialization is optional... The TRITONBACKEND_Model object is this
+  // TritonModel object.
   if (backend->ModelInitFn() != nullptr) {
+    // We must set set shared library path to point to the backend directory in
+    // case the backend library attempts to load additional shared libraries.
+    // Currently, the set and reset function is effective only on Windows, so
+    // there is no need to set path on non-Windows.
+    // However, parallel model loading will not see any speedup on Windows and
+    // the global lock inside the SharedLibrary is a WAR.
+    // [FIXME] Reduce lock WAR on SharedLibrary (DLIS-4300)
+#ifdef _WIN32
     std::unique_ptr<SharedLibrary> slib;
     RETURN_IF_ERROR(SharedLibrary::Acquire(&slib));
     RETURN_IF_ERROR(slib->SetLibraryDirectory(backend->Directory()));
+#endif
 
     TRITONSERVER_Error* err = backend->ModelInitFn()(
         reinterpret_cast<TRITONBACKEND_Model*>(raw_local_model));
 
+#ifdef _WIN32
     RETURN_IF_ERROR(slib->ResetLibraryDirectory());
+#endif
     RETURN_IF_TRITONSERVER_ERROR(err);
   }
 
   // Initialize the model for Triton core usage
-  RETURN_IF_ERROR(local_model->Init());
+  RETURN_IF_ERROR(local_model->Init(is_config_provided));
 
-  bool device_blocking = false;
-  if (local_model->backend_->ExecutionPolicy() ==
-      TRITONBACKEND_EXECUTION_DEVICE_BLOCKING) {
+  RETURN_IF_ERROR(local_model->GetExecutionPolicy(model_config));
+
+  // Initialize the custom batching library for the model, if provided.
+  if (model_config.has_sequence_batching()) {
+    if (model_config.parameters().contains("TRITON_BATCH_STRATEGY_PATH")) {
+      return Status(
+          Status::Code::INVALID_ARG,
+          "TRITON_BATCH_STRATEGY_PATH cannot be specified with "
+          "sequence batcher, using default batching strategy");
+    }
+  } else {
+    std::string batch_libpath;
+    if (model_config.parameters().contains("TRITON_BATCH_STRATEGY_PATH")) {
+      batch_libpath = model_config.parameters()
+                          .at("TRITON_BATCH_STRATEGY_PATH")
+                          .string_value();
+      bool exists = false;
+      RETURN_IF_ERROR(FileExists(batch_libpath, &exists));
+      if (!exists) {
+        return Status(
+            triton::common::Error::Code::NOT_FOUND,
+            ("Batching library path not found: " + batch_libpath).c_str());
+      }
+    } else {
+      const std::string batch_libname = "batchstrategy.so";
+      for (const auto& path : search_paths) {
+        const auto full_path = JoinPath({path, batch_libname});
+        bool exists = false;
+        RETURN_IF_ERROR(FileExists(full_path, &exists));
+        if (exists) {
+          batch_libpath = full_path;
+          break;
+        }
+      }
+    }
+
+    if (!batch_libpath.empty()) {
+      LOG_INFO << "Loading custom batching strategy library " << batch_libpath
+               << " for model " << model_config.name();
+      RETURN_IF_ERROR(local_model->SetBatchingStrategy(batch_libpath));
+    }
+  }
+
+  // Create or update the model instances for this model.
+  std::vector<std::shared_ptr<TritonModelInstance>> added_instances,
+      removed_instances;
+  RETURN_IF_ERROR(local_model->PrepareInstances(
+      model_config, &added_instances, &removed_instances));
+  RETURN_IF_ERROR(local_model->SetConfiguredScheduler(added_instances));
+  local_model->CommitInstances();
+
+  *model = std::move(local_model);
+  return Status::Success;
+}
+
+Status
+TritonModel::UpdateInstanceGroup(const inference::ModelConfig& new_model_config)
+{
+  // Generate normalized model config with new instance group.
+  inference::ModelConfig model_config = config_;
+  model_config.clear_instance_group();
+  model_config.mutable_instance_group()->Add(
+      new_model_config.instance_group().begin(),
+      new_model_config.instance_group().end());
+  RETURN_IF_ERROR(NormalizeInstanceGroup(
+      min_compute_capability_, backend_->BackendAttributes().preferred_groups_,
+      &model_config));
+  RETURN_IF_ERROR(ValidateInstanceGroup(model_config, min_compute_capability_));
+
+  // Prepare the new instances on the new config.
+  std::vector<std::shared_ptr<TritonModelInstance>> added_instances,
+      removed_instances;
+  Status status =
+      PrepareInstances(model_config, &added_instances, &removed_instances);
+  if (!status.IsOk()) {
+    ClearBackgroundInstances();
+    return status;
+  }
+
+  // Update the scheduler.
+  status = UpdateConfiguredScheduler(added_instances, removed_instances);
+  if (!status.IsOk()) {
+    ClearBackgroundInstances();
+    return status;
+  }
+
+  // Commit the instance update.
+  CommitInstances();
+  *config_.mutable_instance_group() = model_config.instance_group();
+
+  return Status::Success;
+}
+
+Status
+TritonModel::GetExecutionPolicy(const inference::ModelConfig& model_config)
+{
+  // Set 'device_blocking_'
+  device_blocking_ = false;
+  if (backend_->ExecutionPolicy() == TRITONBACKEND_EXECUTION_DEVICE_BLOCKING) {
     if (model_config.has_sequence_batching()) {
       LOG_INFO << "Overriding execution policy to "
                   "\"TRITONBACKEND_EXECUTION_BLOCKING\" for sequence model \""
                << model_config.name() << "\"";
     } else {
-      device_blocking = true;
+      device_blocking_ = true;
     }
   }
 
-  // Create and initialize the model instances for this model.
-  RETURN_IF_ERROR(TritonModelInstance::CreateInstances(
-      raw_local_model, backend_cmdline_config_map, host_policy_map,
-      model_config, device_blocking));
+  return Status::Success;
+}
 
-  RETURN_IF_ERROR(local_model->SetConfiguredScheduler());
+Status
+TritonModel::LocateBackendLibrary(
+    const std::vector<std::string> search_paths,
+    const std::string& backend_libname, std::string* backend_libdir,
+    std::string* backend_libpath)
+{
+  for (const auto& path : search_paths) {
+    const auto full_path = JoinPath({path, backend_libname});
+    bool exists = false;
+    RETURN_IF_ERROR(FileExists(full_path, &exists));
+    if (exists) {
+      *backend_libdir = path;
+      *backend_libpath = full_path;
+      break;
+    }
+  }
 
-  *model = std::move(local_model);
+  return Status::Success;
+}
+
+Status
+TritonModel::ResolveBackendPaths(
+    const std::string& backend_name, const std::string& global_backend_dir,
+    const std::string& model_name, std::vector<std::string>& search_paths,
+    const std::string& backend_libname, std::string* backend_libdir,
+    std::string* backend_libpath, std::string* python_runtime_modeldir)
+{
+  // Look for shared library first
+  RETURN_IF_ERROR(LocateBackendLibrary(
+      search_paths, backend_libname, backend_libdir, backend_libpath));
+
+  if (!(*backend_libpath).empty()) {
+    *python_runtime_modeldir = "";
+    return Status::Success;
+  }
+
+  // If not found, then we are processing a python backend based backend.
+  // We look for libtriton_python.so in python backend directory
+  // and model.py in provided custom backend's directory
+  std::string python_backend_dir = JoinPath({global_backend_dir, "python"});
+  bool is_dir;
+  RETURN_IF_ERROR(IsDirectory(python_backend_dir, &is_dir));
+  if (!is_dir) {
+    return Status(
+        Status::Code::INVALID_ARG, "unable to find '" + global_backend_dir +
+                                       "/python', '" + backend_name +
+                                       "' requires python backend to operate.");
+  }
+  search_paths.emplace_back(python_backend_dir);
+  std::string runtime_model_path =
+      JoinPath({global_backend_dir, backend_name, "model.py"});
+  bool exists;
+  RETURN_IF_ERROR(FileExists(runtime_model_path, &exists));
+  if (!exists) {
+    return Status(
+        Status::Code::INVALID_ARG,
+        "unable to find '" + backend_name + "/model.py' for model '" +
+            model_name + "', in " +
+            JoinPath({global_backend_dir, backend_name}));
+  }
+
+  *python_runtime_modeldir = JoinPath({global_backend_dir, backend_name});
+  std::string python_backend_libname;
+  RETURN_IF_ERROR(BackendConfigurationBackendLibraryName(
+      "python", &python_backend_libname));
+
+  RETURN_IF_ERROR(LocateBackendLibrary(
+      search_paths, python_backend_libname, backend_libdir, backend_libpath));
+
   return Status::Success;
 }
 
@@ -212,65 +397,23 @@ TritonModel::ResolveBackendConfigs(
 {
   const auto& global_itr = backend_cmdline_config_map.find(std::string());
   const auto& specific_itr = backend_cmdline_config_map.find(backend_name);
-  if (specific_itr == backend_cmdline_config_map.end() &&
-      global_itr != backend_cmdline_config_map.end()) {
-    for (auto setting : global_itr->second) {
-      config.push_back(setting);
+  std::map<std::string, std::string> lconfig;
+  if (global_itr != backend_cmdline_config_map.end()) {
+    // Accumulate all global settings
+    for (auto& setting : global_itr->second) {
+      lconfig[setting.first] = setting.second;
     }
-  } else if (
-      specific_itr != backend_cmdline_config_map.end() &&
-      global_itr == backend_cmdline_config_map.end()) {
-    for (auto setting : specific_itr->second) {
-      config.push_back(setting);
+  }
+  if (specific_itr != backend_cmdline_config_map.end()) {
+    // Accumulate backend specific settings and override
+    // global settings with specific configs if needed
+    for (auto& setting : specific_itr->second) {
+      lconfig[setting.first] = setting.second;
     }
-  } else if (
-      specific_itr != backend_cmdline_config_map.end() &&
-      global_itr != backend_cmdline_config_map.end()) {
-    triton::common::BackendCmdlineConfig global_backend_config =
-        global_itr->second;
-    triton::common::BackendCmdlineConfig specific_backend_config =
-        specific_itr->second;
-
-    std::sort(global_backend_config.begin(), global_backend_config.end());
-    std::sort(specific_backend_config.begin(), specific_backend_config.end());
-
-    size_t global_index = 0;
-    size_t specific_index = 0;
-    while (global_index < global_backend_config.size() &&
-           specific_index < specific_backend_config.size()) {
-      auto& current_global_setting = global_backend_config.at(global_index);
-      auto& current_specific_setting =
-          specific_backend_config.at(specific_index);
-      if (current_specific_setting.first.compare(
-              current_global_setting.first) == 0) {
-        // specific setting overrides global setting
-        config.push_back(current_specific_setting);
-        ++global_index;
-        ++specific_index;
-      } else if (
-          current_specific_setting.first.compare(current_global_setting.first) <
-          0) {
-        config.push_back(current_specific_setting);
-        ++specific_index;
-      } else {
-        config.push_back(current_global_setting);
-        ++global_index;
-      }
-    }
-
-    // add the rest of the global configs
-    if (global_index < global_backend_config.size()) {
-      auto& current_global_setting = global_backend_config.at(global_index);
-      config.push_back(current_global_setting);
-    }
-
-    // add the rest of the specific settings
-    if (specific_index < specific_backend_config.size()) {
-      auto& current_specific_setting =
-          specific_backend_config.at(specific_index);
-      config.push_back(current_specific_setting);
-    }
-  }  // else empty config
+  }
+  for (auto& final_setting : lconfig) {
+    config.emplace_back(final_setting);
+  }
 
   return Status::Success;
 }
@@ -308,17 +451,232 @@ TritonModel::SetBackendConfigDefaults(
   return Status::Success;
 }
 
-Status
-TritonModel::AddInstance(
-    std::unique_ptr<TritonModelInstance>&& instance, const bool passive)
+std::unordered_map<
+    TritonModelInstance::Signature,
+    std::vector<std::shared_ptr<TritonModelInstance>>>
+TritonModel::IndexInstances() const
 {
-  if (passive) {
-    passive_instances_.emplace_back(std::move(instance));
-  } else {
-    instances_.emplace_back(std::move(instance));
+  std::unordered_map<
+      TritonModelInstance::Signature,
+      std::vector<std::shared_ptr<TritonModelInstance>>>
+      mapped_instances;
+  for (auto* instances : {&instances_, &passive_instances_}) {
+    for (auto& instance : (*instances)) {
+      auto itr = mapped_instances
+                     .emplace(
+                         instance->GetSignature(),
+                         std::vector<std::shared_ptr<TritonModelInstance>>())
+                     .first;
+      itr->second.push_back(instance);
+    }
+  }
+  return mapped_instances;
+}
+
+Status
+TritonModel::PrepareInstances(
+    const inference::ModelConfig& model_config,
+    std::vector<std::shared_ptr<TritonModelInstance>>* added_instances,
+    std::vector<std::shared_ptr<TritonModelInstance>>* removed_instances)
+{
+  added_instances->clear();
+  removed_instances->clear();
+
+  std::unordered_map<
+      TritonModelInstance::Signature,
+      std::vector<std::shared_ptr<TritonModelInstance>>>
+      existing_instances = IndexInstances();
+
+
+  std::vector<std::future<Status>> creation_results;
+  // Used to protect shared states for parallel instance loading
+  std::mutex instance_mu;
+
+  // Deferred will be lazily evaluated when the result is requested. Since the
+  // creation_results are requested serially below, this is equivalent to making
+  // the calls serially.
+  auto launch_policy = std::launch::deferred;
+
+  // Override for testing/debugging purposes
+  bool parallel = backend_->BackendAttributes().parallel_instance_loading_;
+  const char* env = std::getenv("TRITON_PARALLEL_INSTANCE_LOADING");
+  if (env != nullptr) {
+    std::string s_env = std::string(env);
+    if (!s_env.empty()) {
+      parallel = (s_env == "1") ? true : false;
+      LOG_VERBOSE(1)
+          << "Using TRITON_PARALLEL_INSTANCE_LOADING environment variable "
+             "override: "
+          << parallel;
+    }
   }
 
-  return Status::Success;
+  // If the backend supports it, std::launch::async will allow concurrent calls
+  if (parallel) {
+    launch_policy = std::launch::async;
+  }
+
+  // Iterates over all the requested instances on the model config, and decides
+  // if each requested instance can reuse an existing instance or a new instance
+  // is needed.
+  for (const auto& group : model_config.instance_group()) {
+    std::vector<std::string> profile_names;
+    for (const auto& profile_name : group.profile()) {
+      profile_names.push_back(profile_name);
+    }
+    std::vector<TritonModelInstance::SecondaryDevice> secondary_devices;
+    for (const auto& secondary_device : group.secondary_devices()) {
+      secondary_devices.emplace_back(
+          inference::
+              ModelInstanceGroup_SecondaryDevice_SecondaryDeviceKind_Name(
+                  secondary_device.kind()),
+          secondary_device.device_id());
+    }
+    for (int32_t c = 0; c < group.count(); ++c) {
+      std::string instance_name{group.name() + "_" + std::to_string(c)};
+      const bool passive = group.passive();
+      struct InstanceSetting {
+        InstanceSetting(
+            const std::string& policy_name, TRITONSERVER_InstanceGroupKind kind,
+            int32_t device_id,
+            const inference::ModelRateLimiter* rate_limiter_config)
+            : policy_name_(policy_name), kind_(kind), device_id_(device_id),
+              rate_limiter_config_(rate_limiter_config)
+        {
+        }
+        const std::string policy_name_;
+        const TRITONSERVER_InstanceGroupKind kind_;
+        const int32_t device_id_;
+        const inference::ModelRateLimiter* rate_limiter_config_;
+      };
+      std::vector<InstanceSetting> instance_settings;
+      if (group.kind() == inference::ModelInstanceGroup::KIND_CPU) {
+        instance_settings.emplace_back(
+            group.host_policy().empty() ? "cpu" : group.host_policy(),
+            TRITONSERVER_INSTANCEGROUPKIND_CPU, 0 /* device_id */,
+            &group.rate_limiter());
+      } else if (group.kind() == inference::ModelInstanceGroup::KIND_GPU) {
+        for (const int32_t device_id : group.gpus()) {
+          instance_settings.emplace_back(
+              group.host_policy().empty() ? ("gpu_" + std::to_string(device_id))
+                                          : group.host_policy(),
+              TRITONSERVER_INSTANCEGROUPKIND_GPU, device_id,
+              &group.rate_limiter());
+        }
+      } else if (group.kind() == inference::ModelInstanceGroup::KIND_MODEL) {
+        instance_settings.emplace_back(
+            group.host_policy().empty() ? "model" : group.host_policy(),
+            TRITONSERVER_INSTANCEGROUPKIND_MODEL, 0 /* device_id */,
+            &group.rate_limiter());
+      } else {
+        return Status(
+            Status::Code::INVALID_ARG,
+            std::string("instance_group kind ") +
+                ModelInstanceGroup_Kind_Name(group.kind()) + " not supported");
+      }
+      for (const auto& is : instance_settings) {
+        // All the information for the requested instance is ready. Create a
+        // signature that identifies the requested instance.
+        const TritonModelInstance::Signature signature(group, is.device_id_);
+
+        // Check if the requested instance can reuse an existing instance.
+        if (!TritonModelInstance::ShareBackendThread(
+                DeviceBlocking(), is.kind_)) {
+          auto itr = existing_instances.find(signature);
+          if (itr != existing_instances.end() && !itr->second.empty()) {
+            auto existing_instance = itr->second.back();
+            itr->second.pop_back();
+            LOG_VERBOSE(2) << "Re-using model instance named '"
+                           << existing_instance->Name() << "' with device id '"
+                           << existing_instance->DeviceId() << "'";
+            RegisterBackgroundInstance(std::move(existing_instance), passive);
+
+            continue;
+          }
+        }
+
+        // Note that the local variables should be captured by value
+        creation_results.emplace_back(
+            std::async(launch_policy, [=, &instance_mu]() {
+              // The requested instance did not match an existing instance.
+              // Create a new instance.
+              std::shared_ptr<TritonModelInstance> new_instance;
+              RETURN_IF_ERROR(TritonModelInstance::CreateInstance(
+                  this, instance_name, signature, is.kind_, is.device_id_,
+                  profile_names, passive, is.policy_name_,
+                  *is.rate_limiter_config_, secondary_devices, &new_instance));
+              {
+                std::lock_guard<std::mutex> lk(instance_mu);
+                added_instances->push_back(new_instance);
+                RegisterBackgroundInstance(std::move(new_instance), passive);
+              }
+              // Keep logging to a single stream operator to avoid interweaving
+              const auto msg = "Created model instance named '" +
+                               instance_name + "' with device id '" +
+                               std::to_string(is.device_id_) + "'";
+              LOG_VERBOSE(2) << msg;
+              return Status::Success;
+            }));
+      }
+    }
+  }
+
+  // Any existing instances not reused will be removed.
+  for (auto pair : existing_instances) {
+    removed_instances->insert(
+        removed_instances->end(), pair.second.begin(), pair.second.end());
+  }
+
+  auto status = Status::Success;
+  for (auto& cr : creation_results) {
+    auto lstatus = cr.get();
+    if (!lstatus.IsOk()) {
+      LOG_ERROR << "ERROR: Failed to create instance: " << lstatus.Message();
+      status = lstatus;
+    }
+  }
+
+  return status;
+}
+
+void
+TritonModel::CommitInstances()
+{
+  instances_.swap(bg_instances_);
+  passive_instances_.swap(bg_passive_instances_);
+  ClearBackgroundInstances();
+}
+
+void
+TritonModel::RegisterBackgroundInstance(
+    std::shared_ptr<TritonModelInstance>&& instance, const bool passive)
+{
+  if (passive) {
+    bg_passive_instances_.emplace_back(std::move(instance));
+  } else {
+    bg_instances_.emplace_back(std::move(instance));
+  }
+}
+
+void
+TritonModel::ClearBackgroundInstances()
+{
+  bg_instances_.clear();
+  bg_passive_instances_.clear();
+}
+
+std::vector<std::shared_ptr<TritonModelInstance>>
+TritonModel::GetInstancesByDevice(int32_t device_id) const
+{
+  std::vector<std::shared_ptr<TritonModelInstance>> result;
+  // Do not match passive instances, as they do not have a backend thread.
+  // Do not match foreground instances, as backend threads cannot be updated.
+  for (auto& instance : bg_instances_) {
+    if (instance->DeviceId() == device_id) {
+      result.push_back(instance);
+    }
+  }
+  return result;
 }
 
 Status
@@ -373,7 +731,8 @@ TritonModel::UpdateModelConfig(
 }
 
 Status
-TritonModel::SetConfiguredScheduler()
+TritonModel::SetConfiguredScheduler(
+    const std::vector<std::shared_ptr<TritonModelInstance>>& new_instances)
 {
   std::unique_ptr<Scheduler> scheduler;
 
@@ -384,7 +743,7 @@ TritonModel::SetConfiguredScheduler()
   // non-variable and if there are no shape tensors... so we don't
   // enable it in that case for efficiency reasons.
   std::unordered_map<std::string, bool> enforce_equal_shape_tensors;
-  for (const auto input : config_.input()) {
+  for (const auto& input : config_.input()) {
     if (input.is_shape_tensor()) {
       enforce_equal_shape_tensors.insert({input.name(), true});
     } else if (
@@ -398,16 +757,18 @@ TritonModel::SetConfiguredScheduler()
   // otherwise use the default DynamicBatchScheduler.
   if (config_.has_sequence_batching()) {
     // Sequence batcher
+    if (config_.parameters().contains("TRITON_BATCH_STRATEGY_PATH")) {
+      LOG_ERROR << "TRITON_BATCH_STRATEGY_PATH cannot be specified with "
+                   "sequence batcher, using default batching strategy";
+    }
     RETURN_IF_ERROR(SequenceBatchScheduler::Create(
-        this, enforce_equal_shape_tensors, &scheduler));
+        this, new_instances, enforce_equal_shape_tensors, &scheduler));
   } else if (config_.has_dynamic_batching()) {
     // Dynamic batcher
     RETURN_IF_ERROR(DynamicBatchScheduler::Create(
         this, nullptr, 0 /*nice*/, true /* dynamic_batching_enabled */,
         config_.max_batch_size(), enforce_equal_shape_tensors,
-        config_.dynamic_batching(),
-        config_.response_cache().enable() /* response_cache_enable */,
-        &scheduler));
+        config_.dynamic_batching(), &scheduler));
   } else {
     // Default scheduler. Use dynamic batch scheduler (with batching
     // disabled) as the default scheduler.
@@ -417,7 +778,6 @@ TritonModel::SetConfiguredScheduler()
         std::unordered_map<
             std::string, bool>() /* enforce_equal_shape_tensors */,
         false /* preserve_ordering */,
-        config_.response_cache().enable() /* response_cache_enable */,
         std::set<int32_t>() /* preferred_batch_sizes */,
         0 /* max_queue_delay_microseconds */, &scheduler));
   }
@@ -426,20 +786,78 @@ TritonModel::SetConfiguredScheduler()
 }
 
 Status
-TritonModel::Initialize()
+TritonModel::UpdateConfiguredScheduler(
+    const std::vector<std::shared_ptr<TritonModelInstance>>& added_instances,
+    const std::vector<std::shared_ptr<TritonModelInstance>>& removed_instances)
 {
-  for (const auto& instance : instances_) {
-    RETURN_IF_ERROR(instance->Initialize());
+  if (config_.has_sequence_batching()) {
+    SequenceBatchScheduler* sched =
+        dynamic_cast<SequenceBatchScheduler*>(scheduler_.get());
+    if (sched == nullptr) {
+      return Status(
+          Status::Code::INTERNAL,
+          "Unable to downcast from 'Scheduler' to 'SequenceBatchScheduler' "
+          "during scheduler update");
+    }
+    return sched->Update(added_instances, removed_instances);
   }
 
+  // Non-sequence scheduler does not need to be updated, because other
+  // schedulers do not require the information on model instances to function,
+  // and only interact with the rate limiter.
   return Status::Success;
 }
 
 Status
-TritonModel::WarmUp()
+TritonModel::SetBatchingStrategy(const std::string& batch_libpath)
 {
-  for (const auto& instance : instances_) {
-    RETURN_IF_ERROR(instance->WarmUp());
+  // Load library and functions.
+  std::unique_ptr<SharedLibrary> slib;
+  RETURN_IF_ERROR(SharedLibrary::Acquire(&slib));
+
+  RETURN_IF_ERROR(slib->OpenLibraryHandle(batch_libpath, &batch_dlhandle_));
+  RETURN_IF_ERROR(slib->GetEntrypoint(
+      batch_dlhandle_, "TRITONBACKEND_ModelBatchIncludeRequest",
+      true /* optional */, reinterpret_cast<void**>(&batch_incl_fn_)));
+  RETURN_IF_ERROR(slib->GetEntrypoint(
+      batch_dlhandle_, "TRITONBACKEND_ModelBatchInitialize",
+      true /* optional */, reinterpret_cast<void**>(&batch_init_fn_)));
+  RETURN_IF_ERROR(slib->GetEntrypoint(
+      batch_dlhandle_, "TRITONBACKEND_ModelBatchFinalize", true /* optional */,
+      reinterpret_cast<void**>(&batch_fini_fn_)));
+  RETURN_IF_ERROR(slib->GetEntrypoint(
+      batch_dlhandle_, "TRITONBACKEND_ModelBatcherFinalize",
+      true /* optional */, reinterpret_cast<void**>(&batcher_fini_fn_)));
+  RETURN_IF_ERROR(slib->GetEntrypoint(
+      batch_dlhandle_, "TRITONBACKEND_ModelBatcherInitialize",
+      true /* optional */, reinterpret_cast<void**>(&batcher_init_fn_)));
+
+  // If one custom batching function is defined, all must be.
+  const bool defined_some = batch_incl_fn_ || batch_init_fn_ ||
+                            batch_fini_fn_ || batcher_init_fn_ ||
+                            batcher_fini_fn_;
+  const bool defined_all = batch_incl_fn_ && batch_init_fn_ && batch_fini_fn_ &&
+                           batcher_init_fn_ && batcher_fini_fn_;
+  if (defined_some && !defined_all) {
+    ClearHandles();
+    return Status(
+        Status::Code::INVALID_ARG,
+        batch_libpath +
+            " does not define all "
+            "required custom batching functions for model " +
+            config_.name());
+  }
+  // If a custom batcher is provided, initialize it.
+  if (batcher_init_fn_) {
+    TRITONSERVER_Error* err = batcher_init_fn_(
+        Batcher(), reinterpret_cast<TRITONBACKEND_Model*>(this));
+    if (err) {
+      auto status = Status(
+          TritonCodeToStatusCode(TRITONSERVER_ErrorCode(err)),
+          TRITONSERVER_ErrorMessage(err));
+      TRITONSERVER_ErrorDelete(err);
+      return status;
+    }
   }
 
   return Status::Success;
@@ -447,14 +865,18 @@ TritonModel::WarmUp()
 
 TritonModel::TritonModel(
     InferenceServer* server,
-    const std::shared_ptr<LocalizedDirectory>& localized_model_dir,
+    const std::shared_ptr<LocalizedPath>& localized_model_dir,
     const std::shared_ptr<TritonBackend>& backend,
     const double min_compute_capability, const int64_t version,
-    const inference::ModelConfig& config, const bool auto_complete_config)
+    const inference::ModelConfig& config, const bool auto_complete_config,
+    const triton::common::BackendCmdlineConfigMap& backend_cmdline_config_map,
+    const triton::common::HostPolicyCmdlineConfigMap& host_policy_map)
     : Model(
           min_compute_capability, localized_model_dir->Path(), version, config),
       server_(server), min_compute_capability_(min_compute_capability),
       auto_complete_config_(auto_complete_config),
+      backend_cmdline_config_map_(backend_cmdline_config_map),
+      host_policy_map_(host_policy_map), device_blocking_(false),
       localized_model_dir_(localized_model_dir), backend_(backend),
       state_(nullptr)
 {
@@ -462,10 +884,28 @@ TritonModel::TritonModel(
 
 TritonModel::~TritonModel()
 {
+  // If there is a custom batcher, finalize it.
+  if (batcher_fini_fn_) {
+    TRITONSERVER_Error* err = batcher_fini_fn_(*Batcher());
+    *Batcher() = nullptr;
+    if (err) {
+      LOG_ERROR << "Custom batcher finalization failed for model "
+                << config_.name() << ": " << TRITONSERVER_ErrorMessage(err);
+      TRITONSERVER_ErrorDelete(err);
+    }
+  }
+
+  // Clear library handles.
+  ClearHandles();
+
+  // Explicitly delete/finalize the scheduler before the model instances.
+  scheduler_.reset(nullptr);
+
   // Explicitly delete/finalize all model instances before finalizing
   // the model itself.
   instances_.clear();
   passive_instances_.clear();
+  ClearBackgroundInstances();
 
   // Unregister itself from the rate limiter. Note this should happen
   // after all instances are destructed. Destrucing instances ensures
@@ -480,6 +920,28 @@ TritonModel::~TritonModel()
         backend_->ModelFiniFn()(reinterpret_cast<TRITONBACKEND_Model*>(this)),
         "failed finalizing model");
   }
+}
+
+void
+TritonModel::ClearHandles()
+{
+  if (batch_dlhandle_ == nullptr) {
+    return;
+  }
+
+  {
+    std::unique_ptr<SharedLibrary> slib;
+    LOG_STATUS_ERROR(
+        SharedLibrary::Acquire(&slib), "~TritonModel::ClearHandles");
+    LOG_STATUS_ERROR(
+        slib->CloseLibraryHandle(batch_dlhandle_), "TritonModel::ClearHandles");
+  }
+  batch_dlhandle_ = nullptr;
+  batch_incl_fn_ = nullptr;
+  batch_init_fn_ = nullptr;
+  batch_fini_fn_ = nullptr;
+  batcher_init_fn_ = nullptr;
+  batcher_fini_fn_ = nullptr;
 }
 
 extern "C" {
@@ -592,6 +1054,16 @@ TRITONBACKEND_ModelSetState(TRITONBACKEND_Model* model, void* state)
   return nullptr;  // success
 }
 
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_ModelReportMemoryUsage(
+    TRITONBACKEND_Model* model, TRITONSERVER_BufferAttributes** usage,
+    uint32_t usage_size)
+{
+  TritonModel* tm = reinterpret_cast<TritonModel*>(model);
+  tm->SetMemoryUsage({reinterpret_cast<BufferAttributes**>(usage), usage_size});
+  return nullptr;  // success
+}
+
 ///
 /// TRITONBACKEND_Request
 ///
@@ -625,6 +1097,17 @@ TRITONBACKEND_RequestFlags(TRITONBACKEND_Request* request, uint32_t* flags)
   *flags = tr->Flags();
   return nullptr;  // success
 }
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_RequestIsCancelled(
+    TRITONBACKEND_Request* request, bool* is_cancelled)
+{
+  InferenceRequest* tr = reinterpret_cast<InferenceRequest*>(request);
+
+  RETURN_TRITONSERVER_ERROR_IF_ERROR(tr->IsCancelled(is_cancelled));
+  return nullptr;
+}
+
 
 TRITONAPI_DECLSPEC TRITONSERVER_Error*
 TRITONBACKEND_RequestCorrelationIdString(
@@ -807,6 +1290,25 @@ TRITONBACKEND_RequestRelease(
   return nullptr;  // success
 }
 
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_RequestTrace(
+    TRITONBACKEND_Request* request, TRITONSERVER_InferenceTrace** trace)
+{
+#ifdef TRITON_ENABLE_TRACING
+  InferenceRequest* tr = reinterpret_cast<InferenceRequest*>(request);
+  if (tr->TraceProxy() != nullptr) {
+    *trace = reinterpret_cast<TRITONSERVER_InferenceTrace*>(
+        tr->TraceProxy()->Trace());
+  } else {
+    *trace = nullptr;
+  }
+  return nullptr;  // success
+#else
+  return TRITONSERVER_ErrorNew(
+      TRITONSERVER_ERROR_UNSUPPORTED, "tracing is not supported");
+#endif  // TRITON_ENABLE_TRACING
+}
+
 ///
 /// TRITONBACKEND_State
 ///
@@ -876,8 +1378,8 @@ TRITONBACKEND_StateBuffer(
     void* lbuffer =
         memory->MutableBuffer(&current_memory_type, &current_memory_type_id);
 
-    // If the requested memory type doesn't match the current buffer, allocate a
-    // new buffer with the requested memory type and memory type id.
+    // If the requested memory type doesn't match the current buffer, allocate
+    // a new buffer with the requested memory type and memory type id.
     if (current_memory_type == *memory_type &&
         current_memory_type_id == *memory_type_id) {
       *buffer = lbuffer;
@@ -954,6 +1456,17 @@ TRITONBACKEND_ResponseFactorySendFlags(
   }
   return nullptr;  // success
 }
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_ResponseFactoryIsCancelled(
+    TRITONBACKEND_ResponseFactory* factory, bool* is_cancelled)
+{
+  std::shared_ptr<InferenceResponseFactory>* response_factory =
+      reinterpret_cast<std::shared_ptr<InferenceResponseFactory>*>(factory);
+  *is_cancelled = (*response_factory)->IsCancelled();
+  return nullptr;  // success
+}
+
 
 ///
 /// TRITONBACKEND_Response
@@ -1091,6 +1604,44 @@ TRITONBACKEND_ResponseSend(
   return nullptr;  // success
 }
 
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_RequestParameterCount(
+    TRITONBACKEND_Request* request, uint32_t* count)
+{
+  InferenceRequest* lrequest = reinterpret_cast<InferenceRequest*>(request);
+
+  const auto& parameters = lrequest->Parameters();
+  *count = parameters.size();
+
+  return nullptr;  // Success
+}
+
+TRITONBACKEND_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_RequestParameter(
+    TRITONBACKEND_Request* request, const uint32_t index, const char** key,
+    TRITONSERVER_ParameterType* type, const void** vvalue)
+{
+  InferenceRequest* lrequest = reinterpret_cast<InferenceRequest*>(request);
+
+  const auto& parameters = lrequest->Parameters();
+  if (index >= parameters.size()) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG,
+        ("out of bounds index " + std::to_string(index) +
+         std::string(": request has ") + std::to_string(parameters.size()) +
+         " parameters")
+            .c_str());
+  }
+
+  const InferenceParameter& param = parameters[index];
+
+  *key = param.Name().c_str();
+  *type = param.Type();
+  *vvalue = param.ValuePointer();
+
+  return nullptr;  // Success
+}
+
 ///
 /// TRITONBACKEND_Input
 ///
@@ -1171,7 +1722,8 @@ TRITONBACKEND_InputBuffer(
   InferenceRequest::Input* ti =
       reinterpret_cast<InferenceRequest::Input*>(input);
   Status status = ti->DataBuffer(
-      index, buffer, buffer_byte_size, memory_type, memory_type_id);
+      index, buffer, reinterpret_cast<size_t*>(buffer_byte_size), memory_type,
+      memory_type_id);
   if (!status.IsOk()) {
     *buffer = nullptr;
     *buffer_byte_size = 0;
@@ -1211,10 +1763,11 @@ TRITONBACKEND_InputBufferForHostPolicy(
   Status status =
       (host_policy_name == nullptr)
           ? ti->DataBuffer(
-                index, buffer, buffer_byte_size, memory_type, memory_type_id)
+                index, buffer, reinterpret_cast<size_t*>(buffer_byte_size),
+                memory_type, memory_type_id)
           : ti->DataBufferForHostPolicy(
-                index, buffer, buffer_byte_size, memory_type, memory_type_id,
-                host_policy_name);
+                index, buffer, reinterpret_cast<size_t*>(buffer_byte_size),
+                memory_type, memory_type_id, host_policy_name);
   if (!status.IsOk()) {
     *buffer = nullptr;
     *buffer_byte_size = 0;
@@ -1288,6 +1841,70 @@ TRITONBACKEND_BackendAttributeAddPreferredInstanceGroup(
     }
   }
   return nullptr;
+}
+
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_BackendAttributeSetParallelModelInstanceLoading(
+    TRITONBACKEND_BackendAttribute* backend_attributes, bool enabled)
+{
+  auto ba = reinterpret_cast<TritonBackend::Attribute*>(backend_attributes);
+  ba->parallel_instance_loading_ = enabled;
+  return nullptr;
+}
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_InferenceResponseOutputByName(
+    TRITONBACKEND_Response* response, const char* name,
+    TRITONSERVER_DataType* datatype, const int64_t** shape, uint64_t* dim_count)
+{
+  InferenceResponse* tr = reinterpret_cast<InferenceResponse*>(response);
+
+  const auto& outputs = tr->Outputs();
+  uint32_t output_count = outputs.size();
+  std::string output_name = std::string(name);
+
+  for (uint32_t idx = 0; idx < output_count; ++idx) {
+    if (outputs[idx].Name() == output_name) {
+      *datatype = DataTypeToTriton(outputs[idx].DType());
+      const std::vector<int64_t>& oshape = outputs[idx].Shape();
+      *shape = &oshape[0];
+      *dim_count = oshape.size();
+      return nullptr;  // success
+    }
+  }
+  return TRITONSERVER_ErrorNew(
+      TRITONSERVER_ERROR_NOT_FOUND,
+      ("Output name " + output_name + "not found.").c_str());
+}
+
+TRITONAPI_DECLSPEC TRITONSERVER_Error*
+TRITONBACKEND_InferenceResponseOutput(
+    TRITONBACKEND_Response* response, const uint32_t index, const char** name,
+    TRITONSERVER_DataType* datatype, const int64_t** shape, uint64_t* dim_count)
+{
+  InferenceResponse* tr = reinterpret_cast<InferenceResponse*>(response);
+
+  const auto& outputs = tr->Outputs();
+  if (index >= outputs.size()) {
+    return TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INVALID_ARG,
+        ("out of bounds index " + std::to_string(index) +
+         std::string(": response has ") + std::to_string(outputs.size()) +
+         " outputs")
+            .c_str());
+  }
+
+  const InferenceResponse::Output& output = outputs[index];
+
+  *name = output.Name().c_str();
+  *datatype = DataTypeToTriton(output.DType());
+
+  const std::vector<int64_t>& oshape = output.Shape();
+  *shape = &oshape[0];
+  *dim_count = oshape.size();
+
+  return nullptr;  // success
 }
 
 }  // extern C

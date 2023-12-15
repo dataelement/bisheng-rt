@@ -29,7 +29,8 @@
 #include <iostream>
 #include <iterator>
 #include <sstream>
-#include "filesystem.h"
+
+#include "filesystem/api.h"
 
 namespace triton { namespace core {
 

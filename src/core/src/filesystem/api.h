@@ -26,8 +26,9 @@
 #pragma once
 
 #include <string>
+
+#include "../status.h"
 #include "google/protobuf/message.h"
-#include "status.h"
 
 namespace triton { namespace core {
 
@@ -36,30 +37,36 @@ enum class FileSystemType { LOCAL, GCS, S3, AS };
 // This class stores the paths of local temporary files needed for loading
 // models from Cloud repositories and performs necessary cleanup after the
 // models are loaded.
-class LocalizedDirectory {
+class LocalizedPath {
  public:
-  // Create an object for a directory path that is already local.
-  LocalizedDirectory(const std::string& original_path)
+  // Create an object for a path that is already local.
+  LocalizedPath(const std::string& original_path)
       : original_path_(original_path)
   {
   }
 
-  // Create an object for a remote directory path. Store both the
-  // original path and the temporary local path.
-  LocalizedDirectory(
-      const std::string& original_path, const std::string& local_path)
+  // Create an object for a remote path. Store both the original path and the
+  // temporary local path.
+  LocalizedPath(const std::string& original_path, const std::string& local_path)
       : original_path_(original_path), local_path_(local_path)
   {
   }
 
   // Destructor. Remove temporary local storage associated with the object.
-  ~LocalizedDirectory();
+  // If the local path is a directory, delete the directory.
+  // If the local path is a file, delete the directory containing the file.
+  ~LocalizedPath();
 
   // Return the localized path represented by this object.
   const std::string& Path() const
   {
     return (local_path_.empty()) ? original_path_ : local_path_;
   }
+
+  // Maintain a vector of LocalizedPath that should be kept available in the
+  // tmp directory for the lifetime of this object
+  // FIXME: Remove when no longer required
+  std::vector<std::shared_ptr<LocalizedPath>> other_localized_path;
 
  private:
   std::string original_path_;
@@ -87,7 +94,7 @@ std::string BaseName(const std::string& path);
 std::string DirName(const std::string& path);
 
 /// Does a file or directory exist?
-/// \param path The path to check for existance.
+/// \param path The path to check for existence.
 /// \param exists Returns true if file/dir exists
 /// \return Error status if unable to perform the check
 Status FileExists(const std::string& path, bool* exists);
@@ -99,6 +106,8 @@ Status FileExists(const std::string& path, bool* exists);
 Status IsDirectory(const std::string& path, bool* is_dir);
 
 /// Get file modification time in nanoseconds.
+/// A file is considered modified in Triton when its binary content has changed
+/// including the action of replacing it with another file.
 /// \param path The path.
 /// \param mtime_ns Returns the file modification time. For some filesystems a
 /// file/folder may not have a modification time, in that case return 0.
@@ -134,13 +143,13 @@ Status GetDirectoryFiles(
 /// \return Error status
 Status ReadTextFile(const std::string& path, std::string* contents);
 
-/// Create an object representing a local copy of a directory.
-/// \param path The path of the directory.
-/// \param localized Returns the LocalizedDirectory object
-/// representing the local copy of the directory.
+/// Create an object representing a local copy of a path.
+/// \param path The path of the directory or file.
+/// \param localized Returns the LocalizedPath object
+/// representing the local copy of the path.
 /// \return Error status
-Status LocalizeDirectory(
-    const std::string& path, std::shared_ptr<LocalizedDirectory>* localized);
+Status LocalizePath(
+    const std::string& path, std::shared_ptr<LocalizedPath>* localized);
 
 /// Write a string to a file.
 /// \param path The path of the file.
@@ -189,10 +198,19 @@ Status MakeDirectory(const std::string& dir, const bool recursive);
 /// \return Error status
 Status MakeTemporaryDirectory(const FileSystemType type, std::string* temp_dir);
 
-/// Delete a directory.
-/// \param path Returns the path to the directory.
+/// Create a temporary directory of the specified filesystem type
+/// in a provided location.
+/// \param type The type of the filesystem.
+/// \param  dir_path The specified path.
+/// \param temp_dir Returns the path to the temporary directory.
 /// \return Error status
-Status DeleteDirectory(const std::string& path);
+Status MakeTemporaryDirectory(
+    const FileSystemType type, std::string dir_path, std::string* temp_dir);
+
+/// Delete a path.
+/// \param path The path to the directory or file.
+/// \return Error status
+Status DeletePath(const std::string& path);
 
 /// Infer the filesystem type from the given path.
 /// \param path The path to infer the filesystem type from.

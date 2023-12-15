@@ -1,4 +1,4 @@
-// Copyright 2020-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2020-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -28,6 +28,8 @@
 
 #include <algorithm>
 #include <deque>
+
+#include "constants.h"
 #include "model.h"
 #include "model_config_utils.h"
 #include "server.h"
@@ -103,9 +105,97 @@ InferenceRequest::InferenceRequest(
     Model* model, const int64_t requested_model_version)
     : needs_normalization_(true), model_raw_(model),
       requested_model_version_(requested_model_version), flags_(0),
-      correlation_id_(0), batch_size_(0), timeout_us_(0), collect_stats_(true)
+      correlation_id_(0), batch_size_(0), timeout_us_(0), collect_stats_(true),
+      state_(InferenceRequest::State::INITIALIZED), null_request_(false)
 {
   SetPriority(0);
+}
+
+Status
+InferenceRequest::SetState(InferenceRequest::State new_state)
+{
+  LOG_VERBOSE(1) << LogRequest() << "Setting state from " << state_ << " to "
+                 << new_state;
+  // No-op if this is already the current state, or if this is a null request.
+  if (new_state == state_ || null_request_) {
+    return Status::Success;
+  }
+
+  // Generate error when called rather than copying it into every case below.
+  const auto generate_error = [&]() {
+    std::stringstream ss;
+    ss << LogRequest() << "Invalid request state transition from " << state_
+       << " to " << new_state;
+    return Status(Status::Code::INTERNAL, ss.str());
+  };
+
+  // Define state transitions
+  switch (state_) {
+    case InferenceRequest::State::INITIALIZED: {
+      if (new_state == InferenceRequest::State::PENDING) {
+        IncrementPendingRequestCount();
+      } else if (new_state == InferenceRequest::State::RELEASED) {
+        // No-op when moving from initialized to released, just releasing early.
+      } else {
+        return generate_error();
+      }
+      break;
+    }
+    case InferenceRequest::State::PENDING: {
+      // Request may move from pending to either execution when scheduled to
+      // backend, or released early due to some error.
+      if (new_state == InferenceRequest::State::EXECUTING ||
+          new_state == InferenceRequest::State::RELEASED) {
+        DecrementPendingRequestCount();
+      } else {
+        // Unexpected state transition
+        return generate_error();
+      }
+      break;
+    }
+    case InferenceRequest::State::EXECUTING: {
+      if (new_state != InferenceRequest::State::RELEASED) {
+        return generate_error();
+      }
+      break;
+    }
+    case InferenceRequest::State::RELEASED: {
+      if (new_state != InferenceRequest::State::INITIALIZED) {
+        // Only transition currently supported after release is to start over
+        // again, such as re-using request objects for multiple inferences.
+        return generate_error();
+      }
+      break;
+    }
+  }
+  state_ = new_state;
+  return Status::Success;
+}
+
+void
+InferenceRequest::IncrementPendingRequestCount()
+{
+#ifdef TRITON_ENABLE_METRICS
+  // Pending request count should always be 0 or 1 per-request. If a request
+  // increments the count, it should not be incremented again until decremented.
+  auto reporter = model_raw_->MetricReporter();
+  if (reporter) {
+    reporter->IncrementGauge(kPendingRequestMetric, 1);
+  }
+#endif  // TRITON_ENABLE_METRICS
+}
+
+void
+InferenceRequest::DecrementPendingRequestCount()
+{
+#ifdef TRITON_ENABLE_METRICS
+  // Pending request count should always be 0 or 1 per-request. A request should
+  // not decrement the count unless it has already been incremented.
+  auto reporter = model_raw_->MetricReporter();
+  if (reporter) {
+    reporter->DecrementGauge(kPendingRequestMetric, 1);
+  }
+#endif  // TRITON_ENABLE_METRICS
 }
 
 const std::string&
@@ -121,13 +211,43 @@ InferenceRequest::ActualModelVersion() const
 }
 
 void
-InferenceRequest::SetPriority(uint32_t p)
+InferenceRequest::SetPriority(uint64_t p)
 {
   if ((p == 0) || (p > model_raw_->MaxPriorityLevel())) {
     priority_ = model_raw_->DefaultPriorityLevel();
   } else {
     priority_ = p;
   }
+}
+
+Status
+InferenceRequest::AddParameter(const char* name, const char* value)
+{
+  parameters_.emplace_back(name, value);
+  return Status::Success;
+}
+
+Status
+InferenceRequest::AddParameter(const char* name, const int64_t value)
+{
+  parameters_.emplace_back(name, value);
+  return Status::Success;
+}
+
+Status
+InferenceRequest::AddParameter(const char* name, const bool value)
+{
+  parameters_.emplace_back(name, value);
+  return Status::Success;
+}
+
+Status
+InferenceRequest::SetParameters(
+    const std::deque<InferenceParameter>& parameters)
+{
+  // NOTE: For BYTES parameters, this will shallow copy the pointer for now.
+  parameters_ = parameters;
+  return Status::Success;
 }
 
 #ifdef TRITON_ENABLE_TRACING
@@ -258,6 +378,7 @@ InferenceRequest::OutputBufferProperties(
 Status
 InferenceRequest::Run(std::unique_ptr<InferenceRequest>& request)
 {
+  RETURN_IF_ERROR(request->SetState(InferenceRequest::State::PENDING));
   return request->model_raw_->Enqueue(request);
 }
 
@@ -329,6 +450,9 @@ InferenceRequest::Release(
   }
 #endif  // TRITON_ENABLE_TRACING
 
+  LOG_STATUS_ERROR(
+      request->SetState(InferenceRequest::State::RELEASED),
+      "Failed to set released state");
   void* userp = request->release_userp_;
   auto& release_fn = request->release_fn_;
   release_fn(
@@ -339,11 +463,12 @@ InferenceRequest::Release(
 InferenceRequest*
 InferenceRequest::CopyAsNull(const InferenceRequest& from)
 {
-  // Create a copy of 'from' request with artifical inputs and no requested
+  // Create a copy of 'from' request with artificial inputs and no requested
   // outputs. Maybe more efficient to share inputs and other metadata,
   // but that binds the Null request with 'from' request's lifecycle.
   std::unique_ptr<InferenceRequest> lrequest(
       new InferenceRequest(from.model_raw_, from.requested_model_version_));
+  lrequest->null_request_ = true;
   lrequest->needs_normalization_ = false;
   lrequest->batch_size_ = from.batch_size_;
   lrequest->collect_stats_ = false;
@@ -399,7 +524,7 @@ InferenceRequest::CopyAsNull(const InferenceRequest& from)
   // Second pass
   size_t max_byte_size = 0;
   size_t max_str_byte_size = 0;
-  const std::string* max_input_name;
+  const std::string* max_input_name = nullptr;
   for (const auto& input : from.OriginalInputs()) {
     // Skip shape tensors in this pass
     if (input.second.IsShapeTensor()) {
@@ -453,7 +578,7 @@ InferenceRequest::CopyAsNull(const InferenceRequest& from)
     *new_input->MutableShapeWithBatchDim() = input.second.ShapeWithBatchDim();
 
     // Note that the input that have max byte size will be responsible for
-    // holding the artifical data, while other inputs will hold a reference to
+    // holding the artificial data, while other inputs will hold a reference to
     // it with byte size that matches 'from'
     if (input.first == *max_input_name) {
       new_input->SetData(data);
@@ -474,6 +599,7 @@ InferenceRequest::CopyAsNull(const InferenceRequest& from)
   lrequest->SetResponseCallback(
       &null_allocator, nullptr, NullResponseComplete, nullptr);
   lrequest->SetReleaseCallback(NullRequestComplete, nullptr);
+  lrequest->SetResponseFactory();
 
   // Must normalize inputs here...
   for (auto& pr : lrequest->original_inputs_) {
@@ -703,6 +829,7 @@ InferenceRequest::PrepareForInference()
   // inference execution.
   inputs_.clear();
   override_inputs_.clear();
+  SetResponseFactory();
 
   // Renormalize if anything has changed in the inference request in a
   // way that could impact renormalization.
@@ -726,8 +853,10 @@ InferenceRequest::PrepareForInference()
   request_start_ns_ = 0;
 #endif  // TRITON_ENABLE_STATS
 
-  LOG_VERBOSE(1) << LogRequest() << "prepared: " << *this;
+  // Help enforce that PrepareForInference() is called prior to Run().
+  RETURN_IF_ERROR(SetState(InferenceRequest::State::INITIALIZED));
 
+  LOG_VERBOSE(1) << LogRequest() << "prepared: " << *this;
   return Status::Success;
 }
 
@@ -785,7 +914,9 @@ InferenceRequest::Normalize()
       if (!has_one_element) {
         return Status(
             Status::Code::INVALID_ARG, LogRequest() +
-                                           "For BYTE datatype raw input, the "
+                                           "For BYTE datatype raw input '" +
+                                           config_input.name() +
+                                           "', the "
                                            "model must have input shape [1]");
       }
       // In the case of BYTE data type, we will prepend the byte size to follow
@@ -924,13 +1055,13 @@ InferenceRequest::Normalize()
     if (input.DType() != input_config->data_type()) {
       return Status(
           Status::Code::INVALID_ARG,
-          LogRequest() + "inference input data-type is '" +
+          LogRequest() + "inference input '" + pr.first + "' data-type is '" +
               std::string(
                   triton::common::DataTypeToProtocolString(input.DType())) +
-              "', model expects '" +
+              "', but model '" + ModelName() + "' expects '" +
               std::string(triton::common::DataTypeToProtocolString(
                   input_config->data_type())) +
-              "' for '" + ModelName() + "'");
+              "'");
     }
 
     // Validate input shape
@@ -960,8 +1091,16 @@ InferenceRequest::Normalize()
 
       if (!match_config) {
         triton::common::DimsList full_dims;
+        std::string implicit_batch_note = "";
         if (model_config.max_batch_size() > 0) {
           full_dims.Add(triton::common::WILDCARD_DIM);
+          implicit_batch_note =
+              "NOTE: Setting a non-zero max_batch_size in the model config "
+              "requires a batch dimension to be prepended to each input shape. "
+              "If you want to specify the full shape including the batch dim "
+              "in your input dims config, try setting max_batch_size to zero. "
+              "See the model configuration docs for more info on "
+              "max_batch_size.";
         }
         for (int i = 0; i < input_config->dims_size(); ++i) {
           full_dims.Add(input_config->dims(i));
@@ -971,7 +1110,8 @@ InferenceRequest::Normalize()
             LogRequest() + "unexpected shape for input '" + pr.first +
                 "' for model '" + ModelName() + "'. Expected " +
                 triton::common::DimsListToString(full_dims) + ", got " +
-                triton::common::DimsListToString(input.OriginalShape()));
+                triton::common::DimsListToString(input.OriginalShape()) + ". " +
+                implicit_batch_note);
       }
     }
 
@@ -1119,36 +1259,6 @@ InferenceRequest::ReportStatisticsCacheHit(MetricModelReporter* metric_reporter)
         nullptr /* metric_reporter */, std::max(1U, batch_size_),
         request_start_ns_, queue_start_ns_, cache_lookup_start_ns_,
         request_end_ns, cache_lookup_duration_ns);
-  }
-}
-
-void
-InferenceRequest::ReportStatisticsCacheMiss(
-    MetricModelReporter* metric_reporter)
-{
-  if (cache_lookup_start_ns_ >= cache_lookup_end_ns_) {
-    LOG_WARNING << LogRequest()
-                << "Cache lookup timestamps were not set correctly. Cache "
-                   "lookup duration stats may be incorrect.";
-  }
-  if (cache_insertion_start_ns_ >= cache_insertion_end_ns_) {
-    LOG_WARNING << LogRequest()
-                << "Cache insertion timestamps were not set correctly. Cache "
-                   "insertion duration stats may be incorrect.";
-  }
-
-  const uint64_t cache_lookup_duration_ns =
-      cache_lookup_end_ns_ - cache_lookup_start_ns_;
-
-  const uint64_t cache_insertion_duration_ns =
-      cache_insertion_end_ns_ - cache_insertion_start_ns_;
-
-  model_raw_->MutableStatsAggregator()->UpdateSuccessCacheMiss(
-      metric_reporter, cache_lookup_duration_ns, cache_insertion_duration_ns);
-  if (secondary_stats_aggregator_ != nullptr) {
-    secondary_stats_aggregator_->UpdateSuccessCacheMiss(
-        nullptr /* metric_reporter */, cache_lookup_duration_ns,
-        cache_insertion_duration_ns);
   }
 }
 #endif  // TRITON_ENABLE_STATS
@@ -1464,6 +1574,32 @@ operator<<(std::ostream& out, const InferenceRequest::SequenceId& sequence_id)
     default:
       out << sequence_id.UnsignedIntValue();
       break;
+  }
+  return out;
+}
+
+std::ostream&
+operator<<(std::ostream& out, const InferenceRequest::State& state)
+{
+  switch (state) {
+    case InferenceRequest::State::INITIALIZED: {
+      out << "INITIALIZED";
+      break;
+    }
+    case InferenceRequest::State::PENDING: {
+      out << "PENDING";
+      break;
+    }
+    case InferenceRequest::State::EXECUTING: {
+      out << "EXECUTING";
+      break;
+    }
+    case InferenceRequest::State::RELEASED: {
+      out << "RELEASED";
+      break;
+    }
+    default:
+      out << "UNKNOWN";
   }
   return out;
 }

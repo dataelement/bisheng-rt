@@ -118,9 +118,6 @@ Status GetSupportedGPUs(
 /// \return The error status. A non-OK status means the target GPU is
 /// not supported.
 Status SupportsIntegratedZeroCopy(const int gpu_id, bool* zero_copy_support);
-
-/// Get GPU Computing Capability
-Status GetGPUCompatibility(std::string& cc);
 #endif
 
 // Helper around CopyBuffer that updates the completion queue with the returned

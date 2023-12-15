@@ -27,6 +27,7 @@
 #include "scheduler_utils.h"
 
 #include <cassert>
+
 #include "constants.h"
 #include "triton/common/logging.h"
 
@@ -174,7 +175,8 @@ PriorityQueue::PolicyQueue::Dequeue(std::unique_ptr<InferenceRequest>* request)
 
 bool
 PriorityQueue::PolicyQueue::ApplyPolicy(
-    size_t idx, size_t* rejected_count, size_t* rejected_batch_size)
+    size_t idx, size_t* rejected_count, size_t* rejected_batch_size,
+    size_t* cancelled_count, size_t* cancelled_batch_size)
 {
   uint64_t now_nanoseconds =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -182,8 +184,20 @@ PriorityQueue::PolicyQueue::ApplyPolicy(
           .count();
   if (idx < queue_.size()) {
     size_t curr_idx = idx;
+
+    // Advance curr_idx until a request that goes into a batch, if not already.
     while (curr_idx < queue_.size()) {
-      if ((timeout_timestamp_ns_[curr_idx] != 0) &&
+      // Cancel request at curr_idx if it is marked as cancelled.
+      if (queue_[curr_idx]->IsCancelled()) {
+        cancelled_queue_.emplace_back(std::move(queue_[curr_idx]));
+        *cancelled_count += 1;
+        *cancelled_batch_size +=
+            std::max(1U, cancelled_queue_.back()->BatchSize());
+        curr_idx++;
+      }
+      // Delay or reject request at curr_idx if it is expired.
+      else if (
+          (timeout_timestamp_ns_[curr_idx] != 0) &&
           (now_nanoseconds > timeout_timestamp_ns_[curr_idx])) {
         if (timeout_action_ == inference::ModelQueuePolicy::DELAY) {
           delayed_queue_.emplace_back(std::move(queue_[curr_idx]));
@@ -194,11 +208,14 @@ PriorityQueue::PolicyQueue::ApplyPolicy(
               std::max(1U, rejected_queue_.back()->BatchSize());
         }
         curr_idx++;
-      } else {
+      }
+      // Request at curr_idx is unexpired and non-cancelled.
+      else {
         break;
       }
     }
 
+    // Erase requests that are not going into a batch from queue_.
     // Use range erasure on deque as all erasure functions are linear,
     // this implies in the edge case where this function is always called on
     // 'bad' index can be O(n^2). However, for data structures that are O(1)
@@ -209,12 +226,12 @@ PriorityQueue::PolicyQueue::ApplyPolicy(
         timeout_timestamp_ns_.begin() + idx,
         timeout_timestamp_ns_.begin() + curr_idx);
 
-    // Current idx is pointing to an item with unexpired timeout
+    // Check if idx is still in range after erasing requests.
     if (idx < queue_.size()) {
       return true;
     }
   }
-  // At this point, idx is pointing to an item with expired timeout.
+  // At this point, idx >= queue_.size().
   // If the item is in delayed queue, then return true. Otherwise, false
   // meaning the queue has no item with this 'idx'.
   return ((idx - queue_.size()) < delayed_queue_.size());
@@ -225,6 +242,13 @@ PriorityQueue::PolicyQueue::ReleaseRejectedQueue(
     std::deque<std::unique_ptr<InferenceRequest>>* requests)
 {
   rejected_queue_.swap(*requests);
+}
+
+void
+PriorityQueue::PolicyQueue::ReleaseCancelledQueue(
+    std::deque<std::unique_ptr<InferenceRequest>>* requests)
+{
+  cancelled_queue_.swap(*requests);
 }
 
 const std::unique_ptr<InferenceRequest>&
@@ -247,41 +271,56 @@ PriorityQueue::PolicyQueue::TimeoutAt(size_t idx)
   }
 }
 
-PriorityQueue::PriorityQueue()
-    : size_(0), front_priority_level_(0), last_priority_level_(0)
+bool
+PriorityQueue::PolicyQueue::ReadyForErasure()
 {
-  inference::ModelQueuePolicy default_policy;
-  queues_.emplace(0, PolicyQueue(default_policy));
+  size_t total_size = Size() + rejected_queue_.size() + cancelled_queue_.size();
+  return !keep_instantiated_ && total_size == 0;
+}
+
+PriorityQueue::PriorityQueue()
+    : size_(0), front_priority_level_(0), default_policy_()
+{
+  queues_.emplace(0, PolicyQueue(default_policy_, true));
   front_priority_level_ = queues_.begin()->first;
   ResetCursor();
 }
 
 PriorityQueue::PriorityQueue(
     const inference::ModelQueuePolicy& default_queue_policy,
-    uint32_t priority_levels, const ModelQueuePolicyMap queue_policy_map)
-    : size_(0), last_priority_level_(priority_levels)
+    uint64_t priority_levels, const ModelQueuePolicyMap queue_policy_map)
+    : size_(0), default_policy_(default_queue_policy)
 {
+  // Permanently instantiate PolicyQueue with keep_instantiate=true
+  // to prevent them from being erased & created during scheduling
   if (priority_levels == 0) {
-    queues_.emplace(0, PolicyQueue(default_queue_policy));
+    // Only default policy is instantiated
+    queues_.emplace(0, PolicyQueue(default_policy_, true));
+    support_prefetching_ =
+        (default_policy_.default_timeout_microseconds() == 0) &&
+        (!default_policy_.allow_timeout_override()) &&
+        (default_policy_.max_queue_size() == 0);
   } else {
-    for (uint32_t level = 1; level <= priority_levels; level++) {
-      auto it = queue_policy_map.find(level);
-      if (it == queue_policy_map.end()) {
-        queues_.emplace(level, PolicyQueue(default_queue_policy));
-      } else {
-        queues_.emplace(level, PolicyQueue(it->second));
-      }
+    // All priorities with user-given policy are instantiated. We do not
+    // permanently add default PolicyQueue because those will be dynamically
+    // created and erased to keep memory footprint low
+    for (const auto& qp : queue_policy_map) {
+      queues_.emplace(qp.first, PolicyQueue(qp.second, true));
     }
+    support_prefetching_ = false;
   }
-  front_priority_level_ = queues_.begin()->first;
+  front_priority_level_ = queues_.empty() ? 0 : queues_.begin()->first;
   ResetCursor();
 }
 
 Status
 PriorityQueue::Enqueue(
-    uint32_t priority_level, std::unique_ptr<InferenceRequest>& request)
+    uint64_t priority_level, std::unique_ptr<InferenceRequest>& request)
 {
-  auto status = queues_[priority_level].Enqueue(request);
+  // Get corresponding PolicyQueue if it exists, otherwise insert it
+  // via emplace with the default policy
+  auto it = queues_.insert(std::make_pair(priority_level, default_policy_));
+  auto status = it.first->second.Enqueue(request);
   if (status.IsOk()) {
     size_++;
     front_priority_level_ = std::min(front_priority_level_, priority_level);
@@ -289,9 +328,10 @@ PriorityQueue::Enqueue(
     // within the pending batch. At the same priority level the request is
     // guaranteed to be after pending batch if the batch hasn't reached
     // delayed queue.
-    if ((priority_level < pending_cursor_.curr_it_->first) ||
-        ((priority_level == pending_cursor_.curr_it_->first) &&
-         (pending_cursor_.at_delayed_queue_))) {
+    if (pending_cursor_.valid_ &&
+        ((priority_level < pending_cursor_.curr_it_->first) ||
+         ((priority_level == pending_cursor_.curr_it_->first) &&
+          (pending_cursor_.at_delayed_queue_)))) {
       pending_cursor_.valid_ = false;
     }
   }
@@ -303,41 +343,53 @@ Status
 PriorityQueue::Dequeue(std::unique_ptr<InferenceRequest>* request)
 {
   pending_cursor_.valid_ = false;
-  while (true) {
-    if (!queues_[front_priority_level_].Empty()) {
-      RETURN_IF_ERROR(queues_[front_priority_level_].Dequeue(request));
+  auto it_start = queues_.lower_bound(front_priority_level_);
+  for (auto it = it_start; it != queues_.end(); ++it) {
+    if (!it->second.Empty()) {
+      front_priority_level_ = it->first;
+      RETURN_IF_ERROR(it->second.Dequeue(request));
       size_--;
+      if (it->second.ReadyForErasure()) {
+        queues_.erase(it);
+      }
       return Status::Success;
-    } else if (front_priority_level_ != last_priority_level_) {
-      front_priority_level_++;
-      continue;
     }
-
-    // Control reach here if the queue for last priority level is also
-    // empty, then return error below.
-    break;
   }
-
-  return Status(
-      Status::Code::UNAVAILABLE,
-      (*request)->LogRequest() + "dequeue on empty queue");
+  return Status(Status::Code::UNAVAILABLE, "dequeue on empty queue");
 }
 
 void
-PriorityQueue::ReleaseRejectedRequests(
-    std::shared_ptr<std::vector<std::deque<std::unique_ptr<InferenceRequest>>>>*
-        requests)
+PriorityQueue::ReleaseSkippedRequests(
+    std::vector<std::deque<std::unique_ptr<InferenceRequest>>>*
+        rejected_requests,
+    std::vector<std::deque<std::unique_ptr<InferenceRequest>>>*
+        cancelled_requests)
 {
-  auto res = std::make_shared<
-      std::vector<std::deque<std::unique_ptr<InferenceRequest>>>>(
+  std::vector<std::deque<std::unique_ptr<InferenceRequest>>> reject_req(
       queues_.size());
+  std::vector<std::deque<std::unique_ptr<InferenceRequest>>> cancel_req(
+      queues_.size());
+
   size_t idx = 0;
-  for (auto& queue : queues_) {
-    queue.second.ReleaseRejectedQueue(&((*res)[idx]));
+  for (auto it = queues_.begin(); it != queues_.end();) {
+    it->second.ReleaseRejectedQueue(&reject_req[idx]);
+    it->second.ReleaseCancelledQueue(&cancel_req[idx]);
     idx++;
+    if (it->second.ReadyForErasure()) {
+      // Invalidate the pending batch cursor if it points to
+      // the item to be erased
+      if (pending_cursor_.valid_ &&
+          it->first == pending_cursor_.curr_it_->first) {
+        pending_cursor_.valid_ = false;
+      }
+      it = queues_.erase(it);  // returns iterator following removed element
+    } else {
+      ++it;
+    }
   }
 
-  requests->swap(res);
+  rejected_requests->swap(reject_req);
+  cancelled_requests->swap(cancel_req);
 }
 
 bool
@@ -364,11 +416,14 @@ PriorityQueue::ApplyPolicyAtCursor()
 {
   size_t rejected_batch_size = 0;
   size_t rejected_count = 0;
+  size_t cancelled_batch_size = 0;
+  size_t cancelled_count = 0;
   while (pending_cursor_.curr_it_ != queues_.end()) {
     if (!(pending_cursor_.curr_it_->second.ApplyPolicy(
-            pending_cursor_.queue_idx_, &rejected_count,
-            &rejected_batch_size))) {
-      if (size_ > pending_cursor_.pending_batch_count_ + rejected_count) {
+            pending_cursor_.queue_idx_, &rejected_count, &rejected_batch_size,
+            &cancelled_count, &cancelled_batch_size))) {
+      if (size_ > pending_cursor_.pending_batch_count_ + rejected_count +
+                      cancelled_count) {
         pending_cursor_.curr_it_++;
         pending_cursor_.queue_idx_ = 0;
         continue;
@@ -378,8 +433,8 @@ PriorityQueue::ApplyPolicyAtCursor()
     // for pending batch, or if all requests are in pending batch.
     break;
   }
-  size_ -= rejected_count;
-  return rejected_batch_size;
+  size_ -= rejected_count + cancelled_count;
+  return rejected_batch_size + cancelled_batch_size;
 }
 
 void
