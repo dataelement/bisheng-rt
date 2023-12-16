@@ -120,6 +120,9 @@ Status GetSupportedGPUs(
 Status SupportsIntegratedZeroCopy(const int gpu_id, bool* zero_copy_support);
 #endif
 
+/// Get GPU Computing Capability
+Status GetGPUCompatibility(std::string& cc);
+
 // Helper around CopyBuffer that updates the completion queue with the returned
 // status and cuda_used flag.
 void CopyBufferHandler(
