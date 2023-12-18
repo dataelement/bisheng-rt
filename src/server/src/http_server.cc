@@ -4119,7 +4119,8 @@ HTTPAPIServer::InferRequestClass::IncrementResponseCount()
 
 TRITONSERVER_Error*
 HTTPAPIServer::ParseRequestBody(
-    evhtp_request_t* req, std::vector<char>* json_buffer)
+    evhtp_request_t* req, std::vector<char>* json_buffer,
+    bool enable_string_tensor = false)
 {
   static auto evbuffer_deleter = [](evbuffer* data) {
     if (data != nullptr) {
@@ -4222,6 +4223,10 @@ HTTPAPIServer::ParseRequestBody(
   // std::vector<char> json_buffer;
   size_t length = header_length;
   size_t offset = 0, remaining_length = length;
+
+  size_t padding_size = enable_string_tensor ? 4 : 1;
+  size_t data_offset = enable_string_tensor ? 4 : 0;
+
   char* json_base;
   // No need to memcpy when number of iovecs is 1
   if ((n > 0) && (v[0].iov_len >= remaining_length)) {
@@ -4236,12 +4241,13 @@ HTTPAPIServer::ParseRequestBody(
     }
 
     // copy content out to dependent buffer
-    json_buffer->resize(v[0].iov_len + 1);
-    json_base = json_buffer->data();
+    length = v[0].iov_len;
+    json_buffer->resize(v[0].iov_len + padding_size);
+    json_base = json_buffer->data() + data_offset;
     memcpy(json_base, static_cast<char*>(v[0].iov_base), v[0].iov_len);
   } else {
-    json_buffer->resize(length + 1);
-    json_base = json_buffer->data();
+    json_buffer->resize(length + padding_size);
+    json_base = json_buffer->data() + data_offset;
     while ((remaining_length > 0) && (v_idx < n)) {
       char* base = static_cast<char*>(v[v_idx].iov_base);
       size_t base_size;
@@ -4270,9 +4276,15 @@ HTTPAPIServer::ParseRequestBody(
             .c_str());
   }
 
-  json_buffer->at(length) = '\0';
+  if (enable_string_tensor) {
+    memcpy(json_buffer->data(), &length, 4);
+  } else {
+    json_buffer->at(length) = '\0';
+  }
+
   return nullptr;
 }
+
 
 void
 HTTPAPIServer::HandleRestfulInfer(
@@ -4288,15 +4300,15 @@ HTTPAPIServer::HandleRestfulInfer(
   // Step 0. parse the body
   // Decompress request body if it is compressed in supported type
   std::vector<char> body;
-  TRITONSERVER_Error* err = ParseRequestBody(req, &body);
+  TRITONSERVER_Error* err = ParseRequestBody(req, &body, !use_raw_input);
 
-  if (!use_raw_input) {
-    std::string len_buffer;
-    uint32_t len = body.size() - 1;
-    len_buffer.append(reinterpret_cast<const char*>(&len), sizeof(uint32_t));
-    body.insert(body.begin(), len_buffer.begin(), len_buffer.end());
-    body.resize(body.size() - 1);
-  }
+  // if (!use_raw_input) {
+  //   std::string len_buffer;
+  //   uint32_t len = body.size() - 1;
+  //   len_buffer.append(reinterpret_cast<const char*>(&len), sizeof(uint32_t));
+  //   body.insert(body.begin(), len_buffer.begin(), len_buffer.end());
+  //   body.resize(body.size() - 1);
+  // }
 
   // Step 2. create thre request
   bool connection_paused = false;
@@ -5022,6 +5034,7 @@ HTTPAPIServer::HandleGenerate(
         req, EVHTP_RES_METHNALLOWED, "Method Not Allowed");
   }
 
+  TRITONSERVER_Error* err = nullptr;
   // int64_t requested_model_version;
   // RETURN_AND_RESPOND_IF_ERR(
   //     req,
@@ -5059,14 +5072,15 @@ HTTPAPIServer::HandleGenerate(
   // Step 0. parse the body
   // Decompress request body if it is compressed in supported type
   std::vector<char> body;
-  TRITONSERVER_Error* err = ParseRequestBody(req, &body);
-  if (true) {
-    std::string len_buffer;
-    uint32_t len = body.size() - 1;
-    len_buffer.append(reinterpret_cast<const char*>(&len), sizeof(uint32_t));
-    body.insert(body.begin(), len_buffer.begin(), len_buffer.end());
-    body.resize(body.size() - 1);
-  }
+  RETURN_AND_RESPOND_IF_ERR(req, ParseRequestBody(req, &body, true));
+
+  // if (true) {
+  //   std::string len_buffer;
+  //   uint32_t len = body.size() - 1;
+  //   len_buffer.append(reinterpret_cast<const char*>(&len), sizeof(uint32_t));
+  //   body.insert(body.begin(), len_buffer.begin(), len_buffer.end());
+  //   body.resize(body.size() - 1);
+  // }
 
   // Step 1. create the irequest
   // Create the inference request object which provides all information needed

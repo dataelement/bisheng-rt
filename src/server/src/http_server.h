@@ -427,7 +427,7 @@ class HTTPAPIServer : public HTTPServer {
       evhtp_request_t* req, const std::string& app_name, bool use_raw_input);
 
   TRITONSERVER_Error* ParseRequestBody(
-      evhtp_request_t* req, std::vector<char>* body);
+      evhtp_request_t* req, std::vector<char>* body, bool enable_string_tensor);
 
   TRITONSERVER_Error* EVBufferToInput(
       const std::string& model_name, TRITONSERVER_InferenceRequest* irequest,
