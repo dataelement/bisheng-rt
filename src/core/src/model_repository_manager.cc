@@ -404,8 +404,6 @@ ModelRepositoryManager::Create(
     std::unique_ptr<ModelRepositoryManager>* model_repository_manager,
     const std::string& server_config_file = "")
 {
-  std::cout << "---ModelRepositoryManager::Create " << server_config_file
-            << std::endl;
   // The rest only matters if repository path is valid directory
   std::string op_defs_path = "";
   bool op_defs_path_exist = false;
@@ -691,9 +689,6 @@ ModelRepositoryManager::LoadModelsFromConfig(
   }
 
   // step 2. poll the models
-  for (auto const& m : models) {
-    std::cout << "---load model in config" << m.first << std::endl;
-  }
   RETURN_IF_ERROR(
       LoadUnloadModels(models, ActionType::LOAD, false, all_models_polled));
 
