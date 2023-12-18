@@ -35,6 +35,8 @@
 #include "infer_parameter.h"
 #include "model_config.pb.h"
 #include "model_lifecycle.h"
+#include "ops_def.pb.h"
+#include "server_config.pb.h"
 #include "status.h"
 #include "triton/common/model_config.h"
 
@@ -48,6 +50,12 @@ enum ActionType { NO_ACTION, LOAD, UNLOAD };
 
 /// Predefined reason strings
 #define MODEL_READY_REASON_DUPLICATE "model appears in two or more repositories"
+
+using InferParamMap =
+    std::unordered_map<std::string, std::vector<const InferenceParameter*>>;
+
+using MutableInferParamMap =
+    std::unordered_map<std::string, std::vector<InferenceParameter>>;
 
 /// An object to manage the model repository active in the server.
 class ModelRepositoryManager {
@@ -394,7 +402,8 @@ class ModelRepositoryManager {
       const bool model_control_enabled,
       const ModelLifeCycleOptions& life_cycle_options,
       const bool enable_model_namespacing,
-      std::unique_ptr<ModelRepositoryManager>* model_repository_manager);
+      std::unique_ptr<ModelRepositoryManager>* model_repository_manager,
+      const std::string& server_config_file);
 
   /// Poll the model repository to determine the new set of models and
   /// compare with the current set. And serve the new set of models based
@@ -488,6 +497,9 @@ class ModelRepositoryManager {
   /// \param repository Path to model repository.
   /// \return error status
   Status UnregisterModelRepository(const std::string& repository);
+
+  // Register opdefs.
+  Status RegisterOpModels(const std::string& path);
 
  private:
   // Set of DependencyNode
@@ -599,6 +611,31 @@ class ModelRepositoryManager {
   bool ModelDirectoryOverride(
       const std::vector<const InferenceParameter*>& model_params);
 
+  // New Logic for config control
+  Status LoadModelsFromConfig(
+      const std::string& config_file, bool* all_models_polled,
+      void* server_config_obj = nullptr);
+
+  // Parse typ model parameters
+  Status UpdateTypeModelParameters(
+      const std::string& model_name, const std::string& model_type,
+      const std::vector<const InferenceParameter*>& infer_params,
+      InferParamMap& models, MutableInferParamMap& params_store);
+
+  // Parse App model parameters
+  Status UpdateAppModelParameters(
+      const std::string& model_name, const std::string& model_type,
+      const std::vector<const InferenceParameter*>& infer_params,
+      inference::ServerConfig& app_config);
+
+  // Support Elem Model online load/unload
+  //  1. type model, control by the config predefined
+  //  2. app model, control by the app_config in version directory
+  Status LoadUnloadElemModel(
+      const std::string& model_name, const std::string& model_type,
+      const std::vector<const InferenceParameter*>& infer_params,
+      const ActionType type, const bool unload_dependents);
+
   const bool autofill_;
   const bool polling_enabled_;
   const bool model_control_enabled_;
@@ -653,6 +690,10 @@ class ModelRepositoryManager {
   // Model lifecycle
 
   std::unique_ptr<ModelLifeCycle> model_life_cycle_;
+
+  // add pre-defined template ops and pipelines
+  std::unordered_map<std::string, inference::ModelConfig> ops_map_;
+  std::unordered_map<std::string, inference::ModelConfig> pipelines_map_;
 };
 
 }}  // namespace triton::core

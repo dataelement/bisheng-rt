@@ -265,6 +265,7 @@ class InferenceServer {
   }
 
   void SetRepoAgentDir(const std::string& d) { repoagent_dir_ = d; }
+  void SetServerConfigFile(const std::string& d) { server_config_file_ = d; }
 
   // Return the requested model object.
   Status GetModel(
@@ -349,6 +350,8 @@ class InferenceServer {
   std::unique_ptr<ModelRepositoryManager> model_repository_manager_;
   std::shared_ptr<TritonBackendManager> backend_manager_;
   std::shared_ptr<TritonCacheManager> cache_manager_;
+
+  std::string server_config_file_;
 };
 
 }}  // namespace triton::core

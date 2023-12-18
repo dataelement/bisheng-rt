@@ -1906,6 +1906,7 @@ ValidateModelConfigInt64()
       "ModelConfig::sequence_batching::oldest::max_queue_delay_microseconds",
       "ModelConfig::sequence_batching::max_sequence_idle_microseconds",
       "ModelConfig::ensemble_scheduling::step::model_version",
+      "ModelConfig::ensemble_scheduling::implicit_step::model_version",
       "ModelConfig::model_warmup::inputs::value::dims",
       "ModelConfig::optimization::cuda::graph_spec::input::value::dim",
       "ModelConfig::optimization::cuda::graph_spec::graph_lower_bound::input::"

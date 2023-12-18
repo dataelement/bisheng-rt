@@ -1,0 +1,27 @@
+basic_config {
+  env {
+    parameters {
+      key: "TF_CPP_MIN_LOG_LEVEL"
+      value: "2"
+    }
+  }
+  gpu_config {
+    parameters {
+      key: "devices"
+      value: "auto"
+    }
+  }
+  model_repository: "./tests/L0_http/generate_models/"
+  model_control_mode: "explicit"
+  backend_config: "tensorflow,version=2"
+  http_port: 9001
+  grpc_port: 9000
+  metrics_port: 9002
+  log_verbose: 0
+  log_file: "./logs/bisheng-rt.log"
+}
+
+app {
+  name: "mock_llm"
+  path: "mock_llm"
+}

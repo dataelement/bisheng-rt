@@ -249,8 +249,8 @@ InferenceServer::Init()
   status = ModelRepositoryManager::Create(
       this, version_, model_repository_paths_, startup_models_,
       strict_model_config_, polling_enabled, model_control_enabled,
-      life_cycle_options, enable_model_namespacing_,
-      &model_repository_manager_);
+      life_cycle_options, enable_model_namespacing_, &model_repository_manager_,
+      server_config_file_);
   if (!status.IsOk()) {
     if (model_repository_manager_ == nullptr) {
       ready_state_ = ServerReadyState::SERVER_FAILED_TO_INITIALIZE;
@@ -616,7 +616,7 @@ InferenceServer::PrintBackendAndModelSummary()
     backends_table.InsertRow(backend_record);
   }
   std::string backends_table_string = backends_table.PrintTable();
-  LOG_INFO << backends_table_string;
+  LOG_VERBOSE(2) << backends_table_string;
 
   // Models Summary
   auto model_states = model_repository_manager_->ModelStates();
