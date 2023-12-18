@@ -5,14 +5,14 @@
 
 更新时间：12.13.2023
 
-- common: r22.10 -> r23.10 (cb62c7 -> cf617c)
-- third_party r22.10 -> r23.10 (c5fd70 -> 0d09c0)
-
+- common: r22.10 -> r23.10 (cb62c7 -> cf617c) 增量更新
+- third_party r22.10 -> r23.10 (c5fd70 -> 0d09c0) 增量更新
 - core: r22.10 -> r23.10 (4080df -> 958a24)，更新最新基线代码 + 增量合并历史逻辑
+- backend: r22.10->r23.10 (ebb4aa -> 1336eb) 增量更新
+- backends/python_backend: r22.08 -> r23.10 (0d24fd -> 67ca86) 完全更新
+
 - server: r22.10 -> main (86427d -> 6dfa3e7 -> f2cd99) 直接合并最新基线代码
 
-- backend: r22.10->r23.11 (ebb4aa -> )
-- backends/python_backend: r22.08 -> r23.10 (0d24fd -> 67ca86)
 
 
 更新时间：12.03.2022
