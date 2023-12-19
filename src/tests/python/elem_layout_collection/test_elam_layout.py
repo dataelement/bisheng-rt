@@ -5,7 +5,7 @@ import requests
 
 
 def test():
-    rt_ep = os.environ.get('RT_EP', '192.168.106.12:19001')
+    rt_ep = os.environ.get('RT_EP', '192.168.106.127:9001')
     proj_dir = '/home/hanfeng/projects/bisheng-rt'
     image_file = proj_dir + '/python/pybackend_libs/data/table1.jpg'
     print(image_file)
@@ -19,7 +19,7 @@ def test():
 
 
 def test2():
-    rt_ep = os.environ.get('RT_EP', '192.168.106.12:19001')
+    rt_ep = os.environ.get('RT_EP', '192.168.106.127:9001')
     proj_dir = '/home/hanfeng/projects/bisheng-rt'
     image_file = proj_dir + '/python/pybackend_libs/data/table1.jpg'
     print(image_file)

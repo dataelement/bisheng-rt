@@ -56,5 +56,5 @@ def test_table_row_col_app():
     print(outp)
 
 
-# test_ocr()
+test_ocr()
 test_table_row_col_app()
