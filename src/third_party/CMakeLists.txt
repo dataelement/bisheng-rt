@@ -442,8 +442,10 @@ set(GCS_CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH}
 #
 ExternalProject_Add(google-cloud-cpp
   PREFIX google-cloud-cpp
-  GIT_REPOSITORY "https://github.com/googleapis/google-cloud-cpp.git"
-  GIT_TAG "v1.42.0"
+  URL "http://192.168.106.8/pkgs/google-cloud-cpp-v1.42.0.tar.gz"
+  URL_HASH SHA256=7f25db42f5dde5e8af9e9544a5fa6c37f6710caf28e7201d24f729a529ae5c7f
+  #GIT_REPOSITORY "https://github.com/googleapis/google-cloud-cpp.git"
+  #GIT_TAG "v1.42.0"
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/google-cloud-cpp/src/google-cloud-cpp"
   EXCLUDE_FROM_ALL ON
   CMAKE_CACHE_ARGS
@@ -504,13 +506,17 @@ ExternalProject_Add(cnmem
 #
 ExternalProject_Add(aws-sdk-cpp
   PREFIX aws-sdk-cpp
-  GIT_REPOSITORY "https://github.com/aws/aws-sdk-cpp.git"
-  GIT_TAG "1.11.60"
+  URL "http://192.168.106.8/pkgs/aws-sdk-cpp-1.11.60.tar.gz"
+  URL_HASH SHA256=1294499dd757e7805b6fab28f9650964dcdfba5665e280b4237bfb40168dfc93
   SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/aws-sdk-cpp/src/aws-sdk-cpp"
+  # GIT_REPOSITORY "https://github.com/aws/aws-sdk-cpp.git"
+  # GIT_TAG "1.11.60"
+  # SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/aws-sdk-cpp/src/aws-sdk-cpp"
   EXCLUDE_FROM_ALL ON
   CMAKE_CACHE_ARGS
     ${_CMAKE_ARGS_CMAKE_TOOLCHAIN_FILE}
     ${_CMAKE_ARGS_VCPKG_TARGET_TRIPLET}
+    -DCURL_LIBRARY=${TRITON_THIRD_PARTY_INSTALL_PREFIX}/curl/lib/libcurl.a
     -DBUILD_ONLY:STRING=s3
     -DBUILD_SHARED_LIBS:BOOL=OFF
     -DMINIMIZE_SIZE:BOOL=ON
@@ -518,6 +524,7 @@ ExternalProject_Add(aws-sdk-cpp
     -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON
     -DCMAKE_INSTALL_PREFIX:PATH=${TRITON_THIRD_PARTY_INSTALL_PREFIX}/aws-sdk-cpp
   PATCH_COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/install_src.py --src <SOURCE_DIR> ${INSTALL_SRC_DEST_ARG}
+  DEPENDS curl
 )
 
 #

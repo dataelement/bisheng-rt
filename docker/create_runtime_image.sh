@@ -21,7 +21,7 @@ function test_run() {
     PIP_REPO=https://mirrors.tencent.com/pypi/simple
     NEXUS_REPO="https://public2:qTongs8YdIwXSRPX@nexus.dataelem.com/repository/product/bisheng"
 
-    EXTRA_PIP_REPO="http://public:26rS9HRxDqaVy5T@110.16.193.170:50083/repository/pypi-hosted/simple --trusted-host 110.16.193.170"
+    EXTRA_PIP_REPO="http://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
     # apt update && apt install libarchive-dev patchelf libgl1 libjsoncpp-dev -y
 
     # # Configure language
@@ -78,7 +78,21 @@ function build_image() {
 }
 
 
-test_run
+function update_torch() {
+    PIP_REPO=https://mirrors.tencent.com/pypi/simple
+    EXTRA_PIP_REPO="https://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
+
+    # pip install torch==2.1.2 -i ${EXTR_PIP_REPO} --extra-index-url ${PIP_REPO}
+    # LOCAL_PKG="/public/bisheng/release/dist/torch-2.1.2+cu118-cp38-cp38-linux_x86_64.whl"
+    # pip3 install $LOCAL_PKG -i https://mirrors.tencent.com/pypi/simple
+
+    # pip install torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
+    pip install vllm==0.2.6 -i ${PIP_REPO}
+}
+
+
+# test_run
 # create_prod_base_image
 # temp_build_image
 # create_runtime_image
+update_torch
