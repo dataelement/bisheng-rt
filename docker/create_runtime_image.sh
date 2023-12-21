@@ -44,7 +44,7 @@ function test_run() {
     # pip install torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
     # pip install ./docker/deps/tensorflow-1.15.5+nv-cp38-cp38-linux_x86_64.whl -i $PIP_REPO
 
-    # wget ${NEXUS_REPO}/flash-attention-2.3.3.tar.gz && tar zxf flash-attention-2.3.3.tar.gz
+    # wget ${NEXUS_REPO}/flash-attention-v2.3.3.tar.gz && tar zxf flash-attention-v2.3.3.tar.gz
     
     # build is very slowly, be patiently, about 20-30mins
     # pushd ./docker/deps/flash-attention
@@ -82,12 +82,27 @@ function update_torch() {
     PIP_REPO=https://mirrors.tencent.com/pypi/simple
     EXTRA_PIP_REPO="https://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
 
-    # pip install torch==2.1.2 -i ${EXTR_PIP_REPO} --extra-index-url ${PIP_REPO}
+    # pip install torch==2.1.2 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
+
     # LOCAL_PKG="/public/bisheng/release/dist/torch-2.1.2+cu118-cp38-cp38-linux_x86_64.whl"
     # pip3 install $LOCAL_PKG -i https://mirrors.tencent.com/pypi/simple
 
     # pip install torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
-    pip install vllm==0.2.6 -i ${PIP_REPO}
+    # pip3 install -U xformers==0.0.23.post1 --index-url https://download.pytorch.org/whl/cu118
+    # pip3 install vllm==0.2.6 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
+
+    
+    # wget ${NEXUS_REPO}/flash-attention-v2.3.3.tar.gz && tar zxf flash-attention-v2.3.3.tar.gz
+
+
+    # build is very slowly, be patiently, about 20-30mins
+    pushd /public/bisheng/release/dist/flash-attention
+    pip install packaging
+    MAX_JOBS=10 pip install . -i $PIP_REPO
+
+    #MAX_JOBS=10 pip install csrc/layer_norm -i $PIP_REPO
+    popd
+
 }
 
 

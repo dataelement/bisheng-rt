@@ -149,7 +149,7 @@ class ChatGLM2(BaseLLM):
                 yield ChatCompletionResponse(model=request.model,
                                              choices=[choice_data],
                                              object='chat.completion',
-                                             created=created)
+                                             created=created).dict()
             finish_reason = 'stop'
             if tokens + inputs_tokens >= request.max_tokens:
                 finish_reason = 'length'
@@ -162,6 +162,6 @@ class ChatGLM2(BaseLLM):
             yield ChatCompletionResponse(model=request.model,
                                          choices=[choice_data],
                                          object='chat.completion',
-                                         created=created)
+                                         created=created).dict()
 
         torch_gc(self.devices)

@@ -158,7 +158,7 @@ class BaichuanChat(BaseLLM):
                 yield ChatCompletionResponse(model=request.model,
                                              choices=[choice_data],
                                              object='chat.completion',
-                                             created=created)
+                                             created=created).dict()
 
         torch_gc(self.devices)
 

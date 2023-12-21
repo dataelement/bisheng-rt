@@ -37,6 +37,8 @@ class TritonPythonModel:
         self.using_decoupled = (
             pb_utils.using_decoupled_model_transaction_policy(model_config))
 
+        self.logger.log_info(f'using_decoupled {self.using_decoupled}')
+
         params = model_config['parameters']
         parameters = dict((k, v['string_value']) for k, v in params.items())
         pymodel_type = parameters.pop('pymodel_type')
@@ -125,28 +127,43 @@ class TritonPythonModel:
             try:
                 input_data = _get_np_input(request, 'INPUT')[0]
                 inp = json.loads(input_data)
-                for out in self.model.stream_predict(inp):
+                stream = inp.get('stream', False)
+                if stream:
+                    for out in self.model.stream_predict(inp):
+                        out_arr = np.array([json.dumps(out)], dtype=np.object_)
+                        out_tensor = pb_utils.Tensor('OUTPUT', out_arr)
+                        inference_response = pb_utils.InferenceResponse(
+                            output_tensors=[out_tensor])
+
+                        if not response_sender.is_cancelled():
+                            response_sender.send(inference_response)
+                        else:
+                            break
+                else:
+                    out = self.model.predict(inp)
                     out_arr = np.array([json.dumps(out)], dtype=np.object_)
                     out_tensor = pb_utils.Tensor('OUTPUT', out_arr)
                     inference_response = pb_utils.InferenceResponse(
-                        output_tensors=[out_tensor])
+                            output_tensors=[out_tensor])
 
                     if not response_sender.is_cancelled():
                         response_sender.send(inference_response)
-                    else:
-                        break
-
+            except Exception as e:
+                self.logger.log_info(f'Error generating stream: {e}')
+                error = pb_utils.TritonError(f'Error generating stream: {e}')
+                triton_output_tensor = pb_utils.Tensor(
+                    'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+                response = pb_utils.InferenceResponse(
+                    output_tensors=[triton_output_tensor], error=error)
+                response_sender.send(response)
+            finally:
                 response_sender.send(
                     flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
-            except Exception as e:
-                error = pb_utils.TritonError(
-                    f'model [{self.name}] infer with err: [{str(e)}]')
-
-                response_sender.send(pb_utils.InferenceResponse(error))
 
     def execute(self, requests):
         if self.using_decoupled:
-            return self.exec_decoupled(requests)
+            self.exec_decoupled(requests)
+            return None
         else:
             return self.exec(requests)
 

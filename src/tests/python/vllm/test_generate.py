@@ -14,8 +14,6 @@ import test_util as tu
 sys.path.append('../common')
 
 
-
-
 class GenerateEndpointTest(tu.TestResultCollector):
     def setUp(self):
         self._model_name = 'Qwen-1_8B-Chat'
