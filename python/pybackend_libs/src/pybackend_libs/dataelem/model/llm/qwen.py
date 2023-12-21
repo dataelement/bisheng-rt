@@ -1,47 +1,91 @@
+# flake8: noqa
 import copy
 from functools import partial
 
 import torch
 
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
-                  ChatCompletionResponseChoice, ChatMessage, torch_gc)
-from .qwen_utils import auto_configure_device_map2
+                  ChatCompletionResponseChoice,
+                  ChatCompletionResponseStreamChoice, ChatMessage,
+                  DeltaMessage, torch_gc)
+from .qwen_utils import (_TEXT_COMPLETION_CMD, add_extra_stop_words,
+                         auto_configure_device_map2, parse_messages,
+                         parse_response, trim_stop_words)
 
 # from pybackend_libs.dataelem.utils import Timer
 # from typing import Any, Dict, List, Literal, Optional, Union
 
 
+# completion mode, not chat mode
+def text_complete_last_message(model, tokenizer,
+    history, stop_words_ids, gen_kwargs):
+    im_start = '<|im_start|>'
+    im_end = '<|im_end|>'
+    prompt = f'{im_start}system\nYou are a helpful assistant.{im_end}'
+    for i, (query, response) in enumerate(history):
+        query = query.lstrip('\n').rstrip()
+        response = response.lstrip('\n').rstrip()
+        prompt += f'\n{im_start}user\n{query}{im_end}'
+        prompt += f'\n{im_start}assistant\n{response}{im_end}'
+    prompt = prompt[: -len(im_end)]
+
+    _stop_words_ids = [tokenizer.encode(im_end)]
+    if stop_words_ids:
+        for s in stop_words_ids:
+            _stop_words_ids.append(s)
+    stop_words_ids = _stop_words_ids
+
+    input_ids = torch.tensor([tokenizer.encode(prompt)]).to(model.device)
+    output = model.generate(
+        input_ids, stop_words_ids=stop_words_ids, **gen_kwargs).tolist()[0]
+    output = tokenizer.decode(output, errors='ignore')
+    assert output.startswith(prompt)
+    output = output[len(prompt):]
+    output = trim_stop_words(output, ['<|endoftext|>', im_end])
+    # print(f"<completion>\n{prompt}\n<!-- *** -->\n{output}\n</completion>")
+    return output
+
+
 def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):
+    gen_kwargs = {}
+    if request.temperature is not None:
+        if request.temperature < 0.01:
+            gen_kwargs['top_k'] = 1  # greedy decoding
+        else:
+            # Not recommended. Please tune top_p instead.
+            gen_kwargs['temperature'] = request.temperature
+    if request.top_p is not None:
+        gen_kwargs['top_p'] = request.top_p
 
-    if request.messages[-1].role != 'user':
-        raise Exception('Invalid request')
+    stop_words = add_extra_stop_words(request.stop)
+    if request.functions:
+        stop_words = stop_words or []
+        if 'Observation:' not in stop_words:
+            stop_words.append('Observation:')
 
-    query = request.messages[-1].content
-    system = 'You are a helpful assistant.'
+    query, history = parse_messages(request.messages, request.functions)
+    stop_words_ids = [tokenizer.encode(s) for s in stop_words] if stop_words else None
+    if query is _TEXT_COMPLETION_CMD:
+        response = text_complete_last_message(model, tokenizer, history,
+            stop_words_ids=stop_words_ids, gen_kwargs=gen_kwargs)
+    else:
+        response, _ = model.chat(
+            tokenizer,
+            query,
+            history=history,
+            stop_words_ids=stop_words_ids,
+            **gen_kwargs
+        )
+        # print(f"<chat>\n{history}\n{query}\n<!-- *** -->\n{response}\n</chat>")
 
-    prev_messages = request.messages[:-1]
-    if len(prev_messages) > 0 and prev_messages[0].role == 'system':
-        system = prev_messages.pop(0).content
-
-    history = []
-    if len(prev_messages) % 2 == 0:
-        for i in range(0, len(prev_messages), 2):
-            if (prev_messages[i].role == 'user'
-                    and prev_messages[i + 1].role == 'assistant'):
-                history.append(
-                    [prev_messages[i].content, prev_messages[i + 1].content])
-
-    with torch.no_grad():
-        response, _ = model.chat(tokenizer,
-                                 query,
-                                 history=history,
-                                 system=system)
-
-    choice_data = ChatCompletionResponseChoice(index=0,
-                                               message=ChatMessage(
-                                                   role='assistant',
-                                                   content=response),
-                                               finish_reason='stop')
+    if request.functions:
+        choice_data = parse_response(response)
+    else:
+        choice_data = ChatCompletionResponseChoice(
+            index=0,
+            message=ChatMessage(role='assistant', content=response),
+            finish_reason='stop',
+        )
 
     return ChatCompletionResponse(model=request.model,
                                   choices=[choice_data],
@@ -96,6 +140,67 @@ class QwenChat(BaseLLM):
         resp = create_chat_completion(self.model, self.tokenizer, request)
         torch_gc(self.devices)
         return resp.dict()
+
+    def stream_predict(self, kwargs):
+        req_dict = copy.copy(self.default_params)
+        req_dict.update(kwargs)
+        request = ChatCompletionRequest.parse_obj(req_dict)
+        if request.stream:
+            if request.functions:
+                raise Exception(
+                    'Invalid request: Function calling is not yet implemented for stream mode.',
+                )
+
+        gen_kwargs = {}
+        if request.temperature is not None:
+            if request.temperature < 0.01:
+                gen_kwargs['top_k'] = 1  # greedy decoding
+            else:
+                # Not recommended. Please tune top_p instead.
+                gen_kwargs['temperature'] = request.temperature
+        if request.top_p is not None:
+            gen_kwargs['top_p'] = request.top_p
+
+        # chat_stream内部使用的transformers_stream_generator暂时不支持do_sample=False
+        gen_kwargs['do_sample'] = True
+
+        stop_words = add_extra_stop_words(request.stop)
+        query, history = parse_messages(request.messages, request.functions)
+
+        current_length = 0
+        stop_words_ids = [self.tokenizer.encode(s) for s in stop_words] if stop_words else None
+        if stop_words:
+            # TODO: It's a little bit tricky to trim stop words in the stream mode.
+            raise Exception(
+                'Invalid request: custom stop words are not yet supported for stream mode.',
+            )
+        response_generator = self.model.chat_stream(
+            self.tokenizer,
+            query,
+            history=history,
+            stop_words_ids=stop_words_ids,
+            **gen_kwargs
+        )
+        for new_response in response_generator:
+            if len(new_response) == current_length:
+                continue
+
+            new_text = new_response[current_length:]
+            current_length = len(new_response)
+
+            choice_data = ChatCompletionResponseStreamChoice(
+                index=0,
+                delta=DeltaMessage(content=new_text),
+                finish_reason=None
+            )
+            chunk = ChatCompletionResponse(
+                model=request.model,
+                choices=[choice_data],
+                object='chat.completion.chunk'
+            )
+            yield chunk
+
+        torch_gc(self.devices)
 
     def completion(self, kwargs):
         pass
