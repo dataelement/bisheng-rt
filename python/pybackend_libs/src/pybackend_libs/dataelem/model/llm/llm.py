@@ -123,6 +123,7 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
     do_sample: Optional[bool] = False
+    stop: Optional[Union[str, List[str]]] = None
 
 
 class ChatCompletionResponseChoice(BaseModel):

@@ -8,6 +8,15 @@ import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model import get_model
 
 
+def _get_np_input(request, name, has_batch=True):
+    return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
+
+
+def _get_optional_params(request, name):
+    tensor = pb_utils.get_input_tensor_by_name(request, name)
+    return json.loads(tensor.as_numpy()[0]) if tensor else {}
+
+
 def get_gpu_memory():
     command = 'nvidia-smi --query-gpu=memory.free --format=csv'
     memory_free_info = sp.check_output(
@@ -20,9 +29,13 @@ def get_gpu_memory():
 
 class TritonPythonModel:
     def initialize(self, args):
+        self.logger = pb_utils.Logger
         model_instance_name = args['model_instance_name']
         model_config = json.loads(args['model_config'])
         self.name = model_config['name']
+
+        self.using_decoupled = (
+            pb_utils.using_decoupled_model_transaction_policy(model_config))
 
         params = model_config['parameters']
         parameters = dict((k, v['string_value']) for k, v in params.items())
@@ -63,8 +76,9 @@ class TritonPythonModel:
                 f'{model_cls_name} is not existed')
 
         self.model = cls_type(**parameters)
+        self.logger.log_info(f'succ to load model [{self.name}]')
 
-    def execute(self, requests):
+    def exec(self, requests):
         def _get_np_input(request, name, has_batch=True):
             return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
 
@@ -104,5 +118,37 @@ class TritonPythonModel:
         # of this list must match the length of `requests` list.
         return responses
 
+    def exec_decoupled(self, requests):
+        for request in requests:
+            # simple invoke
+            response_sender = request.get_response_sender()
+            try:
+                input_data = _get_np_input(request, 'INPUT')[0]
+                inp = json.loads(input_data)
+                for out in self.model.stream_predict(inp):
+                    out_arr = np.array([json.dumps(out)], dtype=np.object_)
+                    out_tensor = pb_utils.Tensor('OUTPUT', out_arr)
+                    inference_response = pb_utils.InferenceResponse(
+                        output_tensors=[out_tensor])
+
+                    if not response_sender.is_cancelled():
+                        response_sender.send(inference_response)
+                    else:
+                        break
+
+                response_sender.send(
+                    flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
+            except Exception as e:
+                error = pb_utils.TritonError(
+                    f'model [{self.name}] infer with err: [{str(e)}]')
+
+                response_sender.send(pb_utils.InferenceResponse(error))
+
+    def execute(self, requests):
+        if self.using_decoupled:
+            return self.exec_decoupled(requests)
+        else:
+            return self.exec(requests)
+
     def finalize(self):
-        print(f'cleaning up model name={self.name}')
+        self.logger.log_info(f'clean up model [{self.name}]')

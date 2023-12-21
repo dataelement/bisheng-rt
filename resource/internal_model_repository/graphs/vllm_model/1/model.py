@@ -39,7 +39,7 @@ def get_gpu_memory_v2():
 
 class TritonPythonModel:
     def initialize(self, args):
-        # self.logger = pb_utils.Logger
+        self.logger = pb_utils.Logger
         model_instance_name = args['model_instance_name']
         self.model_config = json.loads(args['model_config'])
         self.model_name = args['model_name']
@@ -58,7 +58,7 @@ class TritonPythonModel:
             assert self.using_decoupled, (
                 'vLLM Triton backend must be configured '
                 'to use decoupled model transaction policy')
-        print('using_decoupled', self.using_decoupled)
+        self.logger.log_info('using_decoupled {}'.format(self.using_decoupled))
 
         pymodel_type = parameters.pop('pymodel_type')
         model_path = parameters.pop('model_path')
@@ -152,31 +152,15 @@ class TritonPythonModel:
 
         # Wait for the ongoing_requests
         while self.ongoing_request_count > 0:
-            # self.logger.log_info('Awaiting remaining {} requests'.format(
-            #     self.ongoing_request_count))
-            print('Awaiting remaining {} requests'.format(
+            self.logger.log_info('Awaiting remaining {} requests'.format(
                 self.ongoing_request_count))
             await asyncio.sleep(5)
 
-        try:
-            for task in asyncio.Task.all_tasks(self._loop):
-                if not (task.done() or task.cancelled()):
-                    task.cancel()
-                    await task
-        except asyncio.CancelledError:
-            pass
-
-        if not self.model.llm_engine.is_running():
-            return
-
-        vllm_loop = self.model.llm_engine.background_loop
-        for task in asyncio.Task.all_tasks(vllm_loop):
-            if not (task.done() or task.cancelled()):
+        for task in asyncio.all_tasks(loop=self._loop):
+            if task is not asyncio.current_task():
                 task.cancel()
-                await task
 
-        print('Shutdown complete')
-        # self.logger.log_info('Shutdown complete')
+        self.logger.log_info('Shutdown complete')
 
     def create_response(self, vllm_output, previous_texts=None, stream=False):
         """
@@ -211,8 +195,7 @@ class TritonPythonModel:
 
             response = self.create_response(last_output, previous_texts, False)
         except Exception as e:
-            # self.logger.log_info(f'Error generating stream: {e}')
-            print(f'Error generating stream: {e}')
+            self.logger.log_info(f'Error generating stream: {e}')
             error = pb_utils.TritonError(f'Error generating stream: {e}')
             triton_output_tensor = pb_utils.Tensor(
                 'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
@@ -254,8 +237,7 @@ class TritonPythonModel:
                     self.create_response(last_output, previous_texts, stream))
 
         except Exception as e:
-            # self.logger.log_info(f'Error generating stream: {e}')
-            print(f'Error generating stream: {e}')
+            self.logger.log_info(f'Error generating stream: {e}')
             error = pb_utils.TritonError(f'Error generating stream: {e}')
             triton_output_tensor = pb_utils.Tensor(
                 'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
@@ -293,8 +275,7 @@ class TritonPythonModel:
         """
         Triton virtual method; called when the model is unloaded.
         """
-        # self.logger.log_info('Issuing finalize to vllm backend')
-        print('Issuing finalize to vllm backend')
+        self.logger.log_info('Issuing finalize to vllm backend')
         self._shutdown_event.set()
         if self._loop_thread is not None:
             self._loop_thread.join()

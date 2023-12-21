@@ -30,6 +30,7 @@ class SeparatorStyle(IntEnum):
     PHOENIX = auto()
     ROBIN = auto()
     FALCON_CHAT = auto()
+    CHATGLM3 = auto()
 
 
 @dataclasses.dataclass
@@ -154,6 +155,16 @@ class Conversation:
                     ret += f'{role}：{message}{self.sep}'
                 else:
                     ret += f'{role}：'
+            return ret
+        elif self.sep_style == SeparatorStyle.CHATGLM3:
+            ret = ''
+            if self.system_message:
+                ret += system_prompt
+            for role, message in self.messages:
+                if message:
+                    ret += role + '\n' + ' ' + message
+                else:
+                    ret += role
             return ret
         elif self.sep_style == SeparatorStyle.CHATML:
             ret = '' if system_prompt == '' else system_prompt + self.sep + '\n'
@@ -429,6 +440,22 @@ register_conv_template(
         sep_style=SeparatorStyle.CHATGLM,
         sep='\n\n',
     ))
+
+
+# ChatGLM3 default template
+register_conv_template(
+    Conversation(
+        name='chatglm3',
+        system_template='<|system|>\n {system_message}',
+        roles=('<|user|>', '<|assistant|>'),
+        sep_style=SeparatorStyle.CHATGLM3,
+        stop_token_ids=[
+            64795,
+            64797,
+            2,
+        ],  # "<|user|>", "<|observation|>", "</s>"
+    )
+)
 
 # Dolly V2 default template
 register_conv_template(
@@ -993,6 +1020,7 @@ def get_gen_prompt(model, messages) -> str:
         'Chatglm2': 'chatglm2',
         'Llama2': 'llama-2',
         'InternlmChat': 'internlm-chat',
+        'Chatglm3': 'chatglm3',
     }
 
     assert model in model_to_template_map, f'{model} not supported'

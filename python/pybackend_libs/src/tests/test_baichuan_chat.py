@@ -4,8 +4,8 @@ from pybackend_libs.dataelem.model.llm.baichuan import BaichuanChat
 def test_baichuan_13b_chat():
     # params = {'pretrain_path': '/home/public/llm/Baichuan-13B-Chat'}
     params = {
-        'pretrain_path': '/home/public/llm/Baichuan-13B-Chat',
-        'devices': '5,6',
+        'pretrain_path': '/public/bisheng/model_repository/Baichuan-13B-Chat',
+        'devices': '4,5',
         'gpu_memory': 40,
         'precision': 'fp16',
         'max_tokens': 256,
@@ -35,8 +35,8 @@ def test_baichuan_13b_chat():
 def test_baichuan2_13b_chat():
     # params = {'pretrain_path': '/home/public/llm/Baichuan-13B-Chat'}
     params = {
-        'pretrain_path': '/home/public/llm/Baichuan2-13B-Chat',
-        'devices': '5,6',
+        'pretrain_path': '/public/bisheng/model_repository/Baichuan2-13B-Chat',
+        'devices': '4,5',
         'gpu_memory': 40,
         'precision': 'fp16',
         'max_tokens': 256,
@@ -66,8 +66,8 @@ def test_baichuan2_13b_chat():
 def test_case2():
     # params = {'pretrain_path': '/home/public/llm/Baichuan-13B-Chat'}
     params = {
-        'pretrain_path': '/home/public/llm/Baichuan2-13B-Chat',
-        'devices': '5,6',
+        'pretrain_path': '/public/bisheng/model_repository/Baichuan2-13B-Chat',
+        'devices': '4,5',
         'gpu_memory': 40,
         'precision': 'fp16',
         'max_tokens': 256,
