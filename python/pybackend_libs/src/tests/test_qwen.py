@@ -60,6 +60,10 @@ def test_qwen_function_call():
                             'content': '{"temperature": "22", "unit": "celsius", "description": "Sunny"}',
                         },
                         {
+                            'role': 'assistant',
+                            'content': '波士顿今天天气晴朗，温度为22摄氏度。建议您根据实际情况做好防晒措施。',
+                        },
+                        {
                             'role': 'user',
                             'content': '北京天气如何？',
                         },
@@ -122,6 +126,6 @@ def test_qwen_stream_chat():
         print(outp)
 
 
-test_qwen_7b_chat()
-# test_qwen_function_call()
+# test_qwen_7b_chat()
+test_qwen_function_call()
 # test_qwen_stream_chat()
