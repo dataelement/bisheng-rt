@@ -6,16 +6,15 @@ from pybackend_libs.dataelem.model.llm.qwen import QwenChat
 
 def test_qwen_7b_chat():
     params = {
-        'pretrain_path': '/home/public/projects/models/Qwen-7B-Chat',
-        'devices': '8',
+        'pretrain_path': '/home/public/llm/Qwen-7B-Chat',
+        'devices': '1',
         'gpu_memory': 20,
         'max_tokens': 256,
     }
 
     model = QwenChat(**params)
     inp = {
-        'model':
-        'qwen-7b',
+        'model': 'qwen-7b',
         'messages': [{
             'role': 'system',
             'content': '你是来自数据项素创建的一个人工智能助手'
@@ -38,24 +37,8 @@ def test_qwen_function_call():
     }
 
     model = QwenChat(**params)
-    # inp = {
-    #     'model':
-    #     'qwen-1_8B',
-    #     'messages': [{'role': 'system',
-    #                   'content': 'You are a helpful AI assistant.'},
-    #                  {'role': 'user',
-    #                   'content': '今天上海天气怎么样？'}],
-    #     'functions': [{'name': 'Search',
-    #                    'description': 'useful for when you need to answer questions about current events. You should ask targeted questions',
-    #                    'parameters': {'properties': {'__arg1': {'title': '__arg1', 'type': 'string'}}, 'required': ['__arg1'], 'type': 'object'}},
-    #                   {'name': 'Calculator',
-    #                    'description': 'useful for when you need to answer questions about math',
-    #                    'parameters': {'properties': {'__arg1': {'title': '__arg1', 'type': 'string'}}, 'required': ['__arg1'], 'type': 'object'}}],
-    # }
-
     inp = {
-        'model':
-        'qwen-1_8B',
+        'model': 'qwen-1_8B',
         'messages': [
                         {'role': 'user', 'content': '你好'},
                         {'role': 'assistant', 'content': '你好！很高兴见到你。有什么我可以帮忙的吗？'},
@@ -117,28 +100,28 @@ def test_qwen_function_call():
     print(outp)
 
 
-# def test_qwen_stream_chat():
-#     params = {
-#         'pretrain_path': '/home/public/llm/Qwen-1_8B-Chat',
-#         'devices': '1',
-#         'gpu_memory': 20,
-#         'max_tokens': 8192,
-#     }
+def test_qwen_stream_chat():
+    params = {
+        'pretrain_path': '/home/public/llm/Qwen-1_8B-Chat',
+        'devices': '1',
+        'gpu_memory': 20,
+        'max_tokens': 8192,
+    }
 
-#     model = QwenChat(**params)
+    model = QwenChat(**params)
 
-#     inp = {
-#         'model': 'qwen-1_8B',
-#         'stream': True,
-#         'messages': [{'role': 'system',
-#                       'content': 'You are a helpful AI assistant.'},
-#                      {'role': 'user',
-#                       'content': '今天上海天气怎么样？'}],
-#     }
-#     for outp in model.stream_predict(inp):
-#         print(outp)
+    inp = {
+        'model': 'qwen-1_8B',
+        'stream': True,
+        'messages': [{'role': 'system',
+                      'content': 'You are a helpful AI assistant.'},
+                     {'role': 'user',
+                      'content': '今天上海天气怎么样？'}],
+    }
+    for outp in model.stream_predict(inp):
+        print(outp)
 
 
-# test_qwen_7b_chat()
-test_qwen_function_call()
+test_qwen_7b_chat()
+# test_qwen_function_call()
 # test_qwen_stream_chat()
