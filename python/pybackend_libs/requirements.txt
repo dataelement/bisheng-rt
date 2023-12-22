@@ -3,7 +3,7 @@ lanms==1.0.2
 tensorflow==1.15.5+nv
 torch==2.1.2
 torchvision==0.16.2
-flash-attn==2.3.3
+flash-attn==2.3.6
 
 urllib3==1.25.4
 pydantic < 2
