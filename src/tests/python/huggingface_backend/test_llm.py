@@ -23,20 +23,17 @@ def call_sse_llm(model, ep):
     payload = copy.copy(input_template)
     payload['model'] = model
     headers = {'Accept': 'text/event-stream'}
-    print('1.1')
+
     res = requests.post(url=ep,
         data=json.dumps(payload), headers=headers, stream=False)
     res.raise_for_status()
 
-    print('1.2')
     # print('res.text', res.text, res.code)
     client = sseclient.SSEClient(res)
-    print('1.3')
     res_count = 0
     for event in client.events():
-        print('event data', event.data)
         # delta_data = json.loads(event.data)
-        # print('sse data', delta_data)
+        print('sse data', delta_data)
         res_count += 1
 
 
@@ -118,6 +115,16 @@ def test_llm_model():
     params0 = copy.copy(params[0])
     params0['parameters']['decoupled'] = '1'
     run_model_lifecycle(models[0], params0, True)
+
+    # test decoupled models
+    params1 = copy.copy(params[1])
+    params1['parameters']['decoupled'] = '1'
+    run_model_lifecycle(models[1], params1, True)
+
+    # test decoupled models
+    params2 = copy.copy(params[2])
+    params2['parameters']['decoupled'] = '1'
+    run_model_lifecycle(models[2], params2, True)
 
 
 test_llm_model()
