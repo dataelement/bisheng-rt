@@ -197,7 +197,7 @@ class QwenChat(BaseLLM):
                 model=request.model,
                 choices=[choice_data],
                 object='chat.completion.chunk'
-            )
+            ).dict()
             yield chunk
 
         torch_gc(self.devices)

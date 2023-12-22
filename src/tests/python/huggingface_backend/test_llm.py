@@ -32,7 +32,7 @@ def call_sse_llm(model, ep):
     client = sseclient.SSEClient(res)
     res_count = 0
     for event in client.events():
-        # delta_data = json.loads(event.data)
+        delta_data = json.loads(event.data)
         print('sse data', delta_data)
         res_count += 1
 
@@ -112,19 +112,24 @@ def test_llm_model():
     # run_model_lifecycle(models[2], params[2])
 
     # test decoupled models
-    params0 = copy.copy(params[0])
-    params0['parameters']['decoupled'] = '1'
-    run_model_lifecycle(models[0], params0, True)
+    # params0 = copy.copy(params[0])
+    # params0['parameters']['decoupled'] = '1'
+    # run_model_lifecycle(models[0], params0, True)
 
-    # test decoupled models
-    params1 = copy.copy(params[1])
-    params1['parameters']['decoupled'] = '1'
-    run_model_lifecycle(models[1], params1, True)
+    # # test decoupled models
+    # params1 = copy.copy(params[1])
+    # params1['parameters']['decoupled'] = '1'
+    # run_model_lifecycle(models[1], params1, True)
 
-    # test decoupled models
-    params2 = copy.copy(params[2])
-    params2['parameters']['decoupled'] = '1'
-    run_model_lifecycle(models[2], params2, True)
+    # # test decoupled models
+    # params2 = copy.copy(params[2])
+    # params2['parameters']['decoupled'] = '1'
+    # run_model_lifecycle(models[2], params2, True)
+
+    # # test decoupled models
+    params3 = copy.copy(params[3])
+    params3['parameters']['decoupled'] = '1'
+    run_model_lifecycle(models[3], params3, True)
 
 
 test_llm_model()

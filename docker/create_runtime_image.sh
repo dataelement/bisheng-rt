@@ -9,6 +9,14 @@ function create_prod_base_image() {
 }
 
 
+function create_prod_base_image_v002() {
+    IMAGE="dataelement/bisheng-rt-base:0.0.1"
+    MOUNT="-v $HOME:$HOME -v /public:/public"
+    docker run --gpus=all --net=host -itd --shm-size=10G \
+        --name bisheng_rt_runtime_dev_002 ${MOUNT} $IMAGE bash
+}
+
+
 function create_runtime_image() {
     IMAGE="dataelement/bisheng-rt-runtime:0.0.1"
     MOUNT="-v $HOME:$HOME -v /home/public:/home/public"
@@ -69,6 +77,13 @@ function temp_build_image() {
 }
 
 
+function temp_build_image_v002() {
+    docker rmi dataelement/bisheng-rt-runtime:0.0.2
+    docker commit -a "author@dataelem.com" -m "commit bisheng-rt runtime image" \
+        bisheng_rt_runtime_dev_002 dataelement/bisheng-rt-runtime:0.0.2
+}
+
+
 function build_image() {
     curr=$(pwd)
     pushd ${curr}/python
@@ -78,31 +93,57 @@ function build_image() {
 }
 
 
-function update_torch() {
+function update_rt_runtime_v002() {
     PIP_REPO=https://mirrors.tencent.com/pypi/simple
     EXTRA_PIP_REPO="https://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
 
-    # pip install torch==2.1.2 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
+    export DEBIAN_FRONTEND="noninteractive"
 
-    # LOCAL_PKG="/public/bisheng/release/dist/torch-2.1.2+cu118-cp38-cp38-linux_x86_64.whl"
-    # pip3 install $LOCAL_PKG -i https://mirrors.tencent.com/pypi/simple
+    # apt update && apt install libarchive-dev patchelf libgl1 libjsoncpp-dev -y
 
-    # pip install torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
+    # # Configure language
+    # locale-gen en_US.UTF-8
+    # export LC_ALL=en_US.UTF-8
+    # export LANG=en_US.UTF-8
+    # export LANGUAGE=en_US.UTF-8
+
+    # # Configure timezone
+    # export TZ=Asia/Shanghai
+    # ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+    # ln -s /usr/local/bin/pip3 /usr/bin/pip3.8
+
+    # ## pip install torch==2.1.2 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
+
+    # pip3 install /public/bisheng/release/dist/torch-2.1.2+cu118-cp38-cp38-linux_x86_64.whl -i ${PIP_REPO}
+
+    # pip3 install torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
     # pip3 install -U xformers==0.0.23.post1 --index-url https://download.pytorch.org/whl/cu118
     # pip3 install vllm==0.2.6 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
 
+    # pip3 install lanms==1.0.2 -i ${EXTRA_PIP_REPO}
+
+    # pip3 install /public/bisheng/release/dist/tensorflow-1.15.5+nv-cp38-cp38-linux_x86_64.whl -i $PIP_REPO
     
-    # wget ${NEXUS_REPO}/flash-attention-v2.3.3.tar.gz && tar zxf flash-attention-v2.3.3.tar.gz
+    # pip3 install einops==0.7.0 -i $PIP_REPO
 
 
-    # build is very slowly, be patiently, about 20-30mins
-    pushd /public/bisheng/release/dist/flash-attention
-    pip install packaging
+    ## build is very slowly, be patiently, about 20-30mins
+    pushd /public/bisheng/release/dist/flash-attention-2.3.6
     MAX_JOBS=10 pip install . -i $PIP_REPO
-
-    #MAX_JOBS=10 pip install csrc/layer_norm -i $PIP_REPO
+    MAX_JOBS=10 pip install csrc/layer_norm -i $PIP_REPO
     popd
 
+    # pip3 install flash-attn==2.3.6 -i ${EXTRA_PIP_REPO}
+
+    # pip3 install -r /home/hanfeng/projects/bisheng-rt/python/pybackend_libs/requirements.txt -i $PIP_REPO
+
+    # echo "clean" 
+    # apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip
+}
+
+function run() {
+    workdir="/home/hanfeng/projects/bisheng-rt/docker"
+    docker exec bisheng_rt_runtime_dev_002 bash ${workdir}/create_runtime_image.sh
 }
 
 
@@ -110,4 +151,18 @@ function update_torch() {
 # create_prod_base_image
 # temp_build_image
 # create_runtime_image
-update_torch
+
+# create_prod_base_image_v002
+# temp_build_image_v002
+# exit 0
+
+
+opt="$1"
+case $opt in
+  "run")
+    run
+    ;;
+   *)
+    update_rt_runtime_v002
+    ;;
+esac

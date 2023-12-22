@@ -43,9 +43,9 @@ function run_container_v006() {
   LOCAL_MODEL_REPO="/public/bisheng/model_repository/"
   MAPING_MODEL_REPO="/opt/bisheng-rt/models/model_repository"
   MOUNT="-v ${LOCAL_RT_DEV}:/opt/bisheng-rt -v $LOCAL_MODEL_REPO:$MAPING_MODEL_REPO -v $HOME:$HOME -v /public:/public"
-  IMAGE="dataelement/bisheng-rt-runtime:0.0.1"
+  IMAGE="dataelement/bisheng-rt-runtime:0.0.2"
   docker run --gpus=all --net=host -itd --workdir /opt/bisheng-rt \
-      --shm-size=10G --name bisheng_rt_dev_v006 ${MOUNT} $IMAGE bash
+      --shm-size=10G --name bisheng_rt_test_v006 ${MOUNT} $IMAGE bash
 }
 
 
