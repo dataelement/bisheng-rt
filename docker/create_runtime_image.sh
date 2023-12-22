@@ -21,7 +21,7 @@ function test_run() {
     PIP_REPO=https://mirrors.tencent.com/pypi/simple
     NEXUS_REPO="https://public2:qTongs8YdIwXSRPX@nexus.dataelem.com/repository/product/bisheng"
 
-    EXTRA_PIP_REPO="http://public:26rS9HRxDqaVy5T@110.16.193.170:50083/repository/pypi-hosted/simple --trusted-host 110.16.193.170"
+    EXTRA_PIP_REPO="http://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
     # apt update && apt install libarchive-dev patchelf libgl1 libjsoncpp-dev -y
 
     # # Configure language
@@ -44,7 +44,7 @@ function test_run() {
     # pip install torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
     # pip install ./docker/deps/tensorflow-1.15.5+nv-cp38-cp38-linux_x86_64.whl -i $PIP_REPO
 
-    # wget ${NEXUS_REPO}/flash-attention-2.3.3.tar.gz && tar zxf flash-attention-2.3.3.tar.gz
+    # wget ${NEXUS_REPO}/flash-attention-v2.3.3.tar.gz && tar zxf flash-attention-v2.3.3.tar.gz
     
     # build is very slowly, be patiently, about 20-30mins
     # pushd ./docker/deps/flash-attention
@@ -78,7 +78,36 @@ function build_image() {
 }
 
 
-test_run
+function update_torch() {
+    PIP_REPO=https://mirrors.tencent.com/pypi/simple
+    EXTRA_PIP_REPO="https://public:26rS9HRxDqaVy5T@nx.dataelem.com/repository/pypi-hosted/simple"
+
+    # pip install torch==2.1.2 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
+
+    # LOCAL_PKG="/public/bisheng/release/dist/torch-2.1.2+cu118-cp38-cp38-linux_x86_64.whl"
+    # pip3 install $LOCAL_PKG -i https://mirrors.tencent.com/pypi/simple
+
+    # pip install torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu118
+    # pip3 install -U xformers==0.0.23.post1 --index-url https://download.pytorch.org/whl/cu118
+    # pip3 install vllm==0.2.6 -i ${EXTRA_PIP_REPO} --extra-index-url ${PIP_REPO}
+
+    
+    # wget ${NEXUS_REPO}/flash-attention-v2.3.3.tar.gz && tar zxf flash-attention-v2.3.3.tar.gz
+
+
+    # build is very slowly, be patiently, about 20-30mins
+    pushd /public/bisheng/release/dist/flash-attention
+    pip install packaging
+    MAX_JOBS=10 pip install . -i $PIP_REPO
+
+    #MAX_JOBS=10 pip install csrc/layer_norm -i $PIP_REPO
+    popd
+
+}
+
+
+# test_run
 # create_prod_base_image
 # temp_build_image
 # create_runtime_image
+update_torch

@@ -1,10 +1,13 @@
 import copy
+import time
 
 import torch
 
 from .chatglm2_utils import auto_configure_device_map
 from .llm import (BaseLLM, ChatCompletionRequest, ChatCompletionResponse,
-                  ChatCompletionResponseChoice, ChatMessage, torch_gc)
+                  ChatCompletionResponseChoice,
+                  ChatCompletionResponseStreamChoice, ChatMessage,
+                  DeltaMessage, torch_gc)
 
 
 def create_chat_completion(model, tokenizer, request: ChatCompletionRequest):
@@ -74,7 +77,7 @@ class ChatGLM2(BaseLLM):
                    gpu_memory,
                    True,
                    auto_configure_device_map=auto_configure_device_map,
-                   use_dispatch=True)
+                   use_dispatch=False)
 
     def predict(self, kwargs):
         req_dict = copy.copy(self.default_params)
@@ -86,3 +89,79 @@ class ChatGLM2(BaseLLM):
 
     def completion(self, kwargs):
         pass
+
+    def stream_predict(self, kwargs):
+        # not support function call
+        req_dict = copy.copy(self.default_params)
+        req_dict.update(kwargs)
+        request = ChatCompletionRequest.parse_obj(req_dict)
+
+        if request.messages[-1].role != 'user':
+            raise Exception('Invalid request')
+
+        query = request.messages[-1].content
+        prev_messages = request.messages[:-1]
+        if len(prev_messages) > 0 and prev_messages[0].role == 'system':
+            query = prev_messages.pop(0).content + query
+
+        history = []
+        if len(prev_messages) % 2 == 0:
+            for i in range(0, len(prev_messages), 2):
+                if (prev_messages[i].role == 'user'
+                        and prev_messages[i + 1].role == 'assistant'):
+                    history.append(
+                        [prev_messages[i].content,
+                         prev_messages[i + 1].content])
+
+        kwargs = {
+            'temperature': request.temperature,
+            'top_p': request.top_p,
+            'max_length': request.max_tokens,
+            'do_sample': request.do_sample
+        }
+
+        stop = []
+        if request.stop is not None:
+            stop = request.stop
+            if isinstance(stop, str):
+                stop = [request.stop]
+
+        with torch.no_grad():
+
+            prompt = self.tokenizer.build_prompt(query, history=history)
+            inputs_tokens = len(self.tokenizer.tokenizer.encode(prompt)) + 2
+
+            prev_len = 0
+            tokens = 0
+            created = int(time.time())
+            for resp, hist in self.model.stream_chat(self.tokenizer,
+                                                     query,
+                                                     history=history,
+                                                     **kwargs):
+                tokens += 1
+                delta_resp = resp[prev_len:]
+                prev_len += len(delta_resp)
+                choice_data = ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(role='assistant', content=delta_resp),
+                    finish_reason=None)
+
+                yield ChatCompletionResponse(model=request.model,
+                                             choices=[choice_data],
+                                             object='chat.completion',
+                                             created=created).dict()
+            finish_reason = 'stop'
+            if tokens + inputs_tokens >= request.max_tokens:
+                finish_reason = 'length'
+
+            choice_data = ChatCompletionResponseStreamChoice(
+                index=0,
+                delta=DeltaMessage(role='assistant', content=''),
+                finish_reason=finish_reason)
+
+            yield ChatCompletionResponse(model=request.model,
+                                         choices=[choice_data],
+                                         object='chat.completion',
+                                         created=created).dict()
+
+        torch_gc(self.devices)

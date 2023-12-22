@@ -6,8 +6,8 @@ from pybackend_libs.dataelem.model.llm.qwen import QwenChat
 
 def test_qwen_7b_chat():
     params = {
-        'pretrain_path': '/home/public/llm/Qwen-7B-Chat',
-        'devices': '1',
+        'pretrain_path': '/public/bisheng/model_repository/Qwen-7B-Chat',
+        'devices': '4',
         'gpu_memory': 20,
         'max_tokens': 256,
     }
@@ -28,12 +28,12 @@ def test_qwen_7b_chat():
     print(outp)
 
 
-def test_qwen_function_call():
+def test_qwen_14b_chat_function_call():
     params = {
-        'pretrain_path': '/home/public/llm/Qwen-1_8B-Chat',
-        'devices': '1',
-        'gpu_memory': 20,
-        'max_tokens': 8192,
+        'pretrain_path': '/public/bisheng/model_repository/Qwen-14B-Chat',
+        'devices': '4,5',
+        'gpu_memory': 40,
+        'max_tokens': 256,
     }
 
     model = QwenChat(**params)
@@ -104,6 +104,30 @@ def test_qwen_function_call():
     print(outp)
 
 
+def test_qwen_14b_chat_simple():
+    params = {
+        'pretrain_path': '/public/bisheng/model_repository/Qwen-14B-Chat',
+        'devices': '4,5',
+        'gpu_memory': 40,
+        'max_tokens': 256,
+    }
+
+    model = QwenChat(**params)
+    inp = {
+        'model':
+        'qwen-14b',
+        'messages': [{
+            'role': 'system',
+            'content': '你是来自数据项素创建的一个人工智能助手'
+        }, {
+            'role': 'user',
+            'content': '你是谁'
+        }],
+    }
+
+    outp = model.predict(inp)
+    print(outp)
+    
 def test_qwen_stream_chat():
     params = {
         'pretrain_path': '/home/public/llm/Qwen-1_8B-Chat',
@@ -127,5 +151,5 @@ def test_qwen_stream_chat():
 
 
 # test_qwen_7b_chat()
-test_qwen_function_call()
+# test_qwen_function_call()
 # test_qwen_stream_chat()
