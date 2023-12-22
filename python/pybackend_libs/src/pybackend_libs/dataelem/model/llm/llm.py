@@ -1,5 +1,5 @@
 import time
-from typing import List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import torch
 from accelerate import (dispatch_model, infer_auto_device_map,
@@ -101,8 +101,9 @@ class BaseLLM(object):
 
 
 class ChatMessage(BaseModel):
-    role: Literal['user', 'assistant', 'system', 'observation']
+    role: Literal['user', 'assistant', 'system', 'function', 'observation']
     content: str
+    function_call: Optional[Dict] = None
     tools: Optional[List[dict]] = None
     metadata: Optional[str] = None
 
@@ -118,6 +119,7 @@ class DeltaMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
+    functions: Optional[List[Dict]] = None
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
@@ -129,7 +131,7 @@ class ChatCompletionRequest(BaseModel):
 class ChatCompletionResponseChoice(BaseModel):
     index: int
     message: ChatMessage
-    finish_reason: Literal['stop', 'length']
+    finish_reason: Literal['stop', 'length', 'function_call']
 
 
 class ChatCompletionResponseStreamChoice(BaseModel):
