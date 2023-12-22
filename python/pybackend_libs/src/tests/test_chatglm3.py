@@ -1,10 +1,11 @@
+# flake8: noqa
 from pybackend_libs.dataelem.model.llm.chatglm3 import ChatGLM3
 
 
 def test_chatglm3_6b():
     params = {
         'pretrain_path': '/home/public/llm/chatglm3-6b',
-        'devices': '6',
+        'devices': '4',
         'gpu_memory': 20,
         'max_tokens': 8192,
     }
@@ -23,6 +24,35 @@ def test_chatglm3_6b():
             'role': 'user',
             'content': '你可以做什么'
         }],
+    }
+    outp = model.predict(inp)
+    print(outp)
+
+    print('==============================')
+    inp = {
+        'model':
+        'chatglm_6b',
+        'messages': [
+            {'role': 'system',
+             'content': 'Answer the following questions as best as you can. You have access to the following tools:',
+             'tools': [{'name': 'Calculator',
+                        'description': 'Useful for when you need to answer questions about math',
+                        'parameters': {
+                                        'type': 'object',
+                                        'properties': {
+                                            'formula': {'type': 'string',
+                                                        'description': 'The formula to be calculated'
+                                                       }
+                                        },
+                                        'required': ['formula']
+                                      }
+                       }]
+            },
+            {'role': 'user', 'content': '12345679乘以54等于多少？'},
+            {'role': 'assistant', 'metadata': 'Calculator', 'content': " ```python\ntool_call(formula='12345679*54')\n```"},
+            {'role': 'observation', 'content': '666666666'},
+            {'role': 'user', 'content': ''},
+        ],
     }
     outp = model.predict(inp)
     print(outp)
