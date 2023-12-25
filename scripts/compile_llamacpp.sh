@@ -29,11 +29,12 @@ function compile() {
 
 
 function compile2() {
-  apt install -y libopenblas-dev libopenblas-base pkg-config
-  pushd /public/bisheng/release/dist/llama-cpp-python
-  CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" pip install .
-
-  # pip install .
+  apt update && apt install -y --no-install-recommends libopenblas-dev libopenblas-base pkg-config
+  # pushd /public/bisheng/release/dist/llama-cpp-python
+  wget https://public2:qTongs8YdIwXSRPX@nexus.dataelem.com/repository/product/bisheng/llama-cpp-python-v0.2.25.tar.gz
+  tar zxf llama-cpp-python-v0.2.25.tar.gz
+  cd llama-cpp-python && CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" pip install . && cd -
+  rm -fr llama-cpp-python-v0.2.25.tar.gz llama-cpp-python
 }
 
 
@@ -116,10 +117,10 @@ function bench() {
 
 # start_build_image
 # compile
-# compile2
+compile2
 # llama2_quan4
 # bench
 
-qwen_quan4
+# qwen_quan4
 # bench
 
