@@ -10,16 +10,16 @@ def test_qwen_int4():
         'n_threads_batch':20,
         'chat_format': 'qwen',
         'top_p': 0.8,
-        'max_tokens': 2048
+        'max_tokens': 2048,
+        'model_ftype': 'q4_0',
+        'stop': ['<|im_end|>', '<|im_start|>', '<|endoftext|>', '\n\n\n']
     }
 
     params = {
         'pretrain_path':
             '/public/bisheng/model_repository/Qwen-1_8B-Chat-4b-gguf',
-        'devices': '',
-        'gpu_memory': None,
-        'precision': 'fp16',
-        'max_tokens': 256,
+        # 'pretrain_path':
+        #     '/public/bisheng/model_repository/Qwen-7B-Chat-4b-gguf',
         'pymodel_params': json.dumps(pymodel_params)
     }
 
@@ -30,12 +30,16 @@ def test_qwen_int4():
         'model': 'qwen-1_8b',
         'messages': [{
             'role': 'system',
-            'content': '你是来自数据项素创建的一个人工智能助手'
+            'content': '你是一个作家'
         }, {
             'role': 'user',
-            'content': '你是谁'
+            # 'content': '以“今晚夜色真美”为开头写一篇短文，包含悬疑元素'
+            'content': 'what can you do?'
         }],
     }
+
+    # for outp in model.stream_predict(inp):
+    #     print(outp)
 
     outp = model.predict(inp)
     print(outp)

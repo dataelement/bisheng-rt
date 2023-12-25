@@ -15,9 +15,9 @@ def call_sse_llm(model, ep):
         {'role': 'system', 'content': ''},
         {
           'role': 'user',
-          'content': 'what can you do?'}],
-          # 'content': '以“今晚夜色真美”为开头写一篇短文，包含悬疑元素'}],
-      'max_tokens': 256,
+          # 'content': 'what can you do?'}],
+          'content': '以“今晚夜色真美”为开头写一篇短文，包含悬疑元素'}],
+      'max_tokens': 512,
       'stream': True,
     }
     payload = copy.copy(input_template)
@@ -127,9 +127,15 @@ def test_llm_model():
     # run_model_lifecycle(models[2], params2, True)
 
     # # test decoupled models
-    params3 = copy.copy(params[3])
-    params3['parameters']['decoupled'] = '1'
-    run_model_lifecycle(models[3], params3, True)
+    # params3 = copy.copy(params[3])
+    # params3['parameters']['decoupled'] = '1'
+    # run_model_lifecycle(models[3], params3, True)
+
+    # run_model_lifecycle(models[5], params[5])
+    # # test decoupled models
+    params5 = copy.copy(params[5])
+    params5['parameters']['decoupled'] = '1'
+    run_model_lifecycle(models[5], params5, True)
 
 
 test_llm_model()

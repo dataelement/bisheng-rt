@@ -86,11 +86,18 @@ function qwen_quan4() {
   C1PY="${LLAMACPP_LIB}/bin/convert-hf-to-gguf.py"
   C0PY="python3 ${LLAMACPP_LIB}/bin/convert.py"
 
-  input_dir="/public/bisheng/model_repository/Qwen-1_8B-Chat"
-  output_dir="/public/bisheng/model_repository/Qwen-1_8B-Chat-4b-gguf"
+  # input_dir="/public/bisheng/model_repository/Qwen-1_8B-Chat"
+  # output_dir="/public/bisheng/model_repository/Qwen-1_8B-Chat-4b-gguf"
+  # output_file="${output_dir}/ggml-model-f16.gguf"
+  # $C1PY --outfile $output_file --outtype f16 ${input_dir} 
+  # $QUAN ${output_file} Q4_0
+
+  input_dir="/public/bisheng/model_repository/Qwen-7B-Chat"
+  output_dir="/public/bisheng/model_repository/Qwen-7B-Chat-4b-gguf"
   output_file="${output_dir}/ggml-model-f16.gguf"
-  # $C1PY ${input_dir} --outfile $
+  $C1PY --outfile $output_file --outtype f16 ${input_dir} 
   $QUAN ${output_file} Q4_0
+
 }
 
 function bench() {
@@ -113,6 +120,6 @@ function bench() {
 # llama2_quan4
 # bench
 
-# qwen_quan4
-bench
+qwen_quan4
+# bench
 
