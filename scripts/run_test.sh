@@ -49,7 +49,29 @@ function run_container_v006() {
 }
 
 
-run_container_v006
+function run_container_v006_test() {
+  LOCAL_MODEL_REPO="/public/bisheng/model_repository/"
+  MAPING_MODEL_REPO="/opt/bisheng-rt/models/model_repository"
+  MOUNT="-v $LOCAL_MODEL_REPO:$MAPING_MODEL_REPO -v $HOME:$HOME -v /public:/public"
+  IMAGE="cr.dataelem.com/dataelement/bisheng-rt:0.0.6"
+  docker run --gpus=all --net=host -itd --shm-size=10G \
+    --name bisheng_rt_test_v006 ${MOUNT} $IMAGE bash
+}
+
+
+function run_container_v006_cpu_test() {
+  LOCAL_MODEL_REPO="/public/bisheng/model_repository/"
+  MAPING_MODEL_REPO="/opt/bisheng-rt/models/model_repository"
+  MOUNT="-v $LOCAL_MODEL_REPO:$MAPING_MODEL_REPO -v $HOME:$HOME -v /public:/public"
+  IMAGE="cr.dataelem.com/dataelement/bisheng-rt:0.0.6"
+  docker run --net=host -itd --shm-size=10G \
+    --name bisheng_rt_cpu_test_v006 ${MOUNT} $IMAGE bash
+}
+
+
+# run_container_v006_cpu_test
+run_container_v006_test
+# run_container_v006
 # run_container_dev
 # run_container
 # run_container_v003

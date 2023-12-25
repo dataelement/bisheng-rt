@@ -39,3 +39,5 @@ scikit-image==0.21.0
 
 auto-gptq==0.5.1
 optimum==1.14.1
+
+llama-cpp-python==0.2.25
