@@ -479,6 +479,8 @@ target_link_libraries(
     triton-common-logging            # from repo-common
     triton-common-json               # from repo-common
     triton-common-table-printer      # from repo-common
+    triton-common-cipher             # from repo-common
+    triton-common-fs                 # from repo-common
     protobuf::libprotobuf
     ${RE2_LIBRARY}
 )
