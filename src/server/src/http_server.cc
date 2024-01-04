@@ -1512,7 +1512,7 @@ HTTPAPIServer::HandleRepositoryControl(
           };
       std::unique_ptr<
           std::vector<TRITONSERVER_Parameter*>, decltype(param_deleter)>
-      params(new std::vector<TRITONSERVER_Parameter*>(), param_deleter);
+          params(new std::vector<TRITONSERVER_Parameter*>(), param_deleter);
       // local variables to store the decoded file content, the data must
       // be valid until TRITONSERVER_ServerLoadModelWithParameters returns.
       std::list<std::vector<char>> binary_files;
@@ -3106,7 +3106,7 @@ HTTPAPIServer::HandleInfer(
   if (err == nullptr) {
     connection_paused = true;
 
-    auto infer_request = CreateInferRequest(req, irequest_shared);
+    auto infer_request = CreateInferRequest(req, irequest_shared, model_name);
 #ifdef TRITON_ENABLE_TRACING
     infer_request->trace_ = trace;
 #endif  // TRITON_ENABLE_TRACING
@@ -3440,11 +3440,13 @@ HTTPAPIServer::InferRequestClass::RequestFiniHook(
 HTTPAPIServer::InferRequestClass::InferRequestClass(
     TRITONSERVER_Server* server, evhtp_request_t* req,
     DataCompressor::Type response_compression_type,
-    const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request)
+    const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request,
+    const std::string& model_name)
     : server_(server), req_(req),
       response_compression_type_(response_compression_type), response_count_(0),
-      triton_request_(triton_request)
+      triton_request_(triton_request), model_name_(model_name)
 {
+  start_tp_ = std::chrono::high_resolution_clock::now();
   evhtp_connection_t* htpconn = evhtp_request_get_connection(req);
   thread_ = htpconn->thread;
   evhtp_request_pause(req);
@@ -3533,6 +3535,20 @@ HTTPAPIServer::InferRequestClass::InferResponseComplete(
         infer_request);
   }
 
+  // support request level log output
+  const char* model_name;
+  int64_t model_version;
+  LOG_TRITONSERVER_ERROR(
+      TRITONSERVER_InferenceResponseModel(
+          response, &model_name, &model_version),
+      "getting model name and version");
+  auto end_tp = std::chrono::high_resolution_clock::now();
+  auto elapse = std::chrono::duration<float, std::milli>(
+                    end_tp - infer_request->start_tp_)
+                    .count();
+  LOG_INFO << "Inference request for model " << model_name << " version "
+           << model_version << " completed in " << elapse << " msec";
+
   LOG_TRITONSERVER_ERROR(
       TRITONSERVER_InferenceResponseDelete(response),
       "deleting inference response");
@@ -3588,6 +3604,20 @@ HTTPAPIServer::InferRequestClass::InferResponseCompleteV1(
         infer_request->thread_, InferRequestClass::BADReplyCallback,
         infer_request);
   }
+
+  // support request level log output
+  const char* model_name;
+  int64_t model_version;
+  LOG_TRITONSERVER_ERROR(
+      TRITONSERVER_InferenceResponseModel(
+          response, &model_name, &model_version),
+      "get model name and version");
+  auto end_tp = std::chrono::high_resolution_clock::now();
+  auto elapse = std::chrono::duration<float, std::milli>(
+                    end_tp - infer_request->start_tp_)
+                    .count();
+  LOG_INFO << "Inference request for model " << model_name << " version "
+           << model_version << " completed in " << elapse << " msec";
 
   LOG_TRITONSERVER_ERROR(
       TRITONSERVER_InferenceResponseDelete(response),
@@ -3691,6 +3721,20 @@ HTTPAPIServer::InferRequestClass::InferResponseCompleteV2(
         infer_request->thread_, InferRequestClass::BADReplyCallback,
         infer_request);
   }
+
+  // support request level log output
+  const char* model_name;
+  int64_t model_version;
+  LOG_TRITONSERVER_ERROR(
+      TRITONSERVER_InferenceResponseModel(
+          response, &model_name, &model_version),
+      "get model name and version");
+  auto end_tp = std::chrono::high_resolution_clock::now();
+  auto elapse = std::chrono::duration<float, std::milli>(
+                    end_tp - infer_request->start_tp_)
+                    .count();
+  LOG_INFO << "Inference request for model " << model_name << " version "
+           << model_version << " completed in " << elapse << " msec";
 
   LOG_TRITONSERVER_ERROR(
       TRITONSERVER_InferenceResponseDelete(response),
@@ -4296,6 +4340,14 @@ HTTPAPIServer::HandleRestfulInfer(
     return;
   }
 
+  int64_t requested_model_version;
+  std::string model_version_str = "";
+  RETURN_AND_RESPOND_IF_ERR(
+      req,
+      GetModelVersionFromString(model_version_str, &requested_model_version));
+
+  RETURN_AND_RESPOND_IF_ERR(
+      req, CheckTransactionPolicy(req, model_name, requested_model_version));
 
   // Step 0. parse the body
   // Decompress request body if it is compressed in supported type
@@ -4312,13 +4364,6 @@ HTTPAPIServer::HandleRestfulInfer(
 
   // Step 2. create thre request
   bool connection_paused = false;
-
-  int64_t requested_model_version;
-  std::string model_version_str = "";
-  RETURN_AND_RESPOND_IF_ERR(
-      req,
-      GetModelVersionFromString(model_version_str, &requested_model_version));
-
   TRITONSERVER_InferenceRequest* irequest = nullptr;
   RETURN_AND_RESPOND_IF_ERR(
       req, TRITONSERVER_InferenceRequestNew(
@@ -4352,7 +4397,7 @@ HTTPAPIServer::HandleRestfulInfer(
 
   const char* request_id = "";
   connection_paused = true;
-  auto infer_request = CreateInferRequest(req, irequest_shared);
+  auto infer_request = CreateInferRequest(req, irequest_shared, model_name);
   if (err == nullptr) {
     // Create the request.
     do {
@@ -4421,8 +4466,9 @@ HTTPAPIServer::HandleRestfulInfer(
 
   // process err
   if (err != nullptr) {
-    LOG_VERBOSE(1) << "[request id: " << request_id << "] "
-                   << "Infer failed: " << TRITONSERVER_ErrorMessage(err);
+    LOG_INFO << "[request id: " << request_id << "] "
+             << "[model name: " << model_name << "] "
+             << "Infer failed: " << TRITONSERVER_ErrorMessage(err);
     evhtp_headers_add_header(
         req->headers_out,
         evhtp_header_new(kContentTypeHeader, "application/json", 1, 1));
@@ -4568,6 +4614,15 @@ HTTPAPIServer::GenerateRequestClass::EndResponseCallback(
     infer_request->SendChunkResponse(true /* end */);
     evhtp_send_reply_chunk_end(infer_request->EvHtpRequest());
   }
+
+  // support request level log output
+  const auto& model_name = infer_request->model_name_;
+  auto end_tp = std::chrono::high_resolution_clock::now();
+  auto elapse = std::chrono::duration<float, std::milli>(
+                    end_tp - infer_request->start_tp_)
+                    .count();
+  LOG_INFO << "Inference request for model " << model_name << " completed in "
+           << elapse << " msec";
 
   delete infer_request;
 }
@@ -4841,6 +4896,9 @@ HTTPAPIServer::Handle(evhtp_request_t* req)
           std::string(req->uri->path->full), app_regex_, &app_name,
           &app_kind)) {
     // todo: update later
+    LOG_INFO << "start infer with [model_name: " << app_name
+             << "] [method: " << app_kind << "]";
+
     if (app_name.find("ocr") != std::string::npos) {
       HandleRestfulInfer(req, app_name);
     } else if (app_kind.compare("generate") == 0) {
@@ -5111,11 +5169,11 @@ HTTPAPIServer::HandleGenerate(
   if (streaming) {
     generate_request.reset(new GenerateRequestClass(
         server_.get(), req, GetResponseCompressionType(req), streaming,
-        irequest_shared));
+        irequest_shared, model_name));
   } else {
     generate_request.reset(new GenerateRequestClass(
         server_.get(), req, GetResponseCompressionType(req), streaming,
-        irequest_shared));
+        irequest_shared, model_name));
   }
   generate_request->trace_ = trace;
 
@@ -5166,8 +5224,9 @@ HTTPAPIServer::HandleGenerate(
         request_id = "<id_unknown>";
       }
 
-      LOG_VERBOSE(1) << "[request id: " << request_id << "] "
-                     << "Infer failed: " << TRITONSERVER_ErrorMessage(error);
+      LOG_INFO << "[request id: " << request_id << "] "
+               << "[model name: " << model_name << "] "
+               << "Infer failed: " << TRITONSERVER_ErrorMessage(error);
       AddContentTypeHeader(req, "application/json");
       EVBufferAddErrorJson(req->buffer_out, error);
       evhtp_send_reply(req, EVHTP_RES_BADREQ);

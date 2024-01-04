@@ -28,6 +28,7 @@
 #include <evhtp/evhtp.h>
 #include <re2/re2.h>
 
+#include <chrono>
 #include <list>
 #include <map>
 #include <memory>
@@ -187,7 +188,8 @@ class HTTPAPIServer : public HTTPServer {
     explicit InferRequestClass(
         TRITONSERVER_Server* server, evhtp_request_t* req,
         DataCompressor::Type response_compression_type,
-        const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request);
+        const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request,
+        const std::string& model_name);
     virtual ~InferRequestClass()
     {
       if (req_ != nullptr) {
@@ -259,6 +261,7 @@ class HTTPAPIServer : public HTTPServer {
     TRITONSERVER_Server* server_;
     evhtp_request_t* req_;
     evthr_t* thread_;
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_tp_;
 
     DataCompressor::Type response_compression_type_;
 
@@ -272,6 +275,9 @@ class HTTPAPIServer : public HTTPServer {
     // request and must not reference it after a successful
     // TRITONSERVER_ServerInferAsync (except for cancellation).
     std::shared_ptr<TRITONSERVER_InferenceRequest> triton_request_{nullptr};
+
+    // used for the logging
+    std::string model_name_;
   };
 
   // New design for GenerateRequestClass, remove all MappingSchema control for
@@ -283,9 +289,11 @@ class HTTPAPIServer : public HTTPServer {
     explicit GenerateRequestClass(
         TRITONSERVER_Server* server, evhtp_request_t* req,
         DataCompressor::Type response_compression_type, bool streaming,
-        const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request)
+        const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request,
+        const std::string& model_name)
         : InferRequestClass(
-              server, req, response_compression_type, triton_request),
+              server, req, response_compression_type, triton_request,
+              model_name),
           streaming_(streaming)
     {
     }
@@ -358,10 +366,12 @@ class HTTPAPIServer : public HTTPServer {
   virtual void Handle(evhtp_request_t* req) override;
   virtual std::unique_ptr<InferRequestClass> CreateInferRequest(
       evhtp_request_t* req,
-      const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request)
+      const std::shared_ptr<TRITONSERVER_InferenceRequest>& triton_request,
+      const std::string& model_name)
   {
     return std::unique_ptr<InferRequestClass>(new InferRequestClass(
-        server_.get(), req, GetResponseCompressionType(req), triton_request));
+        server_.get(), req, GetResponseCompressionType(req), triton_request,
+        model_name));
   }
 
   // Helper function to retrieve infer request header in the form specified by
