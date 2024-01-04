@@ -1,5 +1,8 @@
 # flake8: noqa
+import base64
+import io
 import json
+import os
 import re
 from typing import Any, Dict, Optional, Tuple
 
@@ -11,7 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from albumentations.pytorch import ToTensorV2
 from einops import rearrange, repeat
-from PIL import Image
+from PIL import Image, ImageOps
 from timm.models.layers import StdConv2dSame
 from timm.models.resnetv2 import ResNetV2
 from timm.models.vision_transformer import VisionTransformer
@@ -459,14 +462,25 @@ def token2str(tokens, tokenizer) -> list:
             for detok in dec]
 
 
-class LatexOCRAlg(object):
+class LatexRecog(object):
     """Get a prediction of an image in the easiest way"""
     image_resizer = None
 
-    def __init__(self, args_file):
+    def __init__(self, **kwargs):
         """Initialize a LatexOCR model
         """
+
+        pretrain_path = kwargs.get('pretrain_path')
+        devices = kwargs.get('devices').split(',')
+        args_file = os.path.join(pretrain_path, 'model_config.json')
         args = json.load(open(args_file))
+        args.update(
+            resizer_checkpoint=os.path.join(pretrain_path, 'image_resizer.pth'))
+        args.update(tokenizer=os.path.join(pretrain_path, 'tokenizer.json'))
+        args.update(
+            mfr_checkpoint=os.path.join(pretrain_path, 'p2t-mfr-20230702.pt'))
+        args.update(device=devices[0])
+
         self.model = EncoderDecoder(**args)
         mfr_checkpoint = args['mfr_checkpoint']
         device = args['device']
@@ -528,7 +542,17 @@ class LatexOCRAlg(object):
         pred = post_post_process_latex(pred)
         return pred
 
-    def infer(self, img=None, resize=True) -> str:
+
+    def read_image(self, path):
+        img = Image.open(path)
+        img = ImageOps.exif_transpose(img).convert('RGB')
+        return img
+
+    def infer(self, inp) -> Dict[str, Any]:
+        img = inp.get('b64_image')
+        resize = inp.get('resize', True)
+        b64_img = base64.b64decode(img)
+        img = self.read_image(io.BytesIO(b64_img))
         im = self.preprocess(img, resize)
         dec = self.model.generate(im, temperature=self.temperature)
         pred = self.postprocess(dec)

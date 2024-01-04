@@ -1,43 +1,22 @@
-import json
+import base64
 
-import numpy as np
-import torch
-from PIL import Image, ImageOps
-from recog_model import EncoderDecoder, LatexOCRAlg
+from pybackend_libs.dataelem.model.ocr.latex_recog import LatexRec
 
-
-def read_image(path):
-    img = Image.open(path)
-    img = ImageOps.exif_transpose(img).convert('RGB')
-    return img
+# import json
 
 
-def test_recog_model():
-    args_file = './data/args.json'
-    args = json.load(open(args_file, 'r'))
-    model = EncoderDecoder(**args)
-
-    mfr_checkpoint = args['mfr_checkpoint']
-    device = args['device']
-    model.load_state_dict(torch.load(mfr_checkpoint, map_location=device))
-
-    with open('./data/recog_in.npy', 'rb') as fin:
-        im = np.load(fin)
-
-    device = torch.device('cpu')
-    x = torch.from_numpy(im).to(device)
-    pred = model.generate(x, temperature=0.20)
-    print('---pred', pred.size(), np.sum(pred.numpy()))
+def test_latex_recog_model():
+    kwargs = {
+        'model_path': '/public/bisheng/model_repository/latex_recog/',
+        'devices': ''
+    }
+    latex_recog = LatexRec(**kwargs)
+    image_file = '/public/bisheng/latex_data/formular.jpg'
+    inputs = {
+      'b64_image': base64.b64encode(open(image_file, 'rb').read()).decode()
+    }
+    out1 = latex_recog.predict(inputs)
+    print(out1)
 
 
-def test_latex_ocr_alg():
-    args_file = './data/args.json'
-    model = LatexOCRAlg(args_file)
-
-    img = read_image('./data/zh1.jpg')
-    res = model.infer(img)
-    print('res', res)
-
-
-test_latex_ocr_alg()
-# test_recog_model()
+test_latex_recog_model()
