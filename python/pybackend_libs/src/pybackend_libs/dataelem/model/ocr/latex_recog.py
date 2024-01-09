@@ -187,7 +187,6 @@ class EncoderDecoder(nn.Module):
         self.bos_token = args['bos_token']
         self.eos_token = args['eos_token']
         self.max_seq_len = args['max_seq_len']
-
         if encoder_structure.lower() == 'vit':
             raise Exception('vit encoder not supported')
         elif encoder_structure.lower() == 'hybrid':
@@ -196,9 +195,19 @@ class EncoderDecoder(nn.Module):
             raise NotImplementedError(
                 'Encoder structure '
                 '"%s" not supported.' % encoder_structure)
+
+
         self.decoder = TransformerDecoder.get_decoder(args)
         self.encoder.to(device)
         self.decoder.to(device)
+        self.encoder.eval()
+        self.decoder.eval()
+
+         # Compatibility updates
+        for m in self.encoder.modules():
+            print('---m', type(m))
+
+        print('---enocder', dir(self.encoder), self.encoder.training)
 
     def forward(self, x: torch.Tensor, tgt_seq: torch.Tensor,  **kwargs):
         encoded = self.encoder(x)
@@ -207,12 +216,76 @@ class EncoderDecoder(nn.Module):
 
     @torch.no_grad()
     def generate(self, x: torch.Tensor, temperature: float = 0.25):
+        start_tokens = (
+            torch.LongTensor([self.bos_token])[:, None]).to(x.device)
+        print('---encoder, input->output', x.size(), self.encoder(x).size())
         return self.decoder.generate(
-            (torch.LongTensor([self.bos_token] * len(x))[:, None]).to(
-                x.device),
+            start_tokens,
             self.max_seq_len,
             eos_token=self.eos_token,
             context=self.encoder(x),
+            temperature=temperature)
+
+    def export_enc_onnx(self, x, save_onnx_path):
+        torch.onnx.export(
+            self.encoder,
+            x,
+            save_onnx_path,
+            export_params=True,
+            opset_version=17,
+            verbose=False,
+            input_names=['input'],
+            output_names=['output'],
+            do_constant_folding=True,
+            dynamic_axes={
+                'input': {2: 'height', 3: 'width'},
+                'output': {1: 'context1', 2: 'context2'},
+            },
+        )
+
+    def export_decoder_weights(self, save_path):
+        torch.save(self.decoder.state_dict(), save_path)
+
+
+class EncoderDecoderV2(nn.Module):
+    """model and implementation from
+        https://github.com/lukas-blecher/LaTeX-OCR/tree/main
+
+      post/prep from https://github.com/breezedeus/Pix2Text/tree/main
+    """
+
+    def __init__(self, **args):
+        super().__init__()
+        device = args['device']
+        devices = args['devices']
+
+        self.bos_token = args['bos_token']
+        self.eos_token = args['eos_token']
+        self.max_seq_len = args['max_seq_len']
+
+        encoder_model_path = args['encoder_model_path']
+        decode_model_path = args['decoder_model_path']
+
+        from pybackend_libs.dataelem.framework.onnx_graph import ONNXGraph
+        self.encoder = ONNXGraph(encoder_model_path, devices[0])
+        self.decoder = TransformerDecoder.get_decoder(args)
+        self.decoder.load_state_dict(
+            torch.load(decode_model_path, map_location=device))
+        self.decoder.eval()
+        self.decoder.to(device)
+
+    @torch.no_grad()
+    def generate(self, x: torch.Tensor, temperature: float = 0.25):
+        context = self.encoder.run([x.cpu().numpy()])[0]
+        context = torch.from_numpy(context).to(x.device)
+        start_tokens = (
+            torch.LongTensor([self.bos_token])[:, None]).to(x.device)
+
+        return self.decoder.generate(
+            start_tokens,
+            self.max_seq_len,
+            eos_token=self.eos_token,
+            context=context,
             temperature=temperature)
 
 
@@ -470,23 +543,33 @@ class LatexRecog(object):
         """Initialize a LatexOCR model
         """
 
-        pretrain_path = kwargs.get('pretrain_path')
+        pretrain_path = kwargs.get('model_path')
         devices = kwargs.get('devices').split(',')
+        device = torch.device(f'cuda:{devices[0]}' if devices[0] else 'cpu')
+        use_onnx_encoder = kwargs.get('use_onnx_encoder', False)
+
         args_file = os.path.join(pretrain_path, 'model_config.json')
         args = json.load(open(args_file))
         args.update(
             resizer_checkpoint=os.path.join(pretrain_path, 'image_resizer.pth'))
         args.update(tokenizer=os.path.join(pretrain_path, 'tokenizer.json'))
         args.update(
-            mfr_checkpoint=os.path.join(pretrain_path, 'p2t-mfr-20230702.pt'))
-        args.update(device=devices[0])
+            mfr_checkpoint=os.path.join(pretrain_path, 'p2t-mfr-20230702.pth'))
+        args.update(device=device)
 
-        self.model = EncoderDecoder(**args)
-        mfr_checkpoint = args['mfr_checkpoint']
-        device = args['device']
-        self.model.load_state_dict(
-            torch.load(mfr_checkpoint, map_location=device))
-        self.model.eval()
+        if use_onnx_encoder:
+            args['devices'] = devices
+            args['encoder_model_path'] = pretrain_path
+            args['decoder_model_path'] = os.path.join(
+                pretrain_path, 'pytorch_model.bin')
+            self.model = EncoderDecoderV2(**args)
+        else:
+            self.model = EncoderDecoder(**args)
+            mfr_checkpoint = args['mfr_checkpoint']
+            device = args['device']
+            self.model.load_state_dict(
+                torch.load(mfr_checkpoint, map_location=device))
+            self.model.eval()
 
         self.max_dimensions = args['max_dimensions']
         self.min_dimensions = args['min_dimensions']
@@ -548,7 +631,7 @@ class LatexRecog(object):
         img = ImageOps.exif_transpose(img).convert('RGB')
         return img
 
-    def infer(self, inp) -> Dict[str, Any]:
+    def predict(self, inp) -> Dict[str, Any]:
         img = inp.get('b64_image')
         resize = inp.get('resize', True)
         b64_img = base64.b64decode(img)
@@ -557,3 +640,14 @@ class LatexRecog(object):
         dec = self.model.generate(im, temperature=self.temperature)
         pred = self.postprocess(dec)
         return pred
+
+    def export_onnx(self, inp, save_path, save_decoder=False):
+        img = inp.get('b64_image')
+        resize = inp.get('resize', True)
+        b64_img = base64.b64decode(img)
+        img = self.read_image(io.BytesIO(b64_img))
+        im = self.preprocess(img, resize)
+        if save_decoder:
+            self.model.export_decoder_weights(save_path)
+        else:
+            self.model.export_enc_onnx(im, save_path)

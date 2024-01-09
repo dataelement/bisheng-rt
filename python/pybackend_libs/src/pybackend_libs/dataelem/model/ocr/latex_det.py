@@ -99,6 +99,7 @@ class LatexDetection(object):
         self.has_graph_executor = kwargs.get('has_graph_executor', False)
         if not self.has_graph_executor:
             from pybackend_libs.dataelem.framework.pt_graph import PTGraph
+            import torchvision  # noqa: F401
             devices = kwargs.get('devices')
             used_device = devices.split(',')[0]
             self.graph = PTGraph(sig, used_device, **kwargs)
@@ -107,7 +108,7 @@ class LatexDetection(object):
             self.ys = ['output']
 
     def predict(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        b64_image = context.pop('b64_image')
+        b64_image = context.get('b64_image')
         img = base64.b64decode(b64_image)
         img = np.fromstring(img, np.uint8)
         img = cv2.imdecode(img, cv2.IMREAD_COLOR)
