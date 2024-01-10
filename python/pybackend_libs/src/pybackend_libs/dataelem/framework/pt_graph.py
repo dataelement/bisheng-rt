@@ -23,9 +23,13 @@ class PTGraph(object):
 
     def run(self, inputs: List[Any]) -> List[Any]:
         assert len(inputs) == len(self.xs)
-        pt_tensors = [torch.from_numpy(nd).to(self.device) for nd in inputs]
+        if isinstance(inputs[0], torch.Tensor):
+            tensors = [tensor.to(self.device) for tensor in inputs]
+        else:
+            tensors = [torch.from_numpy(nd).to(self.device) for nd in inputs]
+
         with torch.no_grad():
-            outputs = self.model(*pt_tensors)
+            outputs = self.model(*tensors)
 
         if not self.enable_gpu:
             return [outputs.numpy()]

@@ -36,18 +36,22 @@ class CustomVisionTransformer(VisionTransformer):
         self.patch_size = patch_size
 
     def forward_features(self, x):
-        B, c, h, w = x.shape
-        x = self.patch_embed(x)
+        # # B, c, h, w = x.size()
+        # x = self.patch_embed(x)
+        B, h, w = x.size()
 
         # stole cls_tokens impl from Phil Wang, thanks
-        cls_tokens = self.cls_token.expand(B, -1, -1)
+        cls_tokens = self.cls_token.expand(1, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        h, w = h//self.patch_size, w//self.patch_size
+
+        h, w = h // self.patch_size, w // self.patch_size
         pos_emb_ind = (repeat(
-            torch.arange(h)*(self.width//self.patch_size-w), 'h -> (h w)', w=w)
-          + torch.arange(h*w))
-        pos_emb_ind = torch.cat((torch.zeros(1), pos_emb_ind+1), dim=0).long()
+            torch.arange(h) * (self.width // self.patch_size - w), 'h -> (h w)', w=w)
+          + torch.arange(h * w))
+        pos_emb_ind = torch.cat((torch.zeros(1), pos_emb_ind + 1), dim=0).long()
         x += self.pos_embed[:, pos_emb_ind]
+
+        # x += pos_embed
         # x = x + self.pos_embed
         x = self.pos_drop(x)
 
@@ -55,6 +59,21 @@ class CustomVisionTransformer(VisionTransformer):
             x = blk(x)
 
         x = self.norm(x)
+        return x
+
+    def forward(self, x):
+        x = self.forward_features(x)
+        if self.head_dist is not None:
+            # x must be a tuple
+            x, x_dist = self.head(x[0]), self.head_dist(x[1])
+            if self.training and not torch.jit.is_scripting():
+                # during inference, return the average of both classifier
+                # predictions
+                return x, x_dist
+            else:
+                return (x + x_dist) / 2
+        else:
+            x = self.head(x)
         return x
 
 
@@ -196,18 +215,18 @@ class EncoderDecoder(nn.Module):
                 'Encoder structure '
                 '"%s" not supported.' % encoder_structure)
 
-
         self.decoder = TransformerDecoder.get_decoder(args)
         self.encoder.to(device)
         self.decoder.to(device)
         self.encoder.eval()
         self.decoder.eval()
 
-         # Compatibility updates
-        for m in self.encoder.modules():
-            print('---m', type(m))
+        mfr_checkpoint = args['mfr_checkpoint']
+        device = args['device']
+        self.load_state_dict(
+            torch.load(mfr_checkpoint, map_location=device))
 
-        print('---enocder', dir(self.encoder), self.encoder.training)
+        self.encoder_patch_embed = self.encoder.patch_embed
 
     def forward(self, x: torch.Tensor, tgt_seq: torch.Tensor,  **kwargs):
         encoded = self.encoder(x)
@@ -218,7 +237,7 @@ class EncoderDecoder(nn.Module):
     def generate(self, x: torch.Tensor, temperature: float = 0.25):
         start_tokens = (
             torch.LongTensor([self.bos_token])[:, None]).to(x.device)
-        print('---encoder, input->output', x.size(), self.encoder(x).size())
+        x = self.encoder_patch_embed(x)
         return self.decoder.generate(
             start_tokens,
             self.max_seq_len,
@@ -226,25 +245,17 @@ class EncoderDecoder(nn.Module):
             context=self.encoder(x),
             temperature=temperature)
 
-    def export_enc_onnx(self, x, save_onnx_path):
-        torch.onnx.export(
-            self.encoder,
-            x,
-            save_onnx_path,
-            export_params=True,
-            opset_version=17,
-            verbose=False,
-            input_names=['input'],
-            output_names=['output'],
-            do_constant_folding=True,
-            dynamic_axes={
-                'input': {2: 'height', 3: 'width'},
-                'output': {1: 'context1', 2: 'context2'},
-            },
-        )
+    @torch.no_grad()
+    def export_enc_onnx(self, x, save_path):
+        x = self.encoder_patch_embed(x)
+        ts = torch.jit.trace(self.encoder, x, strict=False)
+        ts.save(save_path)
 
     def export_decoder_weights(self, save_path):
-        torch.save(self.decoder.state_dict(), save_path)
+        torch.save(
+            {'decoder': self.decoder.state_dict(),
+             'encoder_patch_embed': self.encoder_patch_embed.state_dict()},
+            save_path)
 
 
 class EncoderDecoderV2(nn.Module):
@@ -263,20 +274,31 @@ class EncoderDecoderV2(nn.Module):
         self.eos_token = args['eos_token']
         self.max_seq_len = args['max_seq_len']
 
+        self.patch_size = args['patch_size']
+        self.width = args['max_width']
+
         encoder_model_path = args['encoder_model_path']
         decode_model_path = args['decoder_model_path']
 
-        from pybackend_libs.dataelem.framework.onnx_graph import ONNXGraph
-        self.encoder = ONNXGraph(encoder_model_path, devices[0])
+        from pybackend_libs.dataelem.framework.pt_graph import PTGraph
+        sig = {'inputs': ['input'], 'outputs': ['output']}
+        self.encoder = PTGraph(sig, devices[0], model_path=encoder_model_path)
+
         self.decoder = TransformerDecoder.get_decoder(args)
-        self.decoder.load_state_dict(
-            torch.load(decode_model_path, map_location=device))
+        self.encoder_patch_embed = HybridEncoder.get_encoder(args).patch_embed
+        checkpoint = torch.load(decode_model_path, map_location=device)
+        self.decoder.load_state_dict(checkpoint['decoder'])
+        self.encoder_patch_embed.load_state_dict(
+            checkpoint['encoder_patch_embed'])
+
+        self.encoder_patch_embed.eval()
         self.decoder.eval()
         self.decoder.to(device)
 
     @torch.no_grad()
     def generate(self, x: torch.Tensor, temperature: float = 0.25):
-        context = self.encoder.run([x.cpu().numpy()])[0]
+        x = self.encoder_patch_embed(x)
+        context = self.encoder.run([x.cpu()])[0]
         context = torch.from_numpy(context).to(x.device)
         start_tokens = (
             torch.LongTensor([self.bos_token])[:, None]).to(x.device)
@@ -565,11 +587,6 @@ class LatexRecog(object):
             self.model = EncoderDecoderV2(**args)
         else:
             self.model = EncoderDecoder(**args)
-            mfr_checkpoint = args['mfr_checkpoint']
-            device = args['device']
-            self.model.load_state_dict(
-                torch.load(mfr_checkpoint, map_location=device))
-            self.model.eval()
 
         self.max_dimensions = args['max_dimensions']
         self.min_dimensions = args['min_dimensions']

@@ -10,15 +10,16 @@ def test_export_onnx():
     }
     latex_recog = LatexRecog(**kwargs)
     image_file = '/public/bisheng/latex_data/formula.jpg'
-    save_onnx_path = '/public/bisheng/model_repository/latex_recog/model.onnx'
+    # save_path = '/public/bisheng/model_repository/latex_recog/model.onnx'
+    save_path = '/public/bisheng/model_repository/latex_recog/model.pt'
     inputs = {
       'b64_image': base64.b64encode(open(image_file, 'rb').read()).decode()
     }
-    latex_recog.export_onnx(inputs, save_onnx_path)
+    latex_recog.export_onnx(inputs, save_path)
 
-    # save_path = (
-    #  '/public/bisheng/model_repository/latex_recog/pytorch_model.bin')
-    # latex_recog.export_onnx(inputs, save_path, True)
+    save_path = (
+     '/public/bisheng/model_repository/latex_recog/pytorch_model.bin')
+    latex_recog.export_onnx(inputs, save_path, True)
 
 
 def test_latex_recog_model():
@@ -63,6 +64,6 @@ def test_safe_recog_model():
         print(out1)
 
 
-test_export_onnx()
-# test_latex_recog_model()
+# test_export_onnx()
 test_safe_recog_model()
+# test_latex_recog_model()
