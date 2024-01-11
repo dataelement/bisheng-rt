@@ -35,7 +35,7 @@ class CustomVisionTransformer(VisionTransformer):
         self.height, self.width = img_size
         self.patch_size = patch_size
 
-    def forward_features(self, x):
+    def forward_features(self, x, pos_emb_ind):
         # # B, c, h, w = x.size()
         # x = self.patch_embed(x)
         B, h, w = x.size()
@@ -44,11 +44,11 @@ class CustomVisionTransformer(VisionTransformer):
         cls_tokens = self.cls_token.expand(1, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
 
-        h, w = h // self.patch_size, w // self.patch_size
-        pos_emb_ind = (repeat(
-            torch.arange(h) * (self.width // self.patch_size - w), 'h -> (h w)', w=w)
-          + torch.arange(h * w))
-        pos_emb_ind = torch.cat((torch.zeros(1), pos_emb_ind + 1), dim=0).long()
+        # h, w = h // self.patch_size, w // self.patch_size
+        # pos_emb_ind = (repeat(
+        #     torch.arange(h) * (self.width // self.patch_size - w), 'h -> (h w)', w=w)
+        #   + torch.arange(h * w))
+        # pos_emb_ind = torch.cat((torch.zeros(1), pos_emb_ind + 1), dim=0).long()
         x += self.pos_embed[:, pos_emb_ind]
 
         # x += pos_embed
@@ -61,8 +61,8 @@ class CustomVisionTransformer(VisionTransformer):
         x = self.norm(x)
         return x
 
-    def forward(self, x):
-        x = self.forward_features(x)
+    def forward(self, x, pos_emb_ind):
+        x = self.forward_features(x, pos_emb_ind)
         if self.head_dist is not None:
             # x must be a tuple
             x, x_dist = self.head(x[0]), self.head_dist(x[1])
@@ -215,11 +215,10 @@ class EncoderDecoder(nn.Module):
                 'Encoder structure '
                 '"%s" not supported.' % encoder_structure)
 
+        self.patch_size = args['patch_size']
+        self.width = args['max_width']
+
         self.decoder = TransformerDecoder.get_decoder(args)
-        self.encoder.to(device)
-        self.decoder.to(device)
-        self.encoder.eval()
-        self.decoder.eval()
 
         mfr_checkpoint = args['mfr_checkpoint']
         device = args['device']
@@ -233,22 +232,34 @@ class EncoderDecoder(nn.Module):
         out = self.decoder(tgt_seq, context=encoded, **kwargs)
         return out
 
+    def get_pos_emb_ind(self, x):
+        _, _, h, w = x.size()
+        h, w = h // self.patch_size, w // self.patch_size
+        pos_emb_ind = (repeat(
+            torch.arange(h) * (self.width // self.patch_size - w), 'h -> (h w)', w=w)
+          + torch.arange(h * w))
+        return torch.cat((torch.zeros(1), pos_emb_ind + 1), dim=0).long().to(x.device)
+
     @torch.no_grad()
-    def generate(self, x: torch.Tensor, temperature: float = 0.25):
+    def generate(self, x: torch.Tensor,
+                 temperature: float = 0.25,
+                 graph_executor=None):
         start_tokens = (
             torch.LongTensor([self.bos_token])[:, None]).to(x.device)
+        pos_emb_ind = self.get_pos_emb_ind(x)
         x = self.encoder_patch_embed(x)
         return self.decoder.generate(
             start_tokens,
             self.max_seq_len,
             eos_token=self.eos_token,
-            context=self.encoder(x),
+            context=self.encoder(x, pos_emb_ind),
             temperature=temperature)
 
     @torch.no_grad()
     def export_enc_onnx(self, x, save_path):
+        pos_emb_ind = self.get_pos_emb_ind(x)
         x = self.encoder_patch_embed(x)
-        ts = torch.jit.trace(self.encoder, x, strict=False)
+        ts = torch.jit.trace(self.encoder, (x, pos_emb_ind), strict=False)
         ts.save(save_path)
 
     def export_decoder_weights(self, save_path):
@@ -280,9 +291,16 @@ class EncoderDecoderV2(nn.Module):
         encoder_model_path = args['encoder_model_path']
         decode_model_path = args['decoder_model_path']
 
-        from pybackend_libs.dataelem.framework.pt_graph import PTGraph
-        sig = {'inputs': ['input'], 'outputs': ['output']}
-        self.encoder = PTGraph(sig, devices[0], model_path=encoder_model_path)
+        self.has_graph_executor = args.get('has_graph_executor', False)
+
+        if not self.has_graph_executor:
+            from pybackend_libs.dataelem.framework.pt_graph import PTGraph
+            sig = {'inputs': ['input', 'pos_emb_ind'], 'outputs': ['output']}
+            self.encoder = PTGraph(sig, devices[0],
+                                   model_path=encoder_model_path)
+        else:
+            self.xs = ['INPUT__0', 'INPUT__1']
+            self.ys = ['OUTPUT__0']
 
         self.decoder = TransformerDecoder.get_decoder(args)
         self.encoder_patch_embed = HybridEncoder.get_encoder(args).patch_embed
@@ -291,15 +309,28 @@ class EncoderDecoderV2(nn.Module):
         self.encoder_patch_embed.load_state_dict(
             checkpoint['encoder_patch_embed'])
 
-        self.encoder_patch_embed.eval()
-        self.decoder.eval()
-        self.decoder.to(device)
+    def get_pos_emb_ind(self, x):
+        _, _, h, w = x.size()
+        h, w = h // self.patch_size, w // self.patch_size
+        pos_emb_ind = (repeat(
+            torch.arange(h) * (self.width // self.patch_size - w), 'h -> (h w)', w=w)
+          + torch.arange(h * w))
+        return torch.cat((torch.zeros(1), pos_emb_ind + 1), dim=0).long().to(x.device)
 
     @torch.no_grad()
-    def generate(self, x: torch.Tensor, temperature: float = 0.25):
+    def generate(self, x: torch.Tensor,
+                 temperature: float = 0.25,
+                 graph_executor=None):
+        pos_emb_ind = self.get_pos_emb_ind(x)
         x = self.encoder_patch_embed(x)
-        context = self.encoder.run([x.cpu()])[0]
-        context = torch.from_numpy(context).to(x.device)
+        if not self.has_graph_executor:
+            context = self.encoder.run([x, pos_emb_ind], ret_type='tensor')[0]
+        else:
+            assert graph_executor is not None
+            xs = [x.cpu().numpy(), pos_emb_ind.cpu().numpy()]
+            context = graph_executor.run(
+                self.ys, self.xs, xs, ret_type='tensor')[0]
+
         start_tokens = (
             torch.LongTensor([self.bos_token])[:, None]).to(x.device)
 
@@ -564,29 +595,33 @@ class LatexRecog(object):
     def __init__(self, **kwargs):
         """Initialize a LatexOCR model
         """
-
         pretrain_path = kwargs.get('model_path')
         devices = kwargs.get('devices').split(',')
         device = torch.device(f'cuda:{devices[0]}' if devices[0] else 'cpu')
-        use_onnx_encoder = kwargs.get('use_onnx_encoder', False)
-
+        enable_safe_encoder = kwargs.get('enable_safe_encoder', '0')
         args_file = os.path.join(pretrain_path, 'model_config.json')
         args = json.load(open(args_file))
         args.update(
             resizer_checkpoint=os.path.join(pretrain_path, 'image_resizer.pth'))
         args.update(tokenizer=os.path.join(pretrain_path, 'tokenizer.json'))
-        args.update(
-            mfr_checkpoint=os.path.join(pretrain_path, 'p2t-mfr-20230702.pth'))
         args.update(device=device)
 
-        if use_onnx_encoder:
+        mfr_checkpoint = os.path.join(pretrain_path, 'p2t-mfr-20230702.pth')
+
+        if enable_safe_encoder == '1':
+            args.update(
+                has_graph_executor=kwargs.get('has_graph_executor', False))
             args['devices'] = devices
             args['encoder_model_path'] = pretrain_path
             args['decoder_model_path'] = os.path.join(
                 pretrain_path, 'pytorch_model.bin')
             self.model = EncoderDecoderV2(**args)
         else:
+            args.update(mfr_checkpoint=mfr_checkpoint)
             self.model = EncoderDecoder(**args)
+
+        self.model.eval()
+        self.model.to(device)
 
         self.max_dimensions = args['max_dimensions']
         self.min_dimensions = args['min_dimensions']
@@ -648,13 +683,15 @@ class LatexRecog(object):
         img = ImageOps.exif_transpose(img).convert('RGB')
         return img
 
-    def predict(self, inp) -> Dict[str, Any]:
+    def predict(self, inp: Dict[str, Any]) -> Dict[str, Any]:
         img = inp.get('b64_image')
         resize = inp.get('resize', True)
         b64_img = base64.b64decode(img)
         img = self.read_image(io.BytesIO(b64_img))
         im = self.preprocess(img, resize)
-        dec = self.model.generate(im, temperature=self.temperature)
+        graph_executor = inp.get('graph_executor', None)
+        dec = self.model.generate(im, temperature=self.temperature,
+                                  graph_executor=graph_executor)
         pred = self.postprocess(dec)
         return pred
 

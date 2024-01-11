@@ -104,8 +104,8 @@ class LatexDetection(object):
             used_device = devices.split(',')[0]
             self.graph = PTGraph(sig, used_device, **kwargs)
         else:
-            self.xs = ['image']
-            self.ys = ['output']
+            self.xs = ['INPUT__0']
+            self.ys = ['OUTPUT__0']
 
     def predict(self, context: Dict[str, Any]) -> Dict[str, Any]:
         b64_image = context.get('b64_image')
@@ -169,9 +169,8 @@ class LatexDetection(object):
             one_out.append(
                 {
                     'type': self.categories[int(label)],
-                    'box': xyxy24p(xyxy, np.array),
+                    'box': xyxy24p(xyxy, ret_type=None),
                     'score': float(conf),
                 }
             )
-
         return {'result': one_out}

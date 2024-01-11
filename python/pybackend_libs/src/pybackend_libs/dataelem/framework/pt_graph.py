@@ -10,6 +10,7 @@ class PTGraph(object):
         device = torch.device(f'cuda:{device}' if device else 'cpu')
         self.model = torch.jit.load(model_path, map_location=device)
         self.model.eval()
+        self.model.to(device)
         self.device = device
         self.ys = sig['outputs']
         self.xs = sig['inputs']
@@ -21,16 +22,21 @@ class PTGraph(object):
             raise Exception(f'{model_file} not exists')
         self.load(sig, device, model_file)
 
-    def run(self, inputs: List[Any]) -> List[Any]:
+    def run(self, inputs: List[Any], ret_type='ndarray') -> List[Any]:
         assert len(inputs) == len(self.xs)
         if isinstance(inputs[0], torch.Tensor):
-            tensors = [tensor.to(self.device) for tensor in inputs]
+            if inputs[0].get_device() == -1 and self.enable_gpu:
+                tensors = [tensor.to(self.device) for tensor in inputs]
+            else:
+                tensors = inputs
         else:
             tensors = [torch.from_numpy(nd).to(self.device) for nd in inputs]
 
         with torch.no_grad():
             outputs = self.model(*tensors)
-            print('tensors in/out', tensors[0].size(), outputs.size())
+
+        if ret_type != 'ndarray':
+            return [outputs]
 
         if not self.enable_gpu:
             return [outputs.numpy()]

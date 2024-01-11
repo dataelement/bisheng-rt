@@ -6,7 +6,7 @@ from pybackend_libs.dataelem.model.ocr.latex_recog import LatexRecog
 def test_export_onnx():
     kwargs = {
         'model_path': '/public/bisheng/model_repository/latex_recog/',
-        'devices': ''
+        'devices': '0'
     }
     latex_recog = LatexRecog(**kwargs)
     image_file = '/public/bisheng/latex_data/formula.jpg'
@@ -25,8 +25,8 @@ def test_export_onnx():
 def test_latex_recog_model():
     kwargs = {
         'model_path': '/public/bisheng/model_repository/latex_recog/',
-        'devices': '',
-        'use_onnx_encoder': False,
+        'devices': '0',
+        'enable_safe_encoder': '0',
     }
     latex_recog = LatexRecog(**kwargs)
     image_files = [
@@ -46,8 +46,8 @@ def test_latex_recog_model():
 def test_safe_recog_model():
     kwargs = {
         'model_path': '/public/bisheng/model_repository/latex_recog/',
-        'devices': '',
-        'use_onnx_encoder': True,
+        'devices': '2',
+        'enable_safe_encoder': '1',
     }
     latex_recog = LatexRecog(**kwargs)
     image_files = [
@@ -65,5 +65,5 @@ def test_safe_recog_model():
 
 
 # test_export_onnx()
-test_safe_recog_model()
+# test_safe_recog_model()
 # test_latex_recog_model()

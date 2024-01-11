@@ -1147,22 +1147,19 @@ ModelRepositoryManager::UpdateAppModelParameters(
   }
 
   if (!model_params_info.empty()) {
-    std::vector<std::string> PARAM_KEYS = {
-        "pymodel_type", "dep_model_name", "dep_model_version",
-        "reserve1",     "reserve2",       "reserve3"};
+    std::vector<std::string> param_keys;
     triton::common::TritonJson::Value model_params_json;
     auto status = model_params_json.Parse(model_params_info);
     if (!status.IsOk()) {
       return Status(Status::Code::INTERNAL, "parse model params failed");
     }
 
-    for (const auto& key : PARAM_KEYS) {
-      std::cout << "---key:" << key << std::endl;
+    model_params_json.Members(&param_keys);
 
+    for (const auto& key : param_keys) {
       if (model_params_json.Find(key.c_str())) {
         std::string value;
         model_params_json.MemberAsString(key.c_str(), &value);
-        std::cout << "---value:" << value << std::endl;
         (*app_model->mutable_parameters())[key] = value;
       }
     }
@@ -1185,6 +1182,15 @@ ModelRepositoryManager::UpdateAppModelParameters(
       ig->set_count(1);
     }
   }
+
+  // update instance_groups into model parameter
+  if (!instance_group_info.empty()) {
+    (*app_model->mutable_parameters())[INSTANCE_GROUP_NAME] =
+        (instance_group_info);
+  }
+
+  // update model_path into model parameter
+  (*app_model->mutable_parameters())["model_path"] = model_path_full;
 
   return Status::Success;
 }
@@ -1236,7 +1242,6 @@ ModelRepositoryManager::LoadUnloadElemModel(
       ReadTextProto(app_config_path, &app_config);
       std::vector<std::string> app_models;
       GetModelNamesFromServerConfig(app_config, app_models);
-      InferParamMap unload_models;
       for (const auto& name : app_models) {
         unload_models[name];
       }

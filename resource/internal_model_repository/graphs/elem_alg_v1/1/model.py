@@ -6,12 +6,15 @@ from pybackend_libs.dataelem.model import get_model
 from torch.utils.dlpack import from_dlpack
 
 
-def pb_tensor_to_numpy(pb_tensor):
+def pb_tensor_to_numpy(pb_tensor, ret_type):
     if pb_tensor.is_cpu():
         return pb_tensor.as_numpy()
     else:
-        pytorch_tensor = from_dlpack(pb_tensor.to_dlpack())
-        return pytorch_tensor.detach().cpu().numpy()
+        if ret_type == 'ndarray':
+            pytorch_tensor = from_dlpack(pb_tensor.to_dlpack())
+            return pytorch_tensor.detach().cpu().numpy()
+        else:
+            return from_dlpack(pb_tensor.to_dlpack())
 
 
 class GraphExecutor(object):
@@ -20,7 +23,7 @@ class GraphExecutor(object):
         self.model_version = model_version
 
     # small difference with sess.run
-    def run(self, outputs_names, inputs_names, inputs):
+    def run(self, outputs_names, inputs_names, inputs, ret_type='ndarray'):
         input_tensors = []
         for index, input_name in enumerate(inputs_names):
             in_tensor = pb_utils.Tensor(input_name, inputs[index])
@@ -41,7 +44,7 @@ class GraphExecutor(object):
         for index, output_name in enumerate(outputs_names):
             pb_tensor = pb_utils.get_output_tensor_by_name(
                 infer_response, output_name)
-            graph_outputs.append(pb_tensor_to_numpy(pb_tensor))
+            graph_outputs.append(pb_tensor_to_numpy(pb_tensor, ret_type))
 
         return graph_outputs
 
@@ -63,6 +66,16 @@ class TritonPythonModel:
         self.graph_executor = GraphExecutor(
             dep_model_name, dep_model_version)
         parameters.update(has_graph_executor=True)
+
+        # update devices for gpu enalbed alg model
+        model_instance_name = args['model_instance_name']
+        instance_groups = parameters.get('instance_groups', '')
+        if instance_groups:
+            group_idx = int(model_instance_name.rsplit('_', 1)[1])
+            gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
+            parameters['devices'] = gpus[group_idx]
+        else:
+            parameters['devices'] = ''
 
         if pymodel_params:
             parameters.update(pymodel_params)
