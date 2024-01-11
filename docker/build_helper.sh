@@ -48,7 +48,17 @@ function build_pt_backend() {
     --cmake-dir ${PROJ_DIR} \
     --build-dir ${PROJ_DIR}/tritonbuild/backends \
     --install-dir ${PROJ_DIR}/tritonbuild/install
-}
+
+  # fix miss libs
+  cp ${LIBPT_DIR}/lib/libmkl_core.so.1 \
+     ${LIBPT_DIR}/lib/libmkl_gnu_thread.so.1 \
+     ${LIBPT_DIR}/lib/libmkl_intel_lp64.so.1 \
+     ${LIBPT_DIR}/lib/libmkl_intel_thread.so.1 \
+     ${PROJ_DIR}/tritonbuild/install/backends/${BACKEND}/
+
+  cp ${LIBPT_DIR}/lib/libjpeg.so ${PROJ_DIR}/tritonbuild/install/backends/${BACKEND}/libjpeg.so.8
+  cp ${LIBPT_DIR}/lib/libpng16.so ${PROJ_DIR}/tritonbuild/install/backends/${BACKEND}/libpng16.so.16
+} 
 
 function build_python_backend() {
   BACKEND=python

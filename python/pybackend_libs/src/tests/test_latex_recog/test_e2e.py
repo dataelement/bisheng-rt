@@ -80,7 +80,7 @@ def test_det_infer():
     RT_EP = os.environ.get('RT_EP')
     ep_prefix = f'http://{RT_EP}'
     headers = {'Content-type': 'application/json'}
-    name = 'latex_det'
+    name = 'latex_det_v1'
     infer_ep = f'{ep_prefix}/v2.1/models/{name}/infer'
 
     image_file = '/public/bisheng/latex_data/zh6.jpg'
@@ -97,7 +97,7 @@ def test_recog_infer():
     RT_EP = os.environ.get('RT_EP')
     ep_prefix = f'http://{RT_EP}'
     headers = {'Content-type': 'application/json'}
-    name = 'latex_recog'
+    name = 'latex_recog_v1'
     infer_ep = f'{ep_prefix}/v2.1/models/{name}/infer'
 
     image_file = '/public/bisheng/latex_data/formula.jpg'
@@ -110,6 +110,6 @@ def test_recog_infer():
     print('resp', resp.json())
 
 
-# test_model_load_unload('latex_det', det_model_config, model_type='det')
-test_model_load_unload('latex_recog', recog_model_config, model_type='recog')
+test_model_load_unload('latex_det_v1', det_model_config, model_type='det')
+# test_model_load_unload('latex_recog_v1', recog_model_config, model_type='recog')
 # test_det_infer()
