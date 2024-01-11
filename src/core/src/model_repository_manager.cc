@@ -43,6 +43,8 @@
 #include "model.h"
 #include "model_config_utils.h"
 #include "triton/common/logging.h"
+#include "triton/common/triton_json.h"
+
 #ifdef TRITON_ENABLE_ENSEMBLE
 #include "ensemble_model.h"
 #endif  // TRITON_ENABLE_ENSEMBLE
@@ -932,6 +934,9 @@ ModelRepositoryManager::UpdateTypeModelParameters(
         break;
       }
       auto device_type = device_info[1];
+      if (device_type.compare("cpu") == 0) {
+        break;
+      }
 
       std::vector<std::string> gpus_group = splitter(gpus_info[1], '|');
       int group_cnt = gpus_group.size();
@@ -1131,6 +1136,62 @@ ModelRepositoryManager::UpdateAppModelParameters(
   app_model->set_name(model_name);
   app_model->set_type(app_model_type);
 
+  // update app model's parameters and instance group field
+  const std::string MODEL_PRAAMS_NAME = "model_params";
+  std::string model_params_info;
+  for (const auto* parameter : infer_params) {
+    if (parameter->Name().compare(MODEL_PRAAMS_NAME) == 0) {
+      model_params_info = parameter->ValueString();
+      break;
+    }
+  }
+
+  if (!model_params_info.empty()) {
+    std::vector<std::string> param_keys;
+    triton::common::TritonJson::Value model_params_json;
+    auto status = model_params_json.Parse(model_params_info);
+    if (!status.IsOk()) {
+      return Status(Status::Code::INTERNAL, "parse model params failed");
+    }
+
+    model_params_json.Members(&param_keys);
+
+    for (const auto& key : param_keys) {
+      if (model_params_json.Find(key.c_str())) {
+        std::string value;
+        model_params_json.MemberAsString(key.c_str(), &value);
+        (*app_model->mutable_parameters())[key] = value;
+      }
+    }
+
+    // update for instance_group info
+    app_model->clear_instance_group();
+    auto* ig = app_model->add_instance_group();
+    std::string ALG_TYPE = "alg_type";
+    if (model_params_json.Find(ALG_TYPE.c_str())) {
+      std::string value;
+      model_params_json.MemberAsString(ALG_TYPE.c_str(), &value);
+      if (value.compare("cpu") == 0) {
+        ig->set_kind(inference::ModelInstanceGroup::KIND_CPU);
+        ig->set_count(3);
+      } else {
+        ig->set_kind(inference::ModelInstanceGroup::KIND_GPU);
+      }
+    } else {
+      ig->set_kind(inference::ModelInstanceGroup::KIND_CPU);
+      ig->set_count(1);
+    }
+  }
+
+  // update instance_groups into model parameter
+  if (!instance_group_info.empty()) {
+    (*app_model->mutable_parameters())[INSTANCE_GROUP_NAME] =
+        (instance_group_info);
+  }
+
+  // update model_path into model parameter
+  (*app_model->mutable_parameters())["model_path"] = model_path_full;
+
   return Status::Success;
 }
 
@@ -1181,7 +1242,6 @@ ModelRepositoryManager::LoadUnloadElemModel(
       ReadTextProto(app_config_path, &app_config);
       std::vector<std::string> app_models;
       GetModelNamesFromServerConfig(app_config, app_models);
-      InferParamMap unload_models;
       for (const auto& name : app_models) {
         unload_models[name];
       }
