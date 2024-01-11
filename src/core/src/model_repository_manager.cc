@@ -934,6 +934,9 @@ ModelRepositoryManager::UpdateTypeModelParameters(
         break;
       }
       auto device_type = device_info[1];
+      if (device_type.compare("cpu") == 0) {
+        break;
+      }
 
       std::vector<std::string> gpus_group = splitter(gpus_info[1], '|');
       int group_cnt = gpus_group.size();
@@ -1133,52 +1136,55 @@ ModelRepositoryManager::UpdateAppModelParameters(
   app_model->set_name(model_name);
   app_model->set_type(app_model_type);
 
-  // // update app model's parameters and instance group field
-  // const std::string MODEL_PRAAMS_NAME = "model_params";
-  // std::string model_params_info;
-  // for (const auto* parameter : infer_params) {
-  //   if (parameter->Name().compare(MODEL_PRAAMS_NAME) == 0) {
-  //     model_params_info = parameter->ValueString();
-  //     break;
-  //   }
-  // }
+  // update app model's parameters and instance group field
+  const std::string MODEL_PRAAMS_NAME = "model_params";
+  std::string model_params_info;
+  for (const auto* parameter : infer_params) {
+    if (parameter->Name().compare(MODEL_PRAAMS_NAME) == 0) {
+      model_params_info = parameter->ValueString();
+      break;
+    }
+  }
 
-  // if (!model_params_info.empty()) {
-  //   std::vector<std::string> PARAM_KEYS = {
-  //     "pymodel_type", "dep_model_name", "dep_model_version",
-  //     "reserve1", "reserve2", "reserve3"};
-  //   triton::common::TritonJson::Value model_params_json;
-  //   auto status = model_params_json.Parse(model_params_info);
-  //   if (!status.IsOk()) {
-  //     return Status(Status::Code::INTERNAL, "parse model params failed");
-  //   }
+  if (!model_params_info.empty()) {
+    std::vector<std::string> PARAM_KEYS = {
+        "pymodel_type", "dep_model_name", "dep_model_version",
+        "reserve1",     "reserve2",       "reserve3"};
+    triton::common::TritonJson::Value model_params_json;
+    auto status = model_params_json.Parse(model_params_info);
+    if (!status.IsOk()) {
+      return Status(Status::Code::INTERNAL, "parse model params failed");
+    }
 
-  //   for (const auto& key : PARAM_KEYS) {
-  //     if (model_params_json.Find(key.c_str())) {
-  //       std::string value;
-  //       model_params_json.MemberAsString(key.c_str(), &value);
-  //       app_model->mutable_parameters()->at(key) = value;
-  //     }
-  //   }
+    for (const auto& key : PARAM_KEYS) {
+      std::cout << "---key:" << key << std::endl;
 
-  //   // update for instance_group info
-  //   app_model->clear_instance_group();
-  //   auto* ig = app_model->add_instance_group();
-  //   std::string ALG_TYPE = "alg_type"
-  //   if (model_params_json.Find(ALG_TYPE.c_str())) {
-  //     std::string value;
-  //     model_params_json.MemberAsString(ALG_TYPE.c_str(), &value);
-  //     if (alg_type.compare("cpu") == 0) {
-  //       ig->set_kind(inference::ModelInstanceGroup::KIND_CPU);
-  //       ig->set_count(3);
-  //     } else {
-  //       ig->set_kind(inference::ModelInstanceGroup::KIND_GPU);
-  //     }
-  //   } else {
-  //     ig->set_kind(inference::ModelInstanceGroup::KIND_GPU);
-  //     ig->set_count(3);
-  //   }
-  // }
+      if (model_params_json.Find(key.c_str())) {
+        std::string value;
+        model_params_json.MemberAsString(key.c_str(), &value);
+        std::cout << "---value:" << value << std::endl;
+        (*app_model->mutable_parameters())[key] = value;
+      }
+    }
+
+    // update for instance_group info
+    app_model->clear_instance_group();
+    auto* ig = app_model->add_instance_group();
+    std::string ALG_TYPE = "alg_type";
+    if (model_params_json.Find(ALG_TYPE.c_str())) {
+      std::string value;
+      model_params_json.MemberAsString(ALG_TYPE.c_str(), &value);
+      if (value.compare("cpu") == 0) {
+        ig->set_kind(inference::ModelInstanceGroup::KIND_CPU);
+        ig->set_count(3);
+      } else {
+        ig->set_kind(inference::ModelInstanceGroup::KIND_GPU);
+      }
+    } else {
+      ig->set_kind(inference::ModelInstanceGroup::KIND_CPU);
+      ig->set_count(1);
+    }
+  }
 
   return Status::Success;
 }

@@ -22,7 +22,8 @@ def test_preprocess():
 
 def test_det():
     kwargs = {
-        'model_path': '/public/bisheng/model_repository/latex_det',
+        'model_path': (
+          '/public/bisheng/model_repository/graphs/latex_det_graph_v1/1'),
         'devices': '0'
     }
     latex_det = LatexDetection(**kwargs)

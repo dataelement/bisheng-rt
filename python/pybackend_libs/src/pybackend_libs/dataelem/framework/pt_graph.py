@@ -30,6 +30,7 @@ class PTGraph(object):
 
         with torch.no_grad():
             outputs = self.model(*tensors)
+            print('tensors in/out', tensors[0].size(), outputs.size())
 
         if not self.enable_gpu:
             return [outputs.numpy()]
