@@ -1123,7 +1123,7 @@ ops [
     ]
 
     output [
-      { name: "OUTPUT__0", data_type: TYPE_FP32, dims: [ -1, 6 ] }
+      { name: "OUTPUT__0", data_type: TYPE_FP32, dims: [ -1, 7 ] }
     ]
 
     instance_group [ { count: 1, kind: KIND_GPU } ]

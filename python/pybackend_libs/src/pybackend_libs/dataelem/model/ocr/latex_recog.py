@@ -693,7 +693,7 @@ class LatexRecog(object):
         dec = self.model.generate(im, temperature=self.temperature,
                                   graph_executor=graph_executor)
         pred = self.postprocess(dec)
-        return pred
+        return {'result': pred}
 
     def export_onnx(self, inp, save_path, save_decoder=False):
         img = inp.get('b64_image')

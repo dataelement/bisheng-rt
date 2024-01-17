@@ -165,9 +165,13 @@ class End2End(nn.Module):
     @torch.no_grad()
     def forward(self, x):
         x = self.model(x)
-        print('e2e.x', x.size())
-        x = non_max_suppression(x,
-            conf_thres=self.score_thres, iou_thres=self.iou_thres, nc=self.nc)
+        xc = x[..., 4] > self.score_thres  # candidates
+        x = x[0]
+        x = x[xc[0]]
+
+        # print('e2e.x', x.size())
+        # x = non_max_suppression(x,
+        #     conf_thres=self.score_thres, iou_thres=self.iou_thres, nc=self.nc)
         return x
 
 
