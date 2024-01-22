@@ -28,20 +28,26 @@ def test_det():
     }
     latex_det = LatexDetection(**kwargs)
     image_file = '/public/bisheng/latex_data/zh5.jpg'
+    # image_file = '/public/bisheng/latex_data/eng2.png'
+    # image_file = '/public/bisheng/latex_data/eng1.png'
+
     inputs = {
       'b64_image': base64.b64encode(open(image_file, 'rb').read()).decode()
     }
     out1 = latex_det.predict(inputs)
-    print(out1)
+    print('result', out1)
 
     image_file = '/public/bisheng/latex_data/zh6.jpg'
+    # image_file = '/public/bisheng/latex_data/eng2.png'
+
     inputs = {
       'b64_image': base64.b64encode(open(image_file, 'rb').read()).decode()
     }
 
     tic = time.time()
-    for _ in range(20):
+    for _ in range(10):
         out1 = latex_det.predict(inputs)
+        print('result', out1)
     print('elapse', time.time() - tic)
 
 
