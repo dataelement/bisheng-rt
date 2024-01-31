@@ -5,7 +5,7 @@ import torch
 
 from .llm import (BaseLLM, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc)
-
+from transformers import TextStreamer
 
 class YiBase(BaseLLM):
     def __init__(self, **kwargs):
@@ -23,7 +23,7 @@ class YiBase(BaseLLM):
         temperature = kwargs.get('temperature', 0.7)
         top_k = kwargs.get('top_k', 40)
         top_p = kwargs.get('top_p', 0.8)
-
+        
         self.default_params = {
             'max_length': max_tokens,
             'do_sample': True,
@@ -43,18 +43,21 @@ class YiBase(BaseLLM):
         self.model.generation_config = self.generation_config
 
     def predict(self, kwargs):
+
         messages = kwargs.get('messages')
         model_name = kwargs.get('model')
-
+        
         prompt = messages[-1]['content']
-        input_ids = self.tokenizer(prompt, return_tensors='pt').input_ids
-        input0_len = input_ids.size()[1]
-        with torch.no_grad():
-            generate_ids = self.model.generate(
-                input_ids.to(self.default_device), **self.default_params)
+        # input_ids = self.tokenizer(prompt, return_tensors='pt').input_ids
+        input_ids = self.tokenizer.apply_chat_template(conversation=messages, 
+                                                tokenize=True, 
+                                                add_generation_prompt=True, 
+                                                return_tensors='pt')
+        generate_ids = self.model.generate(
+            input_ids.to(self.default_device), **self.default_params)
 
-        new_tokens = generate_ids[0, input0_len:]
-        response = self.tokenizer.decode(new_tokens,
+        # new_tokens = generate_ids[0, input0_len:]
+        response = self.tokenizer.decode(generate_ids[0][input_ids.shape[1]:],
                                          skip_special_tokens=True)
 
         choice_data = ChatCompletionResponseChoice(index=0,
@@ -69,6 +72,41 @@ class YiBase(BaseLLM):
 
         torch_gc(self.devices)
         return result.dict()
+
+    def stream_predict(self, kwargs):
+
+        messages = kwargs.get('messages')
+        model_name = kwargs.get('model')
+        
+        # prompt = messages[-1]['content']
+        input_ids = self.tokenizer.apply_chat_template(conversation=messages, 
+                                                tokenize=True, 
+                                                add_generation_prompt=True, 
+                                                return_tensors='pt')
+        # input0_len = input_ids.size()[1]
+
+        streamer = TextStreamer(self.tokenizer) 
+        self.default_params.update(streamer=streamer)
+        self.model.generation_config.update(streamer=streamer)
+
+        generate_ids = self.model.generate(
+            input_ids.to(self.default_device), **self.default_params)
+
+        response = self.tokenizer.decode(generate_ids[0][input_ids.shape[1]:],
+                                        skip_special_tokens=True)
+
+        choice_data = ChatCompletionResponseChoice(index=0,
+                                                message=ChatMessage(
+                                                    role='assistant',
+                                                    content=response),
+                                                finish_reason='stop')
+
+        yield ChatCompletionResponse(model=model_name,
+                                        choices=[choice_data],
+                                        object='chat.completion').dict()
+
+        torch_gc(self.devices)
+
 
     def completion(self, kwargs):
         pass

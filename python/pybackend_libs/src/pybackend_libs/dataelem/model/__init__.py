@@ -18,6 +18,7 @@ table_mrcnn = lazy('pybackend_libs.dataelem.model.table.table_mrcnn')
 table_app = lazy('pybackend_libs.dataelem.model.table.table_app')
 yi_base = lazy('pybackend_libs.dataelem.model.llm.yi')
 lc_model = lazy('pybackend_libs.dataelem.model.llama_cpp.lc_model')
+yuan_base = lazy('pybackend_libs.dataelem.model.llm.yuan')
 
 latex_det = lazy('pybackend_libs.dataelem.model.ocr.latex_det')
 latex_recog = lazy('pybackend_libs.dataelem.model.ocr.latex_recog')
@@ -42,6 +43,7 @@ def get_model(name: str):
         'MrcnnTableDetect': table_mrcnn,
         'VLLMModel': vllm_model,
         'YiBase': yi_base,
+        'YuanBase': yuan_base,
         'LlamaCppModel': lc_model,
         'LatexDetection': latex_det,
         'LatexRecog': latex_recog
