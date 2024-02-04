@@ -2,10 +2,26 @@
 # import time
 
 import torch
-
+import copy
 from .llm import (BaseLLM, ChatCompletionResponse,
-                  ChatCompletionResponseChoice, ChatMessage, torch_gc)
-from transformers import TextStreamer
+                  ChatCompletionResponseChoice, ChatMessage, torch_gc,
+                  ChatCompletionRequest, ChatCompletionResponseStreamChoice,
+                  DeltaMessage)
+from transformers import TextStreamer, TextIteratorStreamer, StoppingCriteriaList, StoppingCriteria
+
+from threading import Thread
+
+class StopOnTokens(StoppingCriteria):
+    def __call__(
+        self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs
+    ) -> bool:
+        stop_ids = (
+            [2, 6, 7, 8],
+        )  # "<|endoftext|>", "<|im_start|>", "<|im_end|>", "<|im_sep|>"
+        for stop_id in stop_ids:
+            if input_ids[0][-1] == stop_id:
+                return True
+        return False
 
 class YiBase(BaseLLM):
     def __init__(self, **kwargs):
@@ -32,6 +48,7 @@ class YiBase(BaseLLM):
             'temperature': temperature,
             'top_k': top_k,
             'top_p': top_p,
+
         }
 
         self._load(pretrain_path,
@@ -73,40 +90,72 @@ class YiBase(BaseLLM):
         torch_gc(self.devices)
         return result.dict()
 
+    
     def stream_predict(self, kwargs):
-
+        
         messages = kwargs.get('messages')
         model_name = kwargs.get('model')
-        
-        # prompt = messages[-1]['content']
-        input_ids = self.tokenizer.apply_chat_template(conversation=messages, 
-                                                tokenize=True, 
-                                                add_generation_prompt=True, 
-                                                return_tensors='pt')
-        # input0_len = input_ids.size()[1]
 
-        streamer = TextStreamer(self.tokenizer) 
-        self.default_params.update(streamer=streamer)
-        self.model.generation_config.update(streamer=streamer)
 
-        generate_ids = self.model.generate(
-            input_ids.to(self.default_device), **self.default_params)
+        req_dict = copy.copy(self.default_params)
+        req_dict.update(kwargs)
+        request = ChatCompletionRequest.parse_obj(req_dict)
+        if request.stream:
+            if request.functions:
+                raise Exception(
+                    'Invalid request: Function calling is not yet implemented for stream mode.',
+                )
 
-        response = self.tokenizer.decode(generate_ids[0][input_ids.shape[1]:],
-                                        skip_special_tokens=True)
+        gen_kwargs = {}
+        if request.temperature is not None:
+            if request.temperature < 0.01:
+                gen_kwargs['top_k'] = 1  # greedy decoding
+            else:
+                # Not recommended. Please tune top_p instead.
+                gen_kwargs['temperature'] = request.temperature
+        if request.top_p is not None:
+            gen_kwargs['top_p'] = request.top_p
 
-        choice_data = ChatCompletionResponseChoice(index=0,
-                                                message=ChatMessage(
-                                                    role='assistant',
-                                                    content=response),
-                                                finish_reason='stop')
+        # chat_stream内部使用的transformers_stream_generator暂时不支持do_sample=False
+        gen_kwargs['do_sample'] = True
 
-        yield ChatCompletionResponse(model=model_name,
-                                        choices=[choice_data],
-                                        object='chat.completion').dict()
+        current_length = 0
+
+        model_inputs = self.tokenizer.apply_chat_template(
+            conversation=messages, add_generation_prompt=True, tokenize=True, return_tensors="pt"
+        ).to(next(self.model.parameters()).device)
+        streamer = TextIteratorStreamer(
+            self.tokenizer, timeout=60, skip_prompt=True, skip_special_tokens=True
+        )
+
+        stop = StopOnTokens()
+        generate_kwargs = {
+            "input_ids": model_inputs,
+            "streamer": streamer,
+            "do_sample": True,
+            "stopping_criteria": StoppingCriteriaList([stop]),
+        }
+        generate_kwargs.update(self.default_params)
+
+        t = Thread(target=self.model.generate, kwargs=generate_kwargs)
+        t.start()
+        for new_token in streamer:
+            if new_token != "":
+                # yield new_token
+
+                choice_data = ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(content=new_token),
+                    finish_reason=None
+                )
+                chunk = ChatCompletionResponse(
+                    model=request.model,
+                    choices=[choice_data],
+                    object='chat.completion.chunk'
+                ).dict()
+                yield chunk
 
         torch_gc(self.devices)
-
 
     def completion(self, kwargs):
         pass
