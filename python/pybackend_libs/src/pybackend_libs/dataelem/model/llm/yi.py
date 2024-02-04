@@ -7,7 +7,8 @@ from .llm import (BaseLLM, ChatCompletionResponse,
                   ChatCompletionResponseChoice, ChatMessage, torch_gc,
                   ChatCompletionRequest, ChatCompletionResponseStreamChoice,
                   DeltaMessage)
-from transformers import TextStreamer, TextIteratorStreamer, StoppingCriteriaList, StoppingCriteria
+from transformers import (TextIteratorStreamer, 
+                    StoppingCriteriaList, StoppingCriteria)
 
 from threading import Thread
 
@@ -122,10 +123,12 @@ class YiBase(BaseLLM):
         current_length = 0
 
         model_inputs = self.tokenizer.apply_chat_template(
-            conversation=messages, add_generation_prompt=True, tokenize=True, return_tensors="pt"
+            conversation=messages, add_generation_prompt=True, 
+            tokenize=True, return_tensors="pt"
         ).to(next(self.model.parameters()).device)
         streamer = TextIteratorStreamer(
-            self.tokenizer, timeout=60, skip_prompt=True, skip_special_tokens=True
+            self.tokenizer, timeout=60, skip_prompt=True, 
+            skip_special_tokens=True
         )
 
         stop = StopOnTokens()
