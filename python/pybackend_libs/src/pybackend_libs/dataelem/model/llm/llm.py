@@ -6,9 +6,8 @@ from accelerate import (dispatch_model, infer_auto_device_map,
                         init_empty_weights)
 from pydantic import BaseModel, Field
 from transformers import (AutoConfig, AutoModel, AutoModelForCausalLM,
-                          AutoTokenizer)
+                          AutoTokenizer, LlamaTokenizer)
 from transformers.generation.utils import GenerationConfig
-
 
 def torch_gc(devices):
     if torch.cuda.is_available():
@@ -44,6 +43,7 @@ class BaseLLM(object):
               auto_configure_device_map=None,
               use_dispatch=False,
               use_generate_config=True,
+              use_llamatokenizer=False,
               **kwargs):
 
         torch_seed()
@@ -58,9 +58,25 @@ class BaseLLM(object):
             self.generation_config = GenerationConfig.from_pretrained(
                 pretrain_path)
 
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrain_path,
+        if not use_llamatokenizer:
+            self.tokenizer = AutoTokenizer.from_pretrained(pretrain_path,
                                                        use_fast=False,
                                                        trust_remote_code=True)
+        else:
+            self.tokenizer = LlamaTokenizer.from_pretrained(pretrain_path,
+                                                        add_eos_token=False, 
+                                                        add_bos_token=False, 
+                                                        eos_token='<eod>',
+                                                        use_fast=False,
+                                                        trust_remote_code=True)
+            self.tokenizer.add_tokens(['<sep>', '<pad>', '<mask>', '<predict>', 
+                                       '<FIM_SUFFIX>', '<FIM_PREFIX>', 
+                                       '<FIM_MIDDLE>','<commit_before>',
+                                       '<commit_msg>','<commit_after>',
+                                       '<jupyter_start>','<jupyter_text>',
+                                       '<jupyter_code>','<jupyter_output>',
+                                       '<empty_output>'], special_tokens=True)
+
         with init_empty_weights():
             config = AutoConfig.from_pretrained(pretrain_path,
                                                 trust_remote_code=True)
