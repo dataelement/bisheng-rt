@@ -30,10 +30,8 @@ class SFTManage(object):
         Failed = 'FAILED'
         Running = 'RUNNING'
 
-    def __init__(self, job_id: str, options: List, commands: Dict):
+    def __init__(self, job_id: str):
         self.job_id = job_id
-        self.options = options
-        self.commands = commands
 
         # 创建指令执行路径
         self.job_exec_dir = os.path.join(self.ClientCliOutput, job_id)
@@ -54,9 +52,9 @@ class SFTManage(object):
         self.train_dir = os.path.join(self.job_exec_dir, 'train_data')
         os.makedirs(self.train_dir, exist_ok=True)
 
-    def run_job(self):
+    def run_job(self, options: List, commands: Dict):
         logger.info(f'start run finetune_job job_id: {self.job_id},'
-                    f' options: {self.options}, commands: {self.commands}')
+                    f' options: {options}, commands: {commands}')
         try:
             # 尝试设置锁，判断是否任务被取消
             lock_ret = self.set_exec_lock_key()
@@ -65,15 +63,15 @@ class SFTManage(object):
                 logger.info(f'job is already canceled, job_id: {self.job_id}')
                 return
             # 解析参数适配本地指令执行
-            self.parse_commands()
+            self.parse_commands(commands)
 
             # 执行指令
             stdout_file = open(self.stdout_path, 'wb')
             stderr_file = open(self.stderr_path, 'wb')
             pid_file = open(self.pid_path, 'wb')
             pid, code = CmdManage.execute_cmd(self.ClientCli,
-                                              self.options,
-                                              self.commands,
+                                              options,
+                                              commands,
                                               stdout=stdout_file,
                                               stderr=stderr_file,
                                               pid_file=pid_file)
@@ -183,20 +181,20 @@ class SFTManage(object):
         with open(file_path, 'r') as f:
             return f.read().strip()
 
-    def parse_commands(self):
+    def parse_commands(self, commands):
         # 将model_name 拼接为完整的绝对路径
         model_path = os.path.join(self.ModelRootPath,
-                                  self.commands['model_name_or_path'])
-        self.commands['model_name_or_path'] = model_path
+                                  commands['model_name_or_path'])
+        commands['model_name_or_path'] = model_path
         # 指定指令的输出路径
-        self.commands['output_dir'] = self.model_output_dir
+        commands['output_dir'] = self.model_output_dir
 
         # 将训练文件下载到本地 并重新拼接命令参数
-        dataset_list = self.commands['dataset'].split(',')
+        dataset_list = commands['dataset'].split(',')
         local_dataset = []
         for file_url in dataset_list:
             local_dataset.append(self.download_train_file(file_url))
-        self.commands['dataset'] = ','.join(local_dataset)
+        commands['dataset'] = ','.join(local_dataset)
 
     def download_train_file(self, file_url: str) -> str:
         """ 将远端的训练文件下载到本地 """
