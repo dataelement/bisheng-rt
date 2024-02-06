@@ -1,10 +1,14 @@
+# flake8: noqa
 import json
+import sys
 from typing import Dict
 
 import numpy as np
 import triton_python_backend_utils as pb_utils
-from celery_tasks import create_job_task
-from sft_manage import SFTManage
+
+sys.path.append('./')
+from celery_tasks import create_job_task  # isort:skip
+from sft_manage import SFTManage  # isort:skip
 
 
 def _get_np_input(request, name, has_batch=True):
@@ -33,10 +37,8 @@ class TritonPythonModel:
         }
 
     def execute(self, requests):
-        # TODO zgq: 处理不同的路由
         responses = []
         for request in requests:
-            self.logger.log_info(f'---- request: {request}')
             response = self.dispatch_request(request)
             responses.append(response)
         return responses
@@ -47,11 +49,11 @@ class TritonPythonModel:
             inp_str = _get_np_input(request, 'INPUT')[0]
             # 这部分就是输入的json数据，uri字段表示用户发起的uri信息
             payload = json.loads(inp_str)
-            self.logger.log_info(f'==== request payload: {request}')
+            self.logger.log_info(f'start handle request: {payload}')
             uri = payload['uri']
             handler = self.request_handler.get(uri)
             if not handler:
-                self.logger.error(f'invalid uri not find handler: {uri}')
+                self.logger.log_info(f'invalid uri not find handler: {uri}')
                 status_code = 400
                 status_message = f'invalid uri not find handler: {uri}'
             else:

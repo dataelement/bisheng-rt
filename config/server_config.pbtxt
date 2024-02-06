@@ -22,3 +22,11 @@ basic_config {
   log_verbose: 0
   log_file: "./log/bisheng-rt.log"
 }
+model {
+  name: "sft_elem"
+  type: "dataelem.pymodel.sft"
+  instance_group {
+    count: 1
+    kind: KIND_CPU
+  }
+}
