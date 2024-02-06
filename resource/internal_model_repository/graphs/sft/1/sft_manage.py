@@ -33,6 +33,8 @@ class SFTManage(object):
     def __init__(self, job_id: str):
         self.job_id = job_id
 
+        # 若目录不存在则新建
+        os.makedirs(self.ClientCliOutput, exist_ok=True)
         # 创建指令执行路径
         self.job_exec_dir = os.path.join(self.ClientCliOutput, job_id)
         os.makedirs(self.job_exec_dir, exist_ok=True)
