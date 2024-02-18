@@ -33,6 +33,12 @@ class SFTManage(object):
     def __init__(self, job_id: str):
         self.job_id = job_id
 
+        self.exit_code_key = f'{job_id}:exitcode'
+        self.stdout_key = f'{job_id}:stdout'
+        self.stderr_key = f'{job_id}:stderr'
+        self.model_name_key = f'{job_id}:model'
+        self.exec_lock_key = f'{job_id}:execlock'
+
         # 若目录不存在则新建
         os.makedirs(self.ClientCliOutput, exist_ok=True)
         # 创建指令执行路径
@@ -71,6 +77,7 @@ class SFTManage(object):
             stdout_file = open(self.stdout_path, 'wb')
             stderr_file = open(self.stderr_path, 'wb')
             pid_file = open(self.pid_path, 'wb')
+            logger.info(f'start cmd job_id: {self.job_id}, params: {commands}')
             pid, code = CmdManage.execute_cmd(self.ClientCli,
                                               options,
                                               commands,
@@ -90,6 +97,8 @@ class SFTManage(object):
             # 将执行结果写到本地文件内
             self.write_result(1, '', str(e))
             raise Exception(e)
+        finally:
+            self.release_exec_lock_key()
 
     def cancel_job(self):
         pid, exit_code, stdout, stderr = self.get_result()
@@ -103,7 +112,10 @@ class SFTManage(object):
         self.set_exec_lock_key()
 
     def set_exec_lock_key(self):
-        return redis_client.setNx(f'{self.job_id}:execlock', 1)
+        return redis_client.setNx(self.exec_lock_key, 1)
+
+    def release_exec_lock_key(self):
+        redis_client.delete(self.exec_lock_key)
 
     def delete_job(self, model_name: str):
         # 先尝试取消任务
@@ -118,13 +130,21 @@ class SFTManage(object):
 
     def publish_job(self, model_name: str):
         # 将预训练生产的模型目录拷贝到正式目录
-        model_output_dir = os.path.join(self.model_output_dir, 'model_output')
+        model_output_dir = os.path.join(self.model_output_dir)
+        # 需要发布到的目录
         publish_model_dir = os.path.join(self.ModelRootPath, model_name)
         if not os.path.exists(model_output_dir):
-            raise Exception(f'[{model_output_dir}] is not exist')
+            raise Exception(f'model not found, [{model_output_dir}] not exist')
+        if os.path.exists(publish_model_dir):
+            raise Exception(f'model already exists, [{publish_model_dir}]')
         shutil.copytree(model_output_dir, publish_model_dir)
+        # 存储发布的模型名称
+        redis_client.set_no_expire(self.model_name_key, model_name)
 
     def cancel_publish_job(self, model_name: str):
+        pub_model_name = redis_client.get(self.model_name_key)
+        if pub_model_name != model_name:
+            raise Exception(f'[{model_name}] not pub model:[{pub_model_name}]')
         publish_model_dir = os.path.join(self.ModelRootPath, model_name)
         if os.path.exists(publish_model_dir):
             shutil.rmtree(publish_model_dir)
@@ -145,38 +165,51 @@ class SFTManage(object):
         return self.JobStatus.Running, ''
 
     def get_job_log(self) -> str:
-        log_path = os.path.join(self.model_output_dir, 'train_log.json')
+        log_path = os.path.join(self.model_output_dir, 'trainer_log.jsonl')
+        if not os.path.exists(log_path):
+            logger.info(f'log not found, [{log_path}] is not exist')
+            return ''
         with open(log_path, 'r') as f:
             return f.read()
 
     def get_job_metrics(self) -> Dict:
-        metrics_path = os.path.join(self.model_output_dir, 'metrics.json')
+        metrics_path = os.path.join(self.model_output_dir, 'all_results.json')
+        if not os.path.exists(metrics_path):
+            logger.info(f'metrics not found, [{metrics_path}] is not exist')
+            return {}
         with open(metrics_path, 'r') as f:
             return json.load(f)
 
     def change_model_name(self, old_model_name, model_name):
+        pub_model_name = redis_client.get(self.model_name_key)
+        if pub_model_name != old_model_name:
+            raise Exception(f'[{old_model_name}] is not'
+                            f' published model:[{pub_model_name}]')
         old_model_dir = os.path.join(self.ModelRootPath, old_model_name)
         if not os.path.exists(old_model_dir):
-            raise Exception(f'model [{model_name}] not exist')
+            raise Exception(f'old model dir [{model_name}] not exist')
         new_model_dir = os.path.join(self.ModelRootPath, model_name)
+        if os.path.exists(new_model_dir):
+            raise Exception(f'new model dir [{model_name}] already exist')
         os.rename(old_model_dir, new_model_dir)
+        redis_client.set_no_expire(self.model_name_key, model_name)
 
     def get_result(self) -> (int, int, str, str):
         pid = self.read_file(self.pid_path)
-        exit_code = redis_client.get(f'{self.job_id}:exitcode')
-        stdout = redis_client.get(f'{self.job_id}:stdout')
-        stderr = redis_client.get(f'{self.job_id}:stderr')
+        exit_code = redis_client.get(self.exit_code_key)
+        stdout = redis_client.get(self.stdout_key)
+        stderr = redis_client.get(self.stderr_key)
         return pid, exit_code, stdout, stderr
 
     def write_result(self, exit_code: int, stdout: str, stderr: str):
-        redis_client.set(f'{self.job_id}:exitcode', str(exit_code))
-        redis_client.set(f'{self.job_id}:stdout', stdout)
-        redis_client.set(f'{self.job_id}:stderr', stderr)
+        redis_client.set(self.exit_code_key, str(exit_code))
+        redis_client.set(self.stdout_key, stdout)
+        redis_client.set(self.stderr_key, stderr)
 
     def delete_result(self):
-        redis_client.delete(f'{self.job_id}:exitcode')
-        redis_client.delete(f'{self.job_id}:stdout')
-        redis_client.delete(f'{self.job_id}:stderr')
+        redis_client.delete(self.exit_code_key)
+        redis_client.delete(self.stdout_key)
+        redis_client.delete(self.stderr_key)
         shutil.rmtree(self.job_exec_dir)
 
     def read_file(self, file_path: str) -> str:
@@ -200,8 +233,9 @@ class SFTManage(object):
 
     def download_train_file(self, file_url: str) -> str:
         """ 将远端的训练文件下载到本地 """
-        local_file_path = os.path.join(self.train_dir
-                                       + os.path.basename(file_url))
+        local_file_path = os.path.join(self.train_dir,
+                                       os.path.basename(
+                                           file_url.split('?')[0]))
         res = requests.get(file_url)
         if res.status_code != 200:
             raise Exception(f'fail to download file from [{file_url}]')
