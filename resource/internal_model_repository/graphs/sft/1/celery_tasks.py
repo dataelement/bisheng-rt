@@ -1,9 +1,8 @@
 from celery import Celery
+from settings import settings
 from sft_manage import SFTManage
 
-import config
-
-app = Celery('finetune_tasks', broker=config.CELERY_REDIS_URL)
+app = Celery('finetune_tasks', broker=settings.redis_url)
 
 
 @app.task()

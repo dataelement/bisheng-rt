@@ -6,23 +6,22 @@ from logging import getLogger
 from typing import Dict, List
 
 import requests
+import settings
 from cmd_manage import CmdManage
 from redis_manager import redis_client
-
-import config
 
 logger = getLogger(__name__)
 
 
 class SFTManage(object):
     # cmd执行的输出目录，绝对路径
-    ClientCliOutput = config.CLIENT_CLI_OUTPUT
+    ClientCliOutput = settings.CLIENT_CLI_OUTPUT
 
     # 执行的训练指令
     ClientCli = 'bisheng_ft'
 
     # 已发布模型的跟目录
-    ModelRootPath = config.MODEL_ROOT_DIR
+    ModelRootPath = settings.MODEL_ROOT_DIR
 
     # job 运行状态
     class JobStatus:

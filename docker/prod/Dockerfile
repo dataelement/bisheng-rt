@@ -37,6 +37,8 @@ RUN pip3 install lanms==1.0.2 -i ${EXTRA_PIP_REPO}
 RUN pip3 install bisheng-pybackend-libs==${BISHENG_PYBACKEND_LIBS_VER}
 # sft need celery and redis
 RUN pip3 install celery[redis]==5.3.6
+RUN pip3 install cryptography==37.0.4
+RUN pip3 install PyYAML==6.0
 
 RUN apt-get clean &&  rm -rf /var/lib/apt/lists/* && rm -rf /root/.cache/pip
 

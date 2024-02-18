@@ -3,8 +3,7 @@ from logging import getLogger
 
 import redis
 from redis import ConnectionPool
-
-import config
+from settings import settings
 
 logger = getLogger(__name__)
 
@@ -119,4 +118,4 @@ class RedisClient:
 
 
 # 示例用法
-redis_client = RedisClient(config.CELERY_REDIS_URL)
+redis_client = RedisClient(settings.redis_url)
