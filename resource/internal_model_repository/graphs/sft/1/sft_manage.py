@@ -77,6 +77,7 @@ class SFTManage(object):
             stderr_file = open(self.stderr_path, 'wb')
             pid_file = open(self.pid_path, 'wb')
             logger.info(f'start cmd job_id: {self.job_id}, params: {commands}')
+            # 分布式部署时，此处指令的pid需要挂载同一个任务输出目录
             pid, code = CmdManage.execute_cmd(self.ClientCli,
                                               options,
                                               commands,
@@ -106,7 +107,10 @@ class SFTManage(object):
             return
         # 没有exitcode 但是有pid说明还在进行中
         if pid is not None:
-            os.kill(pid, signal.SIGKILL)
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
         # 说明任务还未执行，可能在队列中或解析参数的过程
         self.set_exec_lock_key()
 
@@ -201,9 +205,9 @@ class SFTManage(object):
         return pid, exit_code, stdout, stderr
 
     def write_result(self, exit_code: int, stdout: str, stderr: str):
-        redis_client.set(self.exit_code_key, str(exit_code))
-        redis_client.set(self.stdout_key, stdout)
-        redis_client.set(self.stderr_key, stderr)
+        redis_client.set_no_expire(self.exit_code_key, str(exit_code))
+        redis_client.set_no_expire(self.stdout_key, stdout)
+        redis_client.set_no_expire(self.stderr_key, stderr)
 
     def delete_result(self):
         redis_client.delete(self.exit_code_key)

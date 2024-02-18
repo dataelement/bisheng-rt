@@ -39,5 +39,5 @@ class CmdManage:
     def parse_cmd(cls, cmd: str, options: List[str], commands: Dict) -> str:
         cmd = f'{cmd} {" ".join(options)}'
         for key, value in commands.items():
-            cmd += f' {key} {value}'
+            cmd += f' --{key} {value}'
         return cmd
