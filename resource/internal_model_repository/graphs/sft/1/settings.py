@@ -2,7 +2,7 @@ import os
 
 import yaml
 from cryptography.fernet import Fernet
-from pydantic import BaseModel, field_validator
+from pydantic import BaseSettings, validator
 
 # 以下配置和镜像目录相关，不可改动！！！
 # ָbisheng-ft命令的输出根目录
@@ -21,11 +21,11 @@ def decrypt_token(token: str):
     return Fernet(secret_key).decrypt(token).decode()
 
 
-class Settings(BaseModel):
+class Settings(BaseSettings):
     # celery的broker；存储训练指令的执行结果
     redis_url: str = None
 
-    @field_validator('redis_url')
+    @validator('redis_url')
     @classmethod
     def set_redis_url(cls, v: str):
         import re
