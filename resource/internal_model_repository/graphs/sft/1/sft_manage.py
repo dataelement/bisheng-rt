@@ -198,7 +198,9 @@ class SFTManage(object):
         redis_client.set_no_expire(self.model_name_key, model_name)
 
     def get_result(self) -> (int, int, str, str):
-        pid = self.read_file(self.pid_path)
+        pid = None
+        if os.path.exists(self.pid_path):
+            pid = self.read_file(self.pid_path)
         exit_code = redis_client.get(self.exit_code_key)
         stdout = redis_client.get(self.stdout_key)
         stderr = redis_client.get(self.stderr_key)
