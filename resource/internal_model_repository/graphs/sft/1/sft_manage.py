@@ -161,7 +161,7 @@ class SFTManage(object):
         if exit_code is not None:
             if int(exit_code) == 0:
                 return self.JobStatus.Finished, stdout
-            return self.JobStatus.Failed, stderr
+            return self.JobStatus.Failed, stderr + stdout
         if pid is not None:
             return self.JobStatus.Running, ''
         # 还未开始执行，队列中或解析参数中
