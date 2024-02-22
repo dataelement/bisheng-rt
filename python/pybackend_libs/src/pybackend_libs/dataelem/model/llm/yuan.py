@@ -37,7 +37,8 @@ class YuanBase(BaseLLM):
                    gpu_memory,
                    use_safetensors=True,
                    use_auto_model=False,
-                   use_llamatokenizer=True)
+                   use_llamatokenizer=True,
+                   auto_configure_device_map=True)
         self.generation_config.update(**self.default_params)
         self.model.generation_config = self.generation_config
 
