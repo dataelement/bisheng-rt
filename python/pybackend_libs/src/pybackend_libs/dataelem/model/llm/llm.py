@@ -91,7 +91,8 @@ class BaseLLM(object):
                 model,
                 max_memory=max_memory,
                 no_split_module_classes=no_split_modules)
-        elif isinstance(auto_configure_device_map, bool):
+        elif isinstance(auto_configure_device_map, bool) and \
+            auto_configure_device_map:
             device_map = 'auto'
         else:
             device_map = auto_configure_device_map(
