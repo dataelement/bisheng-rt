@@ -3,6 +3,7 @@ from pybackend_libs.dataelem.utils.lazy_loader import lazy
 bge = lazy('pybackend_libs.dataelem.model.embedding.bge')
 gte = lazy('pybackend_libs.dataelem.model.embedding.gte')
 me5 = lazy('pybackend_libs.dataelem.model.embedding.me5')
+jina = lazy('pybackend_libs.dataelem.model.embedding.jina')
 baichuan = lazy('pybackend_libs.dataelem.model.llm.baichuan')
 chatglm2 = lazy('pybackend_libs.dataelem.model.llm.chatglm2')
 chatglm3 = lazy('pybackend_libs.dataelem.model.llm.chatglm3')
@@ -36,6 +37,7 @@ def get_model(name: str):
         'InternLMChat': internlm,
         'ME5Embedding': me5,
         'BGEZhEmbedding': bge,
+        'JINAEmbedding': jina,
         'GTEEmbedding': gte,
         'LayoutMrcnn': layout_mrcnn,
         'TableCellApp': table_app,
