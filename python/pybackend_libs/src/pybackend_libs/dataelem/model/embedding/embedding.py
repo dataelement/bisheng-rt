@@ -16,6 +16,12 @@ def average_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
         ~attention_mask[..., None].bool(), 0.0)
     return last_hidden.sum(dim=1) / attention_mask.sum(dim=1)[..., None]
 
+def mean_pooling(token_embeddings: torch.Tensor, attention_mask: torch.Tensor):
+    input_mask_expanded = (
+        attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+    )
+    return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
+        input_mask_expanded.sum(1), min=1e-9)
 
 def cls_pool(last_hidden_states: Tensor) -> Tensor:
     # Perform pooling. In this case, cls pooling.
