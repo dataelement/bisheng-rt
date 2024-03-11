@@ -1,15 +1,3 @@
-# coding=utf-8
-
-""" BERT model configuration"""
-from collections import OrderedDict
-from typing import Mapping
-
-from transformers.configuration_utils import PretrainedConfig
-from transformers.onnx import OnnxConfig
-from transformers.utils import logging
-
-
-
 import math
 import os
 import warnings
@@ -34,6 +22,11 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutput,
     TokenClassifierOutput,
 )
+from collections import OrderedDict
+from typing import Mapping
+
+from transformers.configuration_utils import PretrainedConfig
+from transformers.onnx import OnnxConfig
 from transformers.modeling_utils import PreTrainedModel
 from transformers.pytorch_utils import (
     apply_chunking_to_forward,
@@ -88,7 +81,7 @@ _CHECKPOINT_FOR_SEQUENCE_CLASSIFICATION = "textattack/bert-base-uncased-yelp-pol
 _SEQ_CLASS_EXPECTED_OUTPUT = "'LABEL_1'"
 _SEQ_CLASS_EXPECTED_LOSS = 0.01
 
-logger = logging.get_logger(__name__)
+
 
 
 class JinaBertConfig(PretrainedConfig):
@@ -118,6 +111,7 @@ class JinaBertConfig(PretrainedConfig):
         attn_implementation='torch',
         gradient_checkpointing=False,
         torch_dtype="float16",
+        _name_or_path="",
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, **kwargs)
@@ -142,21 +136,7 @@ class JinaBertConfig(PretrainedConfig):
         self.feed_forward_type = "geglu"
         self.emb_pooler = "mean"
         self.attn_implementation = None
-
-class JinaBertOnnxConfig(OnnxConfig):
-    @property
-    def inputs(self) -> Mapping[str, Mapping[int, str]]:
-        if self.task == "multiple-choice":
-            dynamic_axis = {0: "batch", 1: "choice", 2: "sequence"}
-        else:
-            dynamic_axis = {0: "batch", 1: "sequence"}
-        return OrderedDict(
-            [
-                ("input_ids", dynamic_axis),
-                ("attention_mask", dynamic_axis),
-                ("token_type_ids", dynamic_axis),
-            ]
-        )
+        self._name_or_path = _name_or_path
 
 
 def load_tf_weights_in_bert(model, config, tf_checkpoint_path):
@@ -244,21 +224,11 @@ def load_tf_weights_in_bert(model, config, tf_checkpoint_path):
 class JinaBertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 
-    def __init__(self,config=JinaBertConfig()):
+    def __init__(self, config: JinaBertConfig):
         super().__init__()
-        # print("=== JinaBertEmbeddings config:",config)
-        # config = JinaBertConfig()
-        # self.device = device
-        # if config is None:
-        #     config = JinaBertConfig()
-        # print("====config.vocab_size: ",config.vocab_size)
         self.word_embeddings = nn.Embedding(
             config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id
         )
-        print("=== config.vocab_size:",config.vocab_size)
-        print("=== config.hidden_size:",config.hidden_size)
-        print("=== config.pad_token_id:",config.pad_token_id)
-        # print("=== self.word_embeddings:",self.word_embeddings)
         if config.position_embedding_type != "alibi":
             self.position_embeddings = nn.Embedding(
                 config.max_position_embeddings, config.hidden_size
@@ -266,12 +236,6 @@ class JinaBertEmbeddings(nn.Module):
         self.token_type_embeddings = nn.Embedding(
             config.type_vocab_size, config.hidden_size
         )
-        # print("=== config.position_embedding_type:",config.position_embedding_type)
-        # print("=== config.max_position_embeddings:",config.max_position_embeddings)
-        # print("=== config.hidden_size:",config.hidden_size)
-        # print("=== config.type_vocab_size:",config.type_vocab_size)
-        # #### print("=== self.position_embeddings:",self.position_embeddings)
-        # print("=== self.token_type_embeddings:",self.token_type_embeddings)
 
         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
         # any TensorFlow checkpoint file
@@ -281,18 +245,11 @@ class JinaBertEmbeddings(nn.Module):
         self.position_embedding_type = getattr(
             config, "position_embedding_type", "absolute"
         )
-        # print("=== config.layer_norm_eps:",config.layer_norm_eps)
-        # print("=== config.hidden_dropout_prob:",config.hidden_dropout_prob)
-        # print("=== self.LayerNorm:",self.LayerNorm)
-        # print("=== self.dropout:",self.dropout)
-        # print("=== self.position_embedding_type:",self.position_embedding_type)
-
         self.register_buffer(
             "position_ids",
             torch.arange(config.max_position_embeddings).expand((1, -1)),
             persistent=False,
         )
-        # print("=== self.position_ids:",self.position_ids)
         self.register_buffer(
             "token_type_ids",
             torch.zeros(self.position_ids.size(), dtype=torch.long),
@@ -318,10 +275,7 @@ class JinaBertEmbeddings(nn.Module):
             position_ids = self.position_ids[
                 :, past_key_values_length : seq_length + past_key_values_length
             ]
-        # print("--- input_ids:",input_ids)
-        # print("--- input_shape:",input_shape)
-        # print("--- seq_length:",seq_length)
-        # print("--- position_ids:",position_ids)
+
         # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
         # issue #5664
@@ -334,18 +288,13 @@ class JinaBertEmbeddings(nn.Module):
                 token_type_ids = buffered_token_type_ids_expanded
             else:
                 token_type_ids = torch.zeros(
-                    # input_shape, dtype=torch.long, device=self.device
                     input_shape, dtype=torch.long, device=self.position_ids.device
                 )
-        
+
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-        # print("--- token_type_ids:",token_type_ids)
-        print("~~~ input_ids:",input_ids,input_ids.dtype)
-        print("~~~ self.word_embeddings:",self.word_embeddings)
-        print("~~~ inputs_embeds:",inputs_embeds)
-        # print("--- token_type_embeddings:",token_type_embeddings)
+
         embeddings = inputs_embeds + token_type_embeddings
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
@@ -356,9 +305,8 @@ class JinaBertEmbeddings(nn.Module):
 
 
 class JinaBertSelfAttention(nn.Module):
-    def __init__(self, config= JinaBertConfig(), position_embedding_type=None):
+    def __init__(self, config: JinaBertConfig, position_embedding_type=None):
         super().__init__()
-        # config = JinaBertConfig()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(
             config, "embedding_size"
         ):
@@ -626,9 +574,8 @@ class JinaBertIntermediate(nn.Module):
 
 
 class JinaBertOutput(nn.Module):
-    def __init__(self, config=JinaBertConfig()):
+    def __init__(self, config: JinaBertConfig):
         super().__init__()
-        # config = JinaBertConfig()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -643,9 +590,8 @@ class JinaBertOutput(nn.Module):
 
 
 class JinaBertGLUMLP(nn.Module):
-    def __init__(self, config=JinaBertConfig()):
+    def __init__(self, config: JinaBertConfig):
         super().__init__()
-        # config = JinaBertConfig()
         self.config = config
         self.gated_layers = nn.Linear(
             config.hidden_size, config.intermediate_size * 2, bias=False
@@ -678,9 +624,8 @@ class JinaBertGLUMLP(nn.Module):
 
 
 class JinaBertLayer(nn.Module):
-    def __init__(self, config=JinaBertConfig()):
+    def __init__(self, config: JinaBertConfig):
         super().__init__()
-        # config = JinaBertConfig()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
         self.attention = JinaBertAttention(config)
@@ -789,9 +734,8 @@ class JinaBertLayer(nn.Module):
 
 
 class JinaBertEncoder(nn.Module):
-    def __init__(self, config=JinaBertConfig()):
+    def __init__(self, config: JinaBertConfig):
         super().__init__()
-        # config = JinaBertConfig()
         self.config = config
         self.layer = nn.ModuleList(
             [JinaBertLayer(config) for _ in range(config.num_hidden_layers)]
@@ -1084,7 +1028,6 @@ class JinaBertPreTrainedModel(PreTrainedModel):
 class JinaBertForPreTrainingOutput(ModelOutput):
     """
     Output type of [`BertForPreTraining`].
-
     Args:
         loss (*optional*, returned when `labels` is provided, `torch.FloatTensor` of shape `(1,)`):
             Total loss as the sum of the masked language modeling loss and the next sequence prediction
@@ -1097,12 +1040,10 @@ class JinaBertForPreTrainingOutput(ModelOutput):
         hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
             Tuple of `torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer) of
             shape `(batch_size, sequence_length, hidden_size)`.
-
             Hidden-states of the model at the output of each layer plus the initial embedding outputs.
         attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
             Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
             sequence_length)`.
-
             Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
             heads.
     """
@@ -1115,15 +1056,12 @@ class JinaBertForPreTrainingOutput(ModelOutput):
 
 
 BERT_START_DOCSTRING = r"""
-
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
-
     This model is also a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass.
     Use it as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage
     and behavior.
-
     Parameters:
         config ([`BertConfig`]): Model configuration class with all the parameters of the model.
             Initializing with a config file does not load the weights associated with the model, only the
@@ -1134,37 +1072,28 @@ BERT_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `({0})`):
             Indices of input sequence tokens in the vocabulary.
-
             Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
-
             [What are input IDs?](../glossary#input-ids)
         attention_mask (`torch.FloatTensor` of shape `({0})`, *optional*):
             Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
-
             - 1 for tokens that are **not masked**,
             - 0 for tokens that are **masked**.
-
             [What are attention masks?](../glossary#attention-mask)
         token_type_ids (`torch.LongTensor` of shape `({0})`, *optional*):
             Segment token indices to indicate first and second portions of the inputs. Indices are selected in `[0,
             1]`:
-
             - 0 corresponds to a *sentence A* token,
             - 1 corresponds to a *sentence B* token.
-
             [What are token type IDs?](../glossary#token-type-ids)
         position_ids (`torch.LongTensor` of shape `({0})`, *optional*):
             Indices of positions of each input sequence tokens in the position embeddings. Selected in the range `[0,
             config.max_position_embeddings - 1]`.
-
             [What are position IDs?](../glossary#position-ids)
         head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
             Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
-
             - 1 indicates the head is **not masked**,
             - 0 indicates the head is **masked**.
-
         inputs_embeds (`torch.FloatTensor` of shape `({0}, hidden_size)`, *optional*):
             Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
             is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
@@ -1186,20 +1115,17 @@ BERT_INPUTS_DOCSTRING = r"""
 )
 class JinaBertModel(JinaBertPreTrainedModel):
     """
-
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
     cross-attention is added between the self-attention layers, following the architecture described in [Attention is
     all you need](https://arxiv.org/abs/1706.03762) by Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit,
     Llion Jones, Aidan N. Gomez, Lukasz Kaiser and Illia Polosukhin.
-
     To behave as an decoder the model needs to be initialized with the `is_decoder` argument of the configuration set
     to `True`. To be used in a Seq2Seq model, the model needs to initialized with both `is_decoder` argument and
     `add_cross_attention` set to `True`; an `encoder_hidden_states` is then expected as an input to the forward pass.
     """
 
-    def __init__(self, config= JinaBertConfig(), add_pooling_layer=True):
+    def __init__(self, config: JinaBertConfig, add_pooling_layer=True):
         super().__init__(config)
-        # config = JinaBertConfig()
         self.config = config
 
         self.emb_pooler = config.emb_pooler
@@ -1232,7 +1158,6 @@ class JinaBertModel(JinaBertPreTrainedModel):
     ) -> Union[List[torch.Tensor], np.ndarray, torch.Tensor]:
         """
         Computes sentence embeddings
-
         Args:
             sentences(`str` or `List[str]`):
                 Sentence or sentences to be encoded
@@ -1257,7 +1182,6 @@ class JinaBertModel(JinaBertPreTrainedModel):
                 If set to true, returned vectors will have length 1. In that case, the faster dot-product (util.dot_score) instead of cosine similarity can be used.
             tokenizer_kwargs(`Dict[str, Any]`, *optional*, defaults to {}):
                 Keyword arguments for the tokenizer
-
         Returns:
             By default, a list of tensors is returned.
             If convert_to_tensor, a stacked tensor is returned.
@@ -1410,12 +1334,10 @@ class JinaBertModel(JinaBertPreTrainedModel):
         encoder_attention_mask (`torch.FloatTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Mask to avoid performing attention on the padding token indices of the encoder input. This mask is used in
             the cross-attention if the model is configured as a decoder. Mask values selected in `[0, 1]`:
-
             - 1 for tokens that are **not masked**,
             - 0 for tokens that are **masked**.
         past_key_values (`tuple(tuple(torch.FloatTensor))` of length `config.n_layers` with each tuple having 4 tensors of shape `(batch_size, num_heads, sequence_length - 1, embed_size_per_head)`):
             Contains precomputed key and value hidden states of the attention blocks. Can be used to speed up decoding.
-
             If `past_key_values` are used, the user can optionally input only the last `decoder_input_ids` (those that
             don't have their past key value states given to this model) of shape `(batch_size, 1)` instead of all
             `decoder_input_ids` of shape `(batch_size, sequence_length)`.
@@ -1599,12 +1521,10 @@ class JinaBertForPreTraining(JinaBertPreTrainedModel):
             next_sentence_label (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
                 Labels for computing the next sequence prediction (classification) loss. Input should be a sequence
                 pair (see `input_ids` docstring) Indices should be in `[0, 1]`:
-
                 - 0 indicates sequence B is a continuation of sequence A,
                 - 1 indicates sequence B is a random sequence.
             kwargs (`Dict[str, any]`, optional, defaults to *{}*):
                 Used to hide legacy arguments that have been deprecated.
-
         Returns:
         """
         return_dict = (
@@ -1711,7 +1631,6 @@ class JinaBertLMHeadModel(JinaBertPreTrainedModel):
         encoder_attention_mask (`torch.FloatTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Mask to avoid performing attention on the padding token indices of the encoder input. This mask is used in
             the cross-attention if the model is configured as a decoder. Mask values selected in `[0, 1]`:
-
             - 1 for tokens that are **not masked**,
             - 0 for tokens that are **masked**.
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1720,7 +1639,6 @@ class JinaBertLMHeadModel(JinaBertPreTrainedModel):
             ignored (masked), the loss is only computed for the tokens with labels n `[0, ..., config.vocab_size]`
         past_key_values (`tuple(tuple(torch.FloatTensor))` of length `config.n_layers` with each tuple having 4 tensors of shape `(batch_size, num_heads, sequence_length - 1, embed_size_per_head)`):
             Contains precomputed key and value hidden states of the attention blocks. Can be used to speed up decoding.
-
             If `past_key_values` are used, the user can optionally input only the last `decoder_input_ids` (those that
             don't have their past key value states given to this model) of shape `(batch_size, 1)` instead of all
             `decoder_input_ids` of shape `(batch_size, sequence_length)`.
@@ -1975,10 +1893,8 @@ class JinaBertForNextSentencePrediction(JinaBertPreTrainedModel):
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the next sequence prediction (classification) loss. Input should be a sequence pair
             (see `input_ids` docstring). Indices should be in `[0, 1]`:
-
             - 0 indicates sequence B is a continuation of sequence A,
             - 1 indicates sequence B is a random sequence.
-
         Returns:
         """
 
@@ -2454,5 +2370,3 @@ class JinaBertForQuestionAnswering(JinaBertPreTrainedModel):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-
-

@@ -10,6 +10,8 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 # from transformers.generation.utils import GenerationConfig
 
+from .jina_util import JinaBertConfig, JinaBertModel
+
 
 def average_pool(last_hidden_states: Tensor, attention_mask: Tensor) -> Tensor:
     last_hidden = last_hidden_states.masked_fill(
@@ -62,7 +64,8 @@ class BaseEmbedding(object):
               devices,
               gpu_memory,
               use_safetensors=False,
-              use_sentence_transformers=False):
+              use_sentence_transformers=False,
+              jina_mode=False):
 
         torch_seed()
 
@@ -81,9 +84,16 @@ class BaseEmbedding(object):
                                                        use_fast=False,
                                                        trust_remote_code=True)
         with init_empty_weights():
-            config = AutoConfig.from_pretrained(pretrain_path,
+            if jina_mode is True:
+                config = JinaBertConfig()
+                config._name_or_path = pretrain_path
+            else:
+                config = AutoConfig.from_pretrained(pretrain_path,
                                                 trust_remote_code=True)
-            model = AutoModel.from_config(config,
+            if jina_mode is True:
+                model = JinaBertModel(config)
+            else:
+                model = AutoModel.from_config(config,
                                           torch_dtype=torch.float16,
                                           trust_remote_code=True)
 
@@ -93,11 +103,19 @@ class BaseEmbedding(object):
             max_memory=max_memory,
             no_split_module_classes=no_split_modules)
 
-        self.model = AutoModel.from_pretrained(pretrain_path,
+        if jina_mode is True:
+            self.model = JinaBertModel.from_pretrained(pretrain_path,
+                                               device_map=device_map,
+                                               trust_remote_code=True,
+                                               use_safetensors=use_safetensors
+                                               )
+        else:
+            self.model = AutoModel.from_pretrained(pretrain_path,
                                                device_map=device_map,
                                                torch_dtype=torch.float16,
                                                trust_remote_code=True,
-                                               use_safetensors=use_safetensors)
+                                               use_safetensors=use_safetensors
+                                               )
 
         self.model.eval()
 
