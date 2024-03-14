@@ -86,6 +86,7 @@ class BaseLLM(object):
 
         model.tie_weights()
         no_split_modules = model._no_split_modules
+        torch_dtype = torch.float16
         if auto_configure_device_map is None:
             device_map = infer_auto_device_map(
                 model,
@@ -93,6 +94,7 @@ class BaseLLM(object):
                 no_split_module_classes=no_split_modules)
         elif auto_configure_device_map is True:
             device_map = 'auto'
+            torch_dtype = 'auto'
         else:
             device_map = auto_configure_device_map(
                 model,
@@ -110,7 +112,7 @@ class BaseLLM(object):
             self.model = auto_model_cls.from_pretrained(
                 pretrain_path,
                 device_map=device_map,
-                torch_dtype=torch.float16,
+                torch_dtype=torch_dtype,
                 trust_remote_code=True,
                 use_safetensors=use_safetensors,
                 **kwargs)
