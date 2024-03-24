@@ -434,7 +434,8 @@ class HTTPAPIServer : public HTTPServer {
   void HandleLogging(evhtp_request_t* req);
 
   void HandleRestfulInfer(
-      evhtp_request_t* req, const std::string& app_name, bool use_raw_input);
+      evhtp_request_t* req, const std::string& app_name, bool use_raw_input,
+      bool support_batch_input);
 
   TRITONSERVER_Error* ParseRequestBody(
       evhtp_request_t* req, std::vector<char>* body, bool enable_string_tensor);

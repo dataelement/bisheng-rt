@@ -3,13 +3,16 @@ import json
 import subprocess as sp
 
 import numpy as np
-# import torch
 import triton_python_backend_utils as pb_utils
 from pybackend_libs.dataelem.model import get_model
 
 
 def _get_np_input(request, name, has_batch=True):
-    return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
+    np_arr = pb_utils.get_input_tensor_by_name(request, name).as_numpy()
+    if np_arr.ndim >= 2:
+        return np_arr.flatten()
+    else:
+        return np_arr
 
 
 def _get_optional_params(request, name):
@@ -50,7 +53,7 @@ class TritonPythonModel:
         model_path = parameters.pop('model_path')
         parameters['pretrain_path'] = model_path
 
-        group_idx = int(model_instance_name.rsplit('_', 1)[1])
+        group_idx = int(model_instance_name.rsplit('_', 2)[1])
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
         parameters['devices'] = gpus[group_idx]
 
@@ -81,13 +84,6 @@ class TritonPythonModel:
         self.logger.log_info(f'succ to load model [{self.name}]')
 
     def exec(self, requests):
-        def _get_np_input(request, name, has_batch=True):
-            return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
-
-        def _get_optional_params(request, name):
-            tensor = pb_utils.get_input_tensor_by_name(request, name)
-            return json.loads(tensor.as_numpy()[0]) if tensor else {}
-
         responses = []
         for request in requests:
             status_code = 200
@@ -109,7 +105,9 @@ class TritonPythonModel:
             if status_code == 200 and outp:
                 result.update(outp)
 
-            result_arr = np.array([json.dumps(result)], dtype=np.object_)
+            result_arr = np.array(
+                [[json.dumps(result, ensure_ascii=False)]],
+                dtype=np.object_)
 
             out_tensor_0 = pb_utils.Tensor('OUTPUT', result_arr)
             inference_response = pb_utils.InferenceResponse(
@@ -130,7 +128,8 @@ class TritonPythonModel:
                 stream = inp.get('stream', False)
                 if stream:
                     for out in self.model.stream_predict(inp):
-                        out_arr = np.array([json.dumps(out)], dtype=np.object_)
+                        out_arr = np.array(
+                            [[json.dumps(out)]], dtype=np.object_)
                         out_tensor = pb_utils.Tensor('OUTPUT', out_arr)
                         inference_response = pb_utils.InferenceResponse(
                             output_tensors=[out_tensor])
@@ -141,7 +140,9 @@ class TritonPythonModel:
                             break
                 else:
                     out = self.model.predict(inp)
-                    out_arr = np.array([json.dumps(out)], dtype=np.object_)
+                    out_arr = np.array(
+                        [[json.dumps(out, ensure_ascii=False)]],
+                        dtype=np.object_)
                     out_tensor = pb_utils.Tensor('OUTPUT', out_arr)
                     inference_response = pb_utils.InferenceResponse(
                             output_tensors=[out_tensor])
@@ -152,7 +153,7 @@ class TritonPythonModel:
                 self.logger.log_info(f'Error generating stream: {e}')
                 error = pb_utils.TritonError(f'Error generating stream: {e}')
                 triton_output_tensor = pb_utils.Tensor(
-                    'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+                    'OUTPUT', np.asarray([['N/A']], dtype=np.object_))
                 response = pb_utils.InferenceResponse(
                     output_tensors=[triton_output_tensor], error=error)
                 response_sender.send(response)

@@ -19,6 +19,7 @@ class GenerateParams(BaseModel):
     best_of: Optional[int] = None
     presence_penalty: float = 0.0
     frequency_penalty: float = 0.0
+    repetition_penalty: float = 1.0
     temperature: float = 1.0
     top_p: float = 1.0
     top_k: int = -1
@@ -116,6 +117,7 @@ class VLLMModel(object):
                                                     None)
         gpu_memory_utilization = pymodel_params.pop('gpu_memory_utilization',
                                                     0.9)
+        max_model_len = pymodel_params.pop('max_model_len', 2048)
         block_size = pymodel_params.pop('block_size', 16)
         swap_space = pymodel_params.pop('swap_space', 4)
 
@@ -134,6 +136,7 @@ class VLLMModel(object):
             'trust_remote_code': True,
             'block_size': block_size,
             'swap_space': swap_space,
+            'max_model_len': max_model_len,
         }
         if self.verbose:
             print('vllm_engine_config', vllm_engine_config)

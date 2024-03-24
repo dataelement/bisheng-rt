@@ -3775,50 +3775,71 @@ HTTPAPIServer::InferRequestClass::FinalizeResponseV2(
         TRITONSERVER_ERROR_INTERNAL, "response wrong name or type or userp");
   }
 
-  auto info = reinterpret_cast<AllocPayload::OutputInfo*>(userp);
+  // std::cout << "byte_size:" << byte_size << "\n";
+
+  evbuffer* response_body = evbuffer_new();
+  size_t offset = 0;
+  const char* cbase = reinterpret_cast<const char*>(base);
+  const size_t len = *(reinterpret_cast<const uint32_t*>(cbase + offset));
+  offset += sizeof(uint32_t);
+  evbuffer_add(response_body, cbase + offset, len);
+
+  // evhtp_headers_add_header(
+  //     req->headers_out,
+  //     evhtp_header_new(kContentTypeHeader, "application/json", 1, 1));
+  // evbuffer_add_buffer(req->buffer_out, response_body);
+  // // Destroy the evbuffer object as the data has been moved
+  // // to HTTP response buffer
+  // evbuffer_free(response_body);
+  // evhtp_send_reply(req, EVHTP_RES_OK);
+
+  // auto info = reinterpret_cast<AllocPayload::OutputInfo*>(userp);
   // Set head with "application/json"
   // SetResponseHeader(false, evbuffer_get_length(response_body));
   SetResponseHeader(false, byte_size);
+  evbuffer_add_buffer(req_->buffer_out, response_body);
+  evbuffer_free(response_body);
 
-  struct evbuffer_iovec* v = nullptr;
-  int v_idx = 0;
-  int n = evbuffer_peek(info->evbuffer_, -1, NULL, NULL, 0);
-  if (n > 0) {
-    v = static_cast<struct evbuffer_iovec*>(
-        alloca(sizeof(struct evbuffer_iovec) * n));
-    if (evbuffer_peek(info->evbuffer_, -1, NULL, v, n) != n) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          "unexpected error getting iovec in response evbuffer");
-    }
-  }
+  // struct evbuffer_iovec* v = nullptr;
+  // int v_idx = 0;
+  // int n = evbuffer_peek(info->evbuffer_, -1, NULL, NULL, 0);
+  // if (n > 0) {
+  //   v = static_cast<struct evbuffer_iovec*>(
+  //       alloca(sizeof(struct evbuffer_iovec) * n));
+  //   if (evbuffer_peek(info->evbuffer_, -1, NULL, v, n) != n) {
+  //     return TRITONSERVER_ErrorNew(
+  //         TRITONSERVER_ERROR_INTERNAL,
+  //         "unexpected error getting iovec in response evbuffer");
+  //   }
+  // }
 
-  size_t buffer_len = evbuffer_get_length(info->evbuffer_);
-  size_t offset = 0, remaining_length = buffer_len;
-  bool first_chunk = true;
-  while ((remaining_length > 0) && (v_idx < n)) {
-    char* base = static_cast<char*>(v[v_idx].iov_base);
-    size_t base_size;
-    if (v[v_idx].iov_len > remaining_length) {
-      base_size = remaining_length;
-      v[v_idx].iov_base = static_cast<void*>(base + remaining_length);
-      v[v_idx].iov_len -= remaining_length;
-      remaining_length = 0;
-    } else {
-      base_size = v[v_idx].iov_len;
-      remaining_length -= v[v_idx].iov_len;
-      v_idx += 1;
-    }
+  // size_t buffer_len = evbuffer_get_length(info->evbuffer_);
+  // size_t offset = 0, remaining_length = buffer_len;
+  // bool first_chunk = true;
+  // std::cout << "--- io vec len:" << n << "\n";
+  // while ((remaining_length > 0) && (v_idx < n)) {
+  //   char* base = static_cast<char*>(v[v_idx].iov_base);
+  //   size_t base_size;
+  //   if (v[v_idx].iov_len > remaining_length) {
+  //     base_size = remaining_length;
+  //     v[v_idx].iov_base = static_cast<void*>(base + remaining_length);
+  //     v[v_idx].iov_len -= remaining_length;
+  //     remaining_length = 0;
+  //   } else {
+  //     base_size = v[v_idx].iov_len;
+  //     remaining_length -= v[v_idx].iov_len;
+  //     v_idx += 1;
+  //   }
 
-    if (first_chunk) {
-      evbuffer_add_reference(
-          req_->buffer_out, base + 4, base_size - 4, NULL, NULL);
-      first_chunk = false;
-    } else {
-      evbuffer_add_reference(req_->buffer_out, base, base_size, NULL, NULL);
-    }
-    offset += base_size;
-  }
+  //   if (first_chunk) {
+  //     evbuffer_add_reference(
+  //         req_->buffer_out, base + 4, base_size - 4, NULL, NULL);
+  //     first_chunk = false;
+  //   } else {
+  //     evbuffer_add_reference(req_->buffer_out, base, base_size, NULL, NULL);
+  //   }
+  //   offset += base_size;
+  // }
 
   return nullptr;  // success
 }
@@ -4332,12 +4353,41 @@ HTTPAPIServer::ParseRequestBody(
 
 void
 HTTPAPIServer::HandleRestfulInfer(
-    evhtp_request_t* req, const std::string& model_name,
-    bool use_raw_input = true)
+    evhtp_request_t* req, const std::string& model_name_,
+    bool use_raw_input = true, bool support_batch_input = false)
 {
   if (req->method != htp_method_POST) {
     evhtp_send_reply(req, EVHTP_RES_METHNALLOWED);
     return;
+  }
+
+  std::string model_name = model_name_;
+
+  // Step 0. parse the body
+  // Decompress request body if it is compressed in supported type
+  std::vector<char> body;
+  TRITONSERVER_Error* err = ParseRequestBody(req, &body, !use_raw_input);
+
+  if (model_name.empty()) {
+    do {
+      rapidjson::Document doc;
+      doc.Parse(body.data(), body.size());
+      if (doc.HasParseError()) {
+        err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "body is not json protocol");
+        break;
+      }
+
+      if (doc.HasMember("model") && doc["model"].IsString()) {
+        model_name = doc["model"].GetString();
+      } else {
+        err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "not have model field in protocol");
+        break;
+      }
+    } while (0);
+
+    RETURN_AND_RESPOND_IF_ERR(req, err);
   }
 
   int64_t requested_model_version;
@@ -4348,11 +4398,6 @@ HTTPAPIServer::HandleRestfulInfer(
 
   RETURN_AND_RESPOND_IF_ERR(
       req, CheckTransactionPolicy(req, model_name, requested_model_version));
-
-  // Step 0. parse the body
-  // Decompress request body if it is compressed in supported type
-  std::vector<char> body;
-  TRITONSERVER_Error* err = ParseRequestBody(req, &body, !use_raw_input);
 
   // if (!use_raw_input) {
   //   std::string len_buffer;
@@ -4405,6 +4450,9 @@ HTTPAPIServer::HandleRestfulInfer(
       const char* output_name = "OUTPUT";
       auto dtype = TRITONSERVER_TYPE_BYTES;
       std::vector<int64_t> shape_vec = {1};
+      if (support_batch_input) {
+        shape_vec.push_back(1)
+      }
       TRITONSERVER_InferenceRequestSetId(irequest, "<id_unknown>");
       err = TRITONSERVER_InferenceRequestSetFlags(irequest, 0);
       BREAK_IF_ERR(err);
@@ -4713,20 +4761,20 @@ HTTPAPIServer::GenerateRequestClass::FinalizeResponse(
         TRITONSERVER_ERROR_INTERNAL, "response wrong name or type or userp");
   }
 
-  auto info = reinterpret_cast<AllocPayload::OutputInfo*>(userp);
+  // auto info = reinterpret_cast<AllocPayload::OutputInfo*>(userp);
 
-  struct evbuffer_iovec* v = nullptr;
-  int v_idx = 0;
-  int n = evbuffer_peek(info->evbuffer_, -1, NULL, NULL, 0);
-  if (n > 0) {
-    v = static_cast<struct evbuffer_iovec*>(
-        alloca(sizeof(struct evbuffer_iovec) * n));
-    if (evbuffer_peek(info->evbuffer_, -1, NULL, v, n) != n) {
-      return TRITONSERVER_ErrorNew(
-          TRITONSERVER_ERROR_INTERNAL,
-          "unexpected error getting iovec in response evbuffer");
-    }
-  }
+  // struct evbuffer_iovec* v = nullptr;
+  // int v_idx = 0;
+  // int n = evbuffer_peek(info->evbuffer_, -1, NULL, NULL, 0);
+  // if (n > 0) {
+  //   v = static_cast<struct evbuffer_iovec*>(
+  //       alloca(sizeof(struct evbuffer_iovec) * n));
+  //   if (evbuffer_peek(info->evbuffer_, -1, NULL, v, n) != n) {
+  //     return TRITONSERVER_ErrorNew(
+  //         TRITONSERVER_ERROR_INTERNAL,
+  //         "unexpected error getting iovec in response evbuffer");
+  //   }
+  // }
 
   // [FIXME] compression
   evbuffer* response_body = evbuffer_new();
@@ -4735,33 +4783,39 @@ HTTPAPIServer::GenerateRequestClass::FinalizeResponse(
     evbuffer_add(response_body, sse_prefix.c_str(), sse_prefix.length());
   }
 
-  // Write json metadata into response evbuffer
-  size_t buffer_len = evbuffer_get_length(info->evbuffer_);
-  size_t offset = 0, remaining_length = buffer_len;
-  bool first_chunk = true;
-  while ((remaining_length > 0) && (v_idx < n)) {
-    char* base = static_cast<char*>(v[v_idx].iov_base);
-    size_t base_size;
-    if (v[v_idx].iov_len > remaining_length) {
-      base_size = remaining_length;
-      v[v_idx].iov_base = static_cast<void*>(base + remaining_length);
-      v[v_idx].iov_len -= remaining_length;
-      remaining_length = 0;
-    } else {
-      base_size = v[v_idx].iov_len;
-      remaining_length -= v[v_idx].iov_len;
-      v_idx += 1;
-    }
+  size_t offset = 0;
+  const char* cbase = reinterpret_cast<const char*>(base);
+  const size_t len = *(reinterpret_cast<const uint32_t*>(cbase + offset));
+  offset += sizeof(uint32_t);
+  evbuffer_add(response_body, cbase + offset, len);
 
-    if (first_chunk) {
-      evbuffer_add_reference(
-          response_body, base + 4, base_size - 4, NULL, NULL);
-      first_chunk = false;
-    } else {
-      evbuffer_add_reference(response_body, base, base_size, NULL, NULL);
-    }
-    offset += base_size;
-  }
+  // // Write json metadata into response evbuffer2
+  // size_t buffer_len = evbuffer_get_length(info->evbuffer_);
+  // size_t offset = 0, remaining_length = buffer_len;
+  // bool first_chunk = true;
+  // while ((remaining_length > 0) && (v_idx < n)) {
+  //   char* base = static_cast<char*>(v[v_idx].iov_base);
+  //   size_t base_size;
+  //   if (v[v_idx].iov_len > remaining_length) {
+  //     base_size = remaining_length;
+  //     v[v_idx].iov_base = static_cast<void*>(base + remaining_length);
+  //     v[v_idx].iov_len -= remaining_length;
+  //     remaining_length = 0;
+  //   } else {
+  //     base_size = v[v_idx].iov_len;
+  //     remaining_length -= v[v_idx].iov_len;
+  //     v_idx += 1;
+  //   }
+
+  //   if (first_chunk) {
+  //     evbuffer_add_reference(
+  //         response_body, base + 4, base_size - 4, NULL, NULL);
+  //     first_chunk = false;
+  //   } else {
+  //     evbuffer_add_reference(response_body, base, base_size, NULL, NULL);
+  //   }
+  //   offset += base_size;
+  // }
 
   // Write json metadata into response evbuffer
   // triton::common::TritonJson::WriteBuffer buffer;
@@ -4900,20 +4954,35 @@ HTTPAPIServer::Handle(evhtp_request_t* req)
              << "] [method: " << app_kind << "]";
 
     if (app_name.find("ocr") != std::string::npos) {
-      HandleRestfulInfer(req, app_name);
+      HandleRestfulInfer(req, app_name, true, false);
     } else if (app_kind.compare("generate") == 0) {
       HandleGenerate(req, app_name, false /* streaming */);
     } else if (app_kind.compare("generate_stream") == 0) {
       HandleGenerate(req, app_name, true /* streaming */);
     } else {
-      HandleRestfulInfer(req, app_name, false);
+      HandleRestfulInfer(req, app_name, false, false);
     }
     return;
   }
 
   if (std::string(req->uri->path->full).compare("/v2/idp/infer") == 0) {
     std::string default_app_name = "ocr_app";
-    HandleRestfulInfer(req, default_app_name);
+    HandleRestfulInfer(req, default_app_name, true, false);
+    return;
+  }
+
+  // support v1 chat completions and embeddings protocols
+  const std::string chat_compl_ep = "/v1/chat/completions";
+  const std::string compl_ep = "/v1/completions";
+  if (std::string(req->uri->path->full).compare(chat_compl_ep) == 0 ||
+      std::string(req->uri->path->full).compare(compl_ep) == 0) {
+    HandleGenerate(req, "", false);
+    return;
+  }
+
+  const std::string embeddings_ep = "/v1/embeddings";
+  if (std::string(req->uri->path->full).compare(embeddings_ep) == 0) {
+    HandleRestfulInfer(req, "", false, true);
     return;
   }
 
@@ -5084,7 +5153,7 @@ HTTPAPIServer::DecompressBuffer(
 
 void
 HTTPAPIServer::HandleGenerate(
-    evhtp_request_t* req, const std::string& model_name, bool streaming)
+    evhtp_request_t* req, const std::string& model_name_, bool streaming_)
 {
   AddContentTypeHeader(req, "application/json");
   if (req->method != htp_method_POST) {
@@ -5093,44 +5162,165 @@ HTTPAPIServer::HandleGenerate(
   }
 
   TRITONSERVER_Error* err = nullptr;
-  // int64_t requested_model_version;
-  // RETURN_AND_RESPOND_IF_ERR(
-  //     req,
-  //     GetModelVersionFromString(model_version_str,
-  //     &requested_model_version));
-
-  // // If tracing is enabled see if this request should be traced.
-  // TRITONSERVER_InferenceTrace* triton_trace = nullptr;
-  // std::shared_ptr<TraceManager::Trace> trace =
-  //     StartTrace(req, model_name, &triton_trace);
-
-  // std::map<std::string, triton::common::TritonJson::Value> input_metadata;
-  // triton::common::TritonJson::Value meta_data_root;
-  // RETURN_AND_RESPOND_IF_ERR(
-  //     req, ModelInputMetadata(
-  //              model_name, requested_model_version, &input_metadata,
-  //              &meta_data_root));
-
-
-  // // [FIXME] decompression should have been done here. before parsing request
-  // // body
-  // if (GetRequestCompressionType(req) != DataCompressor::Type::IDENTITY) {
-  //   RETURN_AND_RESPOND_IF_ERR(
-  //       req,
-  //       TRITONSERVER_ErrorNew(
-  //           TRITONSERVER_ERROR_INVALID_ARG,
-  //           "Unsupported content-encoding, only 'identity' is supported."));
-  // }
-
-  // If tracing is enabled see if this request should be traced.
-  TRITONSERVER_InferenceTrace* triton_trace = nullptr;
-  std::shared_ptr<TraceManager::Trace> trace =
-      StartTrace(req, model_name, &triton_trace);
+  std::string model_name = model_name_;
+  bool streaming = streaming_;
 
   // Step 0. parse the body
   // Decompress request body if it is compressed in supported type
   std::vector<char> body;
   RETURN_AND_RESPOND_IF_ERR(req, ParseRequestBody(req, &body, true));
+
+  if (model_name.empty()) {
+    do {
+      rapidjson::Document doc;
+      const size_t offset = 4;
+      doc.Parse(body.data() + offset, body.size() - offset);
+      if (doc.HasParseError()) {
+        err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "body is not json protocol");
+        break;
+      }
+
+      if (doc.HasMember("model") && doc["model"].IsString()) {
+        model_name = doc["model"].GetString();
+      } else {
+        err = TRITONSERVER_ErrorNew(
+            TRITONSERVER_ERROR_INTERNAL, "not have model field in protocol");
+        break;
+      }
+
+      if (doc.HasMember("stream") && doc["stream"].IsBool()) {
+        streaming = doc["stream"].GetBool();
+      }
+    } while (0);
+
+    RETURN_AND_RESPOND_IF_ERR(req, err);
+  }
+
+  // get requested model version
+  int64_t requested_model_version;
+  std::string model_version_str = "";
+  RETURN_AND_RESPOND_IF_ERR(
+      req,
+      GetModelVersionFromString(model_version_str, &requested_model_version));
+
+  uint32_t txn_flags;
+  RETURN_IF_ERR(TRITONSERVER_ServerModelTransactionProperties(
+      server_.get(), model_name.c_str(), requested_model_version, &txn_flags,
+      nullptr /* voidp */));
+
+  bool is_non_decoupled = (txn_flags & TRITONSERVER_TXN_DECOUPLED) == 0;
+
+  // Check Decoupled Policy
+  if (is_non_decoupled && !stream) {
+    // call non decoupled mode using InferRequest
+    bool connection_paused = false;
+    TRITONSERVER_InferenceRequest* irequest = nullptr;
+    RETURN_AND_RESPOND_IF_ERR(
+        req, TRITONSERVER_InferenceRequestNew(
+                 &irequest, server_.get(), model_name.c_str(),
+                 requested_model_version));
+
+    std::shared_ptr<TRITONSERVER_InferenceRequest> irequest_shared = {
+        irequest, [](TRITONSERVER_InferenceRequest* request) {
+          LOG_TRITONSERVER_ERROR(
+              TRITONSERVER_InferenceRequestDelete(request),
+              "deleting HTTP/REST inference request");
+        }};
+
+    const char* request_id = "";
+    connection_paused = true;
+    auto infer_request = CreateInferRequest(req, irequest_shared, model_name);
+    if (err == nullptr) {
+      // Create the request.
+      do {
+        const char* input_name = "INPUT";
+        const char* output_name = "OUTPUT";
+        auto dtype = TRITONSERVER_TYPE_BYTES;
+        std::vector<int64_t> shape_vec = {1, 1};
+        TRITONSERVER_InferenceRequestSetId(irequest, "<id_unknown>");
+        err = TRITONSERVER_InferenceRequestSetFlags(irequest, 0);
+        BREAK_IF_ERR(err);
+        err = TRITONSERVER_InferenceRequestAddInput(
+            irequest, input_name, dtype, &shape_vec[0], shape_vec.size());
+        BREAK_IF_ERR(err);
+
+        infer_request->serialized_data_.emplace_back(std::move(body));
+        auto& serialized = infer_request->serialized_data_.back();
+        err = TRITONSERVER_InferenceRequestAppendInputData(
+            irequest, input_name, &serialized[0], serialized.size(),
+            TRITONSERVER_MEMORY_CPU, 0 /* memory_type_id */);
+        BREAK_IF_ERR(err);
+
+        err = TRITONSERVER_InferenceRequestAddRequestedOutput(
+            irequest, output_name);
+        BREAK_IF_ERR(err);
+      } while (0);
+
+      // Set the request callback
+      if (err == nullptr) {
+        auto request_release_payload =
+            std::make_unique<RequestReleasePayload>(irequest_shared, nullptr);
+
+        err = TRITONSERVER_InferenceRequestSetReleaseCallback(
+            irequest, InferRequestClass::InferRequestComplete,
+            request_release_payload.get());
+        if (err == nullptr) {
+          err = TRITONSERVER_InferenceRequestSetResponseCallback(
+              irequest, allocator_,
+              reinterpret_cast<void*>(&infer_request->alloc_payload_),
+              InferRequestClass::InferResponseCompleteV2,
+              reinterpret_cast<void*>(infer_request.get()));
+        }
+
+        // Get request ID for logging in case of error.
+        LOG_TRITONSERVER_ERROR(
+            TRITONSERVER_InferenceRequestId(irequest, &request_id),
+            "unable to retrieve request ID string");
+        if (!strncmp(request_id, "", 1)) {
+          request_id = "<id_unknown>";
+        }
+
+        if (err == nullptr) {
+          err = TRITONSERVER_ServerInferAsync(
+              server_.get(), irequest, triton_trace);
+        }
+
+        if (err == nullptr) {
+          infer_request.release();
+          request_release_payload.release();
+        }
+      }
+    }
+
+    // process err
+    if (err != nullptr) {
+      LOG_INFO << "[request id: " << request_id << "] "
+               << "[model name: " << model_name << "] "
+               << "Infer failed: " << TRITONSERVER_ErrorMessage(err);
+      evhtp_headers_add_header(
+          req->headers_out,
+          evhtp_header_new(kContentTypeHeader, "application/json", 1, 1));
+      EVBufferAddErrorJson(req->buffer_out, err);
+      evhtp_send_reply(req, EVHTP_RES_BADREQ);
+      if (connection_paused) {
+        evhtp_request_resume(req);
+      }
+      TRITONSERVER_ErrorDelete(err);
+      LOG_TRITONSERVER_ERROR(
+          TRITONSERVER_InferenceRequestDelete(irequest),
+          "deleting HTTP/REST inference request");
+    }
+  } else if (is_non_decoupled && stream) {
+    err = TRITONSERVER_ErrorNew(
+        TRITONSERVER_ERROR_INTERNAL, "non decoupled mode not support stream");
+    RETURN_AND_RESPOND_IF_ERR(req, err);
+  }
+
+  // If tracing is enabled see if this request should be traced.
+  TRITONSERVER_InferenceTrace* triton_trace = nullptr;
+  std::shared_ptr<TraceManager::Trace> trace =
+      StartTrace(req, model_name, &triton_trace);
 
   // if (true) {
   //   std::string len_buffer;
@@ -5144,12 +5334,6 @@ HTTPAPIServer::HandleGenerate(
   // Create the inference request object which provides all information needed
   // for an inference. Make sure it is cleaned up on early error.
   TRITONSERVER_InferenceRequest* irequest = nullptr;
-  int64_t requested_model_version;
-  std::string model_version_str = "";
-  RETURN_AND_RESPOND_IF_ERR(
-      req,
-      GetModelVersionFromString(model_version_str, &requested_model_version));
-
   RETURN_AND_RESPOND_IF_ERR(
       req, TRITONSERVER_InferenceRequestNew(
                &irequest, server_.get(), model_name.c_str(),
@@ -5185,7 +5369,7 @@ HTTPAPIServer::HandleGenerate(
     const char* input_name = "INPUT";
     const char* output_name = "OUTPUT";
     auto dtype = TRITONSERVER_TYPE_BYTES;
-    std::vector<int64_t> shape_vec = {1};
+    std::vector<int64_t> shape_vec = {1, 1};
     TRITONSERVER_InferenceRequestSetId(irequest, "<id_unknown>");
     err = TRITONSERVER_InferenceRequestSetFlags(irequest, 0);
     BREAK_IF_ERR(err);
