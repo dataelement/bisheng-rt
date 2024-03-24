@@ -26,6 +26,13 @@ function unload_model() {
 }
 
 
+function get_model_config() {
+  model="$1"
+  curl -X GET http://127.0.0.1:9001/v2/models/${model}/config  \
+    -H 'Content-Type: application/json'
+}
+
+
 function load_nondecoupled_model() {
   model="$1"
   curl -v -X POST http://127.0.0.1:9001/v2/repository/models/${model}/load \
@@ -42,6 +49,7 @@ function infer() {
 
 
 # index
+get_model_config "Qwen-1_8B-Chat"
 # load_model "Qwen-1_8B-Chat"
 # unload_model "Qwen-1_8B-Chat"
 # infer "Qwen-1_8B-Chat" "model_req.json"

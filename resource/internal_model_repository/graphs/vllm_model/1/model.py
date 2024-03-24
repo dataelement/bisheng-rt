@@ -13,7 +13,11 @@ from pybackend_libs.dataelem.model import get_model
 
 
 def _get_np_input(request, name, has_batch=True):
-    return pb_utils.get_input_tensor_by_name(request, name).as_numpy()
+    np_arr = pb_utils.get_input_tensor_by_name(request, name).as_numpy()
+    if np_arr.ndim >= 2:
+        return np_arr.flatten()
+    else:
+        return np_arr
 
 
 def _get_optional_params(request, name):
@@ -65,7 +69,7 @@ class TritonPythonModel:
         parameters['pretrain_path'] = model_path
 
         instance_groups = parameters.pop('instance_groups')
-        group_idx = int(model_instance_name.rsplit('_', 1)[1])
+        group_idx = int(model_instance_name.rsplit('_', 2)[1])
         gpus = instance_groups.split(';', 1)[1].split('=')[1].split('|')
         devices = gpus[group_idx]
         parameters.update(devices=devices)
@@ -171,7 +175,9 @@ class TritonPythonModel:
                                         self.model_name)
         # resp_str = json.dumps(resp, ensure_ascii=False).encode('utf-8')
 
-        result_arr = np.array([json.dumps(resp)], dtype=np.object_)
+        resp_str = json.dumps(resp, ensure_ascii=False)
+        result_arr = np.array([[json.dumps(resp, ensure_ascii=False)]],
+            dtype=np.object_)
         out_tensor_0 = pb_utils.Tensor('OUTPUT', result_arr)
         inference_response = pb_utils.InferenceResponse(
             output_tensors=[out_tensor_0])
@@ -198,7 +204,7 @@ class TritonPythonModel:
             self.logger.log_info(f'Error generating stream: {e}')
             error = pb_utils.TritonError(f'Error generating stream: {e}')
             triton_output_tensor = pb_utils.Tensor(
-                'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+                'OUTPUT', np.asarray([['N/A']], dtype=np.object_))
             response = pb_utils.InferenceResponse(
                 output_tensors=[triton_output_tensor], error=error)
         finally:
@@ -240,7 +246,7 @@ class TritonPythonModel:
             self.logger.log_info(f'Error generating stream: {e}')
             error = pb_utils.TritonError(f'Error generating stream: {e}')
             triton_output_tensor = pb_utils.Tensor(
-                'OUTPUT', np.asarray(['N/A'], dtype=np.object_))
+                'OUTPUT', np.asarray([['N/A']], dtype=np.object_))
             response = pb_utils.InferenceResponse(
                 output_tensors=[triton_output_tensor], error=error)
             response_sender.send(response)

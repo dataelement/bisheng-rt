@@ -977,7 +977,10 @@ ops [
   {
     name: "dataelem.pymodel.huggingface_model"
     backend: "python"
-    max_batch_size: 0
+    max_batch_size: 8
+    dynamic_batching {
+      max_queue_delay_microseconds: 10000
+    }
 
     parameters { key: "pymodel_type" value: { string_value: "" } }
 
@@ -989,7 +992,7 @@ ops [
       { name: "OUTPUT", data_type: TYPE_STRING, dims: [ 1 ] }
     ]
 
-    instance_group [ { count: 1, kind: KIND_CPU } ]
+    instance_group [ { count: 1, kind: KIND_GPU } ]
   },
   {
     name: "dataelem.pymodel.elem_model"
@@ -1011,9 +1014,12 @@ ops [
   {
     name: "dataelem.pymodel.vllm_model"
     backend: "python"
-    max_batch_size: 0
+    max_batch_size: 8
 
     parameters { key: "pymodel_type" value: { string_value: "" } }
+    dynamic_batching {
+      max_queue_delay_microseconds: 10000
+    }
 
     input [
       { name: "INPUT", data_type: TYPE_STRING, dims: [ 1 ] }
@@ -1023,7 +1029,7 @@ ops [
       { name: "OUTPUT", data_type: TYPE_STRING, dims: [ 1 ] }
     ]
 
-    instance_group [ { count: 1, kind: KIND_CPU } ]
+    instance_group [ { count: 1, kind: KIND_GPU } ]
   },
   {
     name: "dataelem.app.ocr_app"

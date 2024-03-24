@@ -6,7 +6,7 @@ torchvision==0.16.2
 flash-attn==2.3.6
 
 urllib3==1.25.4
-pydantic < 2
+pydantic >= 2
 
 tokenizers==0.15.0
 tiktoken==0.5.1
@@ -14,12 +14,15 @@ sentencepiece==0.1.99
 
 einops==0.7.0
 huggingface_hub==0.19.4
-transformers==4.36.2
+transformers==4.38.2
 transformers_stream_generator==0.0.4
 SwissArmyTransformer==0.4.8
 cpm_kernels==1.0.11
 accelerate==0.24.1
-vllm==0.2.6
+
+# manage the vllm dependency in dockerfile only
+# newest offical version not support cuda118 directyly
+# vllm==0.3.3
 
 anyio==3.7.1
 starlette==0.27.0
