@@ -3,6 +3,7 @@ from pybackend_libs.dataelem.utils.lazy_loader import lazy
 bge = lazy('pybackend_libs.dataelem.model.embedding.bge')
 gte = lazy('pybackend_libs.dataelem.model.embedding.gte')
 me5 = lazy('pybackend_libs.dataelem.model.embedding.me5')
+jina = lazy('pybackend_libs.dataelem.model.embedding.jina')
 baichuan = lazy('pybackend_libs.dataelem.model.llm.baichuan')
 chatglm2 = lazy('pybackend_libs.dataelem.model.llm.chatglm2')
 chatglm3 = lazy('pybackend_libs.dataelem.model.llm.chatglm3')
@@ -10,6 +11,7 @@ code_geex2 = lazy('pybackend_libs.dataelem.model.llm.code_geex2')
 internlm = lazy('pybackend_libs.dataelem.model.llm.internlm')
 llama2 = lazy('pybackend_libs.dataelem.model.llm.llama2')
 qwen = lazy('pybackend_libs.dataelem.model.llm.qwen')
+qwen1_5 = lazy('pybackend_libs.dataelem.model.llm.qwen1_5')
 xverse = lazy('pybackend_libs.dataelem.model.llm.xverse')
 visualglm = lazy('pybackend_libs.dataelem.model.mmu.visualglm')
 vllm_model = lazy('pybackend_libs.dataelem.model.vllm.vllm_model')
@@ -30,12 +32,14 @@ def get_model(name: str):
         'ChatGLM3': chatglm3,
         'BaichuanChat': baichuan,
         'QwenChat': qwen,
+        'Qwen1_5Chat': qwen1_5,
         'Llama2Chat': llama2,
         'VisualGLM': visualglm,
         'XverseChat': xverse,
         'InternLMChat': internlm,
         'ME5Embedding': me5,
         'BGEZhEmbedding': bge,
+        'JINAEmbedding': jina,
         'GTEEmbedding': gte,
         'LayoutMrcnn': layout_mrcnn,
         'TableCellApp': table_app,
