@@ -1,0 +1,82 @@
+{
+    "qwen1.5-14b-chat-vllm": {
+        "model_name": "Qwen1.5-14B-Chat",
+        "config": {
+            "parameters": {
+                "type": "dataelem.pymodel.vllm_model",
+                "decoupled": "1",
+                "pymodel_type": "llm.vLLMQwen14bChat",
+                "pymodel_params": "{\"temperature\": 0.0, \"stop\": [\"<|im_end|>\", \"<|im_start|>\", \"<|endoftext|>\"], \"dtype\": \"bfloat16\", \"max_model_len\": 8192}",
+                "gpu_memory": "42",
+                "instance_groups": "device=gpu;gpus=0,1|2,3",
+                "reload": "1",
+                "verbose": "0"
+            }
+        }
+    },
+    "qwen1.5-14b-chat-hf": {
+        "model_name": "Qwen1.5-14B-Chat",
+        "config": {
+            "parameters": {
+                "type": "dataelem.pymodel.huggingface_model",
+                "decoupled": "1",
+                "pymodel_type": "llm.Qwen1_5Chat",
+                "gpu_memory": "30",
+                "instance_groups": "device=gpu;gpus=0,1",
+                "reload": "1",
+                "verbose": "0"
+            }
+        }
+    },
+    "qwen-14b-chat-hf": {
+        "model_name": "Qwen-14B-Chat",
+        "config": {
+            "parameters": {
+                "type": "dataelem.pymodel.huggingface_model",
+                "pymodel_type": "llm.QwenChat",
+                "num_layers": "40",
+                "precision": "bf16",
+                "gpu_memory": "40",
+                "instance_groups": "device=gpu;gpus=0,1|2,3",
+                "reload": "1",
+                "decoupled": "1"
+            }
+        }
+    },
+    "chatglm2-hf": {
+        "model_name": "chatglm2-6b",
+        "config": {
+            "parameters": {
+                "type": "dataelem.pymodel.huggingface_model",
+                "pymodel_type": "llm.ChatGLM2",
+                "gpu_memory": "15",
+                "instance_groups": "device=gpu;gpus=1",
+                "reload": "1"
+            }
+        }
+    },
+    "m5e_emb": {
+        "model_name": "multilingual-e5-large",
+        "config": {
+            "parameters": {
+              "type": "dataelem.pymodel.huggingface_model",
+              "pymodel_type": "embedding.ME5Embedding",
+              "gpu_memory": "3",
+              "instance_groups": "device=gpu;gpus=0",
+              "reload": "1"
+            }
+        }
+    },
+    "jina_emb": {
+        "model_name": "jina-embeddings-v2-base-zh",
+        "config": {
+            "parameters": {
+                "type": "dataelem.pymodel.huggingface_model",
+                "pymodel_type": "embedding.JINAEmbedding",
+                "gpu_memory": "3",
+                "instance_groups": "device=gpu;gpus=1",
+                "reload": "1"
+            }
+        }
+    }
+}
