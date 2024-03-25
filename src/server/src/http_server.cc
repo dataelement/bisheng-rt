@@ -1512,7 +1512,7 @@ HTTPAPIServer::HandleRepositoryControl(
           };
       std::unique_ptr<
           std::vector<TRITONSERVER_Parameter*>, decltype(param_deleter)>
-          params(new std::vector<TRITONSERVER_Parameter*>(), param_deleter);
+      params(new std::vector<TRITONSERVER_Parameter*>(), param_deleter);
       // local variables to store the decoded file content, the data must
       // be valid until TRITONSERVER_ServerLoadModelWithParameters returns.
       std::list<std::vector<char>> binary_files;
@@ -4366,12 +4366,14 @@ HTTPAPIServer::HandleRestfulInfer(
   // Step 0. parse the body
   // Decompress request body if it is compressed in supported type
   std::vector<char> body;
-  TRITONSERVER_Error* err = ParseRequestBody(req, &body, !use_raw_input);
+  RETURN_AND_RESPOND_IF_ERR(req, ParseRequestBody(req, &body, !use_raw_input));
+  TRITONSERVER_Error* err = nullptr;
 
   if (model_name.empty()) {
     do {
       rapidjson::Document doc;
-      doc.Parse(body.data(), body.size());
+      const size_t offset = !use_raw_input ? 4 : 0;
+      doc.Parse(body.data() + offset, body.size() - offset);
       if (doc.HasParseError()) {
         err = TRITONSERVER_ErrorNew(
             TRITONSERVER_ERROR_INTERNAL, "body is not json protocol");
@@ -4451,7 +4453,7 @@ HTTPAPIServer::HandleRestfulInfer(
       auto dtype = TRITONSERVER_TYPE_BYTES;
       std::vector<int64_t> shape_vec = {1};
       if (support_batch_input) {
-        shape_vec.push_back(1)
+        shape_vec.push_back(1);
       }
       TRITONSERVER_InferenceRequestSetId(irequest, "<id_unknown>");
       err = TRITONSERVER_InferenceRequestSetFlags(irequest, 0);
@@ -5205,14 +5207,20 @@ HTTPAPIServer::HandleGenerate(
       GetModelVersionFromString(model_version_str, &requested_model_version));
 
   uint32_t txn_flags;
-  RETURN_IF_ERR(TRITONSERVER_ServerModelTransactionProperties(
-      server_.get(), model_name.c_str(), requested_model_version, &txn_flags,
-      nullptr /* voidp */));
+  RETURN_AND_RESPOND_IF_ERR(
+      req, TRITONSERVER_ServerModelTransactionProperties(
+               server_.get(), model_name.c_str(), requested_model_version,
+               &txn_flags, nullptr /* voidp */));
 
   bool is_non_decoupled = (txn_flags & TRITONSERVER_TXN_DECOUPLED) == 0;
 
+  // If tracing is enabled see if this request should be traced.
+  TRITONSERVER_InferenceTrace* triton_trace = nullptr;
+  std::shared_ptr<TraceManager::Trace> trace =
+      StartTrace(req, model_name, &triton_trace);
+
   // Check Decoupled Policy
-  if (is_non_decoupled && !stream) {
+  if (is_non_decoupled && !streaming) {
     // call non decoupled mode using InferRequest
     bool connection_paused = false;
     TRITONSERVER_InferenceRequest* irequest = nullptr;
@@ -5311,16 +5319,12 @@ HTTPAPIServer::HandleGenerate(
           TRITONSERVER_InferenceRequestDelete(irequest),
           "deleting HTTP/REST inference request");
     }
-  } else if (is_non_decoupled && stream) {
+    return;
+  } else if (is_non_decoupled && streaming) {
     err = TRITONSERVER_ErrorNew(
         TRITONSERVER_ERROR_INTERNAL, "non decoupled mode not support stream");
     RETURN_AND_RESPOND_IF_ERR(req, err);
   }
-
-  // If tracing is enabled see if this request should be traced.
-  TRITONSERVER_InferenceTrace* triton_trace = nullptr;
-  std::shared_ptr<TraceManager::Trace> trace =
-      StartTrace(req, model_name, &triton_trace);
 
   // if (true) {
   //   std::string len_buffer;
