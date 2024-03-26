@@ -14,7 +14,7 @@ function build_rt() {
     fi
 
     cmd="bash $HOME/cicd/bisheng-rt/docker/build_helper.sh server"
-    docker exec -it bisheng_rt_build $cmd > $HOME/build-logs/build-rt-server.log 2>&1
+    docker exec bisheng_rt_build $cmd > $HOME/build-logs/build-rt-server.log 2>&1
     if [[ $? -ne 0 ]]; then
         echo "failed to build server"
         exit 1
@@ -24,7 +24,7 @@ function build_rt() {
     fi
 
     cmd2="bash $HOME/cicd/bisheng-rt/docker/build_helper.sh backends"
-    docker exec -it bisheng_rt_build $cmd2 > $HOME/build-logs/build-rt-backends.log 2>&1
+    docker exec bisheng_rt_build $cmd2 > $HOME/build-logs/build-rt-backends.log 2>&1
     if [[ $? -ne 0 ]]; then
         echo "failed to build backends"
         exit 1
