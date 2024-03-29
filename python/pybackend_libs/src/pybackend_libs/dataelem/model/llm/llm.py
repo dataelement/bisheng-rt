@@ -1,3 +1,4 @@
+# flake8: noqa
 import time
 from typing import Dict, List, Literal, Optional, Union
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel, Field
 from transformers import (AutoConfig, AutoModel, AutoModelForCausalLM,
                           AutoTokenizer, LlamaTokenizer)
 from transformers.generation.utils import GenerationConfig
+
 
 def torch_gc(devices):
     if torch.cuda.is_available():
@@ -64,13 +66,13 @@ class BaseLLM(object):
                                                        trust_remote_code=True)
         else:
             self.tokenizer = LlamaTokenizer.from_pretrained(pretrain_path,
-                                                        add_eos_token=False, 
-                                                        add_bos_token=False, 
+                                                        add_eos_token=False,
+                                                        add_bos_token=False,
                                                         eos_token='<eod>',
                                                         use_fast=False,
                                                         trust_remote_code=True)
-            self.tokenizer.add_tokens(['<sep>', '<pad>', '<mask>', '<predict>', 
-                                       '<FIM_SUFFIX>', '<FIM_PREFIX>', 
+            self.tokenizer.add_tokens(['<sep>', '<pad>', '<mask>', '<predict>',
+                                       '<FIM_SUFFIX>', '<FIM_PREFIX>',
                                        '<FIM_MIDDLE>','<commit_before>',
                                        '<commit_msg>','<commit_after>',
                                        '<jupyter_start>','<jupyter_text>',
@@ -160,12 +162,19 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     finish_reason: Optional[Literal['stop', 'length']]
 
 
+class UsageInfo(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+    completion_tokens: Optional[int] = 0
+
+
 class ChatCompletionResponse(BaseModel):
     model: str
     object: Literal['chat.completion', 'chat.completion.chunk']
     choices: List[Union[ChatCompletionResponseChoice,
                         ChatCompletionResponseStreamChoice]]
     created: Optional[int] = Field(default_factory=lambda: int(time.time()))
+    usage: UsageInfo = UsageInfo()
 
 
 class CompletionRequest(BaseModel):

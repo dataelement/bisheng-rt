@@ -8,7 +8,7 @@
                 "pymodel_type": "llm.vLLMQwen14bChat",
                 "pymodel_params": "{\"temperature\": 0.0, \"stop\": [\"<|im_end|>\", \"<|im_start|>\", \"<|endoftext|>\"], \"dtype\": \"bfloat16\", \"max_model_len\": 8192}",
                 "gpu_memory": "42",
-                "instance_groups": "device=gpu;gpus=0,1|2,3",
+                "instance_groups": "device=gpu;gpus=0,1",
                 "reload": "1",
                 "verbose": "0"
             }
@@ -74,7 +74,7 @@
                 "type": "dataelem.pymodel.huggingface_model",
                 "pymodel_type": "embedding.JINAEmbedding",
                 "gpu_memory": "3",
-                "instance_groups": "device=gpu;gpus=1",
+                "instance_groups": "device=gpu;gpus=0|1|2",
                 "reload": "1"
             }
         }

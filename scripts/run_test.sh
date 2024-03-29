@@ -90,7 +90,18 @@ function post_install_r0064() {
   # pip3 install lib/bisheng_pybackend_libs-0.0.3-py3-none-any.whl -i ${REPO}
 }
 
-post_install_r0064
+
+function run_container_v0065() {
+  LOCAL_MODEL_REPO="/public/bisheng/model_repository/"
+  MAPING_MODEL_REPO="/opt/bisheng-rt/models/model_repository"
+  MOUNT="-v $LOCAL_MODEL_REPO:$MAPING_MODEL_REPO -v $HOME:$HOME -v /public:/public"
+  IMAGE="cr.dataelem.com/dataelement/bisheng-rt:0.0.6.5"
+  docker run --gpus=all --net=host -itd --shm-size=10G \
+    --name bisheng_rt_v0065 ${MOUNT} $IMAGE bash
+}
+
+run_container_v0065
+# post_install_r0064
 # run_container_v0065_test
 # run_container_v006_cpu_test
 # run_container_v006_test
