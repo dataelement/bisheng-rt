@@ -4962,7 +4962,16 @@ HTTPAPIServer::Handle(evhtp_request_t* req)
     } else if (app_kind.compare("generate_stream") == 0) {
       HandleGenerate(req, app_name, true /* streaming */);
     } else {
-      HandleRestfulInfer(req, app_name, false, false);
+      // judge whether the model support dynamic batching
+      uint32_t batch_flags;
+      RETURN_AND_RESPOND_IF_ERR(
+          req, TRITONSERVER_ServerModelBatchProperties(
+                   server_.get(), app_name.c_str(), -1, &batch_flags,
+                   nullptr /* voidp */));
+
+      bool support_batch_input = false;
+      support_batch_input = (batch_flags & TRITONSERVER_BATCH_FIRST_DIM) != 0;
+      HandleRestfulInfer(req, app_name, false, support_batch_input);
     }
     return;
   }
@@ -5214,6 +5223,15 @@ HTTPAPIServer::HandleGenerate(
 
   bool is_non_decoupled = (txn_flags & TRITONSERVER_TXN_DECOUPLED) == 0;
 
+  // judge whether the model support dynamic batching
+  bool support_batch_input = true;
+  uint32_t batch_flags;
+  RETURN_AND_RESPOND_IF_ERR(
+      req, TRITONSERVER_ServerModelBatchProperties(
+               server_.get(), model_name.c_str(), -1, &batch_flags,
+               nullptr /* voidp */));
+  support_batch_input = (batch_flags & TRITONSERVER_BATCH_FIRST_DIM) != 0;
+
   // If tracing is enabled see if this request should be traced.
   TRITONSERVER_InferenceTrace* triton_trace = nullptr;
   std::shared_ptr<TraceManager::Trace> trace =
@@ -5245,7 +5263,10 @@ HTTPAPIServer::HandleGenerate(
         const char* input_name = "INPUT";
         const char* output_name = "OUTPUT";
         auto dtype = TRITONSERVER_TYPE_BYTES;
-        std::vector<int64_t> shape_vec = {1, 1};
+        std::vector<int64_t> shape_vec = {1};
+        if (support_batch_input) {
+          shape_vec.push_back(1);
+        }
         TRITONSERVER_InferenceRequestSetId(irequest, "<id_unknown>");
         err = TRITONSERVER_InferenceRequestSetFlags(irequest, 0);
         BREAK_IF_ERR(err);
@@ -5373,7 +5394,10 @@ HTTPAPIServer::HandleGenerate(
     const char* input_name = "INPUT";
     const char* output_name = "OUTPUT";
     auto dtype = TRITONSERVER_TYPE_BYTES;
-    std::vector<int64_t> shape_vec = {1, 1};
+    std::vector<int64_t> shape_vec = {1};
+    if (support_batch_input) {
+      shape_vec.push_back(1);
+    }
     TRITONSERVER_InferenceRequestSetId(irequest, "<id_unknown>");
     err = TRITONSERVER_InferenceRequestSetFlags(irequest, 0);
     BREAK_IF_ERR(err);
