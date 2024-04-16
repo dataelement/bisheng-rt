@@ -6,7 +6,7 @@ from typing import List, Optional, Union
 import cv2
 import numpy as np
 import triton_python_backend_utils as pb_utils
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 from shapely.geometry import Polygon
 
 
@@ -625,14 +625,15 @@ def get_sorted_inds(boxes, filter_polygon, row_col_align_mode):
     return c2_index, row_col_info, text_direction
 
 
-class TensorData(BaseModel):
-    __root__: List[Union['TensorData', float, str, bool]]
+
+class TensorData(RootModel):
+    root: List[Union['TensorData', float, str, bool]]
 
     def __iter__(self):
-        return iter(self.__root__)
+        return iter(self.root)
 
     def __getitem__(self, idx):
-        return self.__root__[idx]
+        return self.root[idx]
 
     @classmethod
     def __get_validators__(cls):
@@ -641,7 +642,7 @@ class TensorData(BaseModel):
     @classmethod
     def validate(cls, v):
         if isinstance(v, dict):
-            return v.get('__root__', [])
+            return v.get('root', [])
         return v
 
 
