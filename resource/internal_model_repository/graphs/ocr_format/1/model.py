@@ -860,7 +860,7 @@ class TritonPythonModel:
                 det=params['det'],
                 recog=params['recog'])
 
-            output = np.array([output1.json()])
+            output = np.array([output1.json().encode('utf-8')])
             out_tensor = pb_utils.Tensor('RESULTS', output.astype(np.bytes_))
 
             inference_response = pb_utils.InferenceResponse(
