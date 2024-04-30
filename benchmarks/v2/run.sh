@@ -14,7 +14,7 @@ function perf1() {
      --model $model_name \
      --dataset $dataset --dataset-type instruct \
      --trust-remote-code \
-     --num-prompts 10 --seed 1947 --num-parallel 1 --use-stream
+     --num-prompts 10 --seed 1947 --num-parallel 2 --use-stream
 }
 
 perf1

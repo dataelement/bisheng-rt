@@ -4,6 +4,7 @@
 import argparse
 import asyncio
 import json
+import os
 import random
 import threading
 import time
@@ -12,9 +13,12 @@ from datetime import datetime
 from queue import Queue
 from typing import AsyncGenerator, List, Optional, Tuple
 
+import aiohttp
 import numpy as np
 from tqdm.asyncio import tqdm
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
+
+AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=6 * 60 * 60)
 
 
 @dataclass
@@ -256,6 +260,7 @@ async def benchmark(
 
     outputs = []
     for request in input_requests:
+        prompt, prompt_len, output_len = request
         request_func_input = RequestFuncInput(
             model=model_id,
             prompt=prompt,
@@ -278,7 +283,7 @@ async def benchmark(
     result_queue.put((task_id, outputs, benchmark_duration))
 
 
-def merge_metrics(input_requests, outputs, benchmark_durations, tokernizer):
+def merge_metrics(input_requests, outputs, benchmark_durations, tokenizer):
     benchmark_duration = max(benchmark_durations)
     metrics = calculate_metrics(
         input_requests=input_requests,
@@ -359,7 +364,7 @@ def main(args: argparse.Namespace):
             api_url=api_url,
             model_id=model_id,
             tokenizer=tokenizer,
-            input_requests=input_requests,
+            input_requests=batch_input_request,
             best_of=args.best_of,
             use_beam_search=args.use_beam_search,
             stream=args.use_stream,
@@ -373,10 +378,10 @@ def main(args: argparse.Namespace):
         threads.append(thread)
 
     for t in threads:
-        thread.start()
+        t.start()
 
     for t in threads:
-        thread.join()
+        t.join()
 
     results = []
     while not result_queue.empty():
@@ -392,7 +397,7 @@ def main(args: argparse.Namespace):
 
     print('outputs', outputs)
     assert len(outputs) == len(input_requests)
-    benchmark_result = merge_metrics(input_requests, outputs, benchmark_durations, tokernizer)
+    benchmark_result = merge_metrics(input_requests, outputs, benchmark_durations, tokenizer)
 
     # Save config and results to json
     if args.save_result:
@@ -507,7 +512,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--use-stream', action='store_true')
     parser.add_argument('--proxy', type=str, default='', help='proxy url')
-    parser.add_argument('--system-prompt', type=str, default='', help='system prompt')
+    parser.add_argument('--system-prompt', type=str, default='You are a helpful assistant.', help='system prompt')
     parser.add_argument(
         '--num-parallel',
         type=int,
