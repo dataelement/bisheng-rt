@@ -42,6 +42,8 @@ class RequestFuncOutput:
     latency: float = 0
     ttft: float = 0
     prompt_len: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 async def async_request_openai_chat_completions(
@@ -83,6 +85,9 @@ async def async_request_openai_chat_completions(
         ttft = 0
         st = time.perf_counter()
         latency = None
+
+        completion_tokens = 0
+        prompt_tokens = 0
         try:
             async with session.post(url=api_url, json=payload,
                                     headers=headers,
@@ -105,6 +110,9 @@ async def async_request_openai_chat_completions(
                                 body = json.loads(chunk)
                                 if 'content' in body['choices'][0]['delta']:
                                     generated_text += body['choices'][0]['delta']['content']
+                                if 'usage' in body:
+                                    completion_tokens = body['usage']['completion_tokens']
+                                    prompt_tokens = body['usage']['prompt_tokens']
                         else:
                             body = json.loads(chunk)
                             generated_text += body['choices'][0]['message']['content']
@@ -116,6 +124,10 @@ async def async_request_openai_chat_completions(
                     output.generated_text = generated_text
                     output.success = True
                     output.latency = latency
+                    output.prompt_tokens = prompt_tokens
+                    output.completion_tokens = completion_tokens
+                    assert prompt_tokens > 0
+                    assert completion_tokens >= 0
                 else:
                     output.success = False
         except (aiohttp.ClientOSError, aiohttp.ServerDisconnectedError):
@@ -150,10 +162,14 @@ def load_dataset(filename, sample_type='conv'):
         dataset = [data for data in dataset if len(data['conversations']) >= 2]
         # Only keep the first two turns of each conversation.
         dataset = [(data['conversations'][0]['value'],
-                    data['conversations'][1]['value']) for data in dataset]
+                    data['conversations'][1]['value'], '') for data in dataset]
     elif sample_type == 'instruct':
-        dataset = [(data['instruction'] + ' ' + data['input'], data['output'])
+        dataset = [(data['instruction'] + ' ' + data['input'], data['output'], '')
                    for data in dataset if 'output' in data and 'input' in data]
+
+    elif sample_type == 'qrformat':
+        dataset = [(data['instruction'], data['output'], data['system'])
+                   for data in dataset if 'output' in data]
 
     return dataset
 
@@ -171,28 +187,29 @@ def sample_requests(
     dataset = [dataset[i] for i in sampled_indices]
 
     # Tokenize the prompts and completions.
-    prompts = [prompt for prompt, _ in dataset]
+    system_prompts = [sample[2] for sample in dataset]
+    prompts = [sample[0] for sample in dataset]
     prompt_token_ids = tokenizer(prompts).input_ids
-    completions = [completion for _, completion in dataset]
+    completions = [sample[1] for sample in dataset]
     completion_token_ids = tokenizer(completions).input_ids
     tokenized_dataset = []
     for i in range(len(dataset)):
         output_len = len(completion_token_ids[i])
-        tokenized_dataset.append((prompts[i], prompt_token_ids[i], output_len))
+        tokenized_dataset.append((prompts[i], prompt_token_ids[i], output_len, system_prompts[i]))
 
     # Filter out too long sequences.
     filtered_dataset: List[Tuple[str, int, int]] = []
-    for prompt, prompt_token_ids, output_len in tokenized_dataset:
+    for prompt, prompt_token_ids, output_len, system_prompt in tokenized_dataset:
         prompt_len = len(prompt_token_ids)
         if prompt_len < 4 or output_len < 4:
             # Prune too short sequences.
             # This is because TGI causes errors when the input or output length
             # is too short.
             continue
-        if prompt_len > 1024 or prompt_len + output_len > 2048:
-            # Prune too long sequences.
-            continue
-        filtered_dataset.append((prompt, prompt_len, output_len))
+        # if prompt_len > 1024 or prompt_len + output_len > 2048:
+        #     # Prune too long sequences.
+        #     continue
+        filtered_dataset.append((prompt, prompt_len, output_len, system_prompt))
 
     # Sample the requests.
     sampled_requests = random.sample(filtered_dataset, num_requests)
@@ -212,9 +229,12 @@ def calculate_metrics(
     ttfts = []
     for i in range(len(outputs)):
         if outputs[i].success:
-            output_len = len(tokenizer.encode(outputs[i].generated_text))
+            # output_len = len(tokenizer.encode(outputs[i].generated_text))
+            # total_output += output_len
+            # total_input += input_requests[i][1]
+            output_len = outputs[i].completion_tokens
             total_output += output_len
-            total_input += input_requests[i][1]
+            total_input += outputs[i].prompt_tokens
             per_token_latencies.append(outputs[i].latency / output_len)
             ttfts.append(outputs[i].ttft)
             completed += 1
@@ -247,7 +267,6 @@ async def benchmark(
     use_beam_search: bool,
     stream: bool,
     proxy: str,
-    system_prompt: str,
     disable_tqdm: bool,
     task_id,
     result_queue
@@ -260,7 +279,10 @@ async def benchmark(
 
     outputs = []
     for request in input_requests:
-        prompt, prompt_len, output_len = request
+        prompt, prompt_len, output_len, system_prompt = request
+        if len(system_prompt) == 0:
+            system_prompt = 'You are a helpful assistant.'
+
         request_func_input = RequestFuncInput(
             model=model_id,
             prompt=prompt,
@@ -369,7 +391,6 @@ def main(args: argparse.Namespace):
             use_beam_search=args.use_beam_search,
             stream=args.use_stream,
             proxy=args.proxy,
-            system_prompt=args.system_prompt,
             disable_tqdm=args.disable_tqdm,
             task_id=i,
             result_queue=result_queue,
@@ -395,7 +416,7 @@ def main(args: argparse.Namespace):
         outputs.extend(r[1])
         benchmark_durations.append(r[2])
 
-    print('outputs', outputs)
+    # print('outputs', outputs)
     assert len(outputs) == len(input_requests)
     benchmark_result = merge_metrics(input_requests, outputs, benchmark_durations, tokenizer)
 
@@ -512,7 +533,6 @@ if __name__ == '__main__':
 
     parser.add_argument('--use-stream', action='store_true')
     parser.add_argument('--proxy', type=str, default='', help='proxy url')
-    parser.add_argument('--system-prompt', type=str, default='You are a helpful assistant.', help='system prompt')
     parser.add_argument(
         '--num-parallel',
         type=int,
