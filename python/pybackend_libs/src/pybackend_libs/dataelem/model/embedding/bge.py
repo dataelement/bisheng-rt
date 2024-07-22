@@ -13,6 +13,7 @@ class BGEZhEmbedding(BaseEmbedding):
         precision = kwargs.get('precision', 'fp16')
         gpu_memory = kwargs.get('gpu_memory')
         devices = kwargs.get('devices').split(',')
+        use_safetensors = True if kwargs.get("use_safetensors") == "1" else False
         self.devices = devices
         self.default_device = f'cuda:{devices[0]}'
         self.batch_size = int(kwargs.get('batch_size', '32'))
@@ -25,6 +26,7 @@ class BGEZhEmbedding(BaseEmbedding):
             precision,
             devices,
             gpu_memory,
+            use_safetensors=use_safetensors,
         )
 
     def predict(self, kwargs):
